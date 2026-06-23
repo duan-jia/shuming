@@ -1,0 +1,28 @@
+#pragma once
+
+#include <string>
+#include "inference/i_engine.h"
+
+namespace fastllm {
+
+class RemoteEngine : public IInferenceEngine {
+public:
+    RemoteEngine(const std::string& endpoint, const std::string& model,
+                 const std::string& api_key);
+    ~RemoteEngine() override = default;
+
+    bool is_loaded() const override { return true; }
+    std::string model_name() const override { return model_; }
+
+    void stream_complete(const std::string& prompt, const InferParams& params,
+                         std::function<void(const std::string&)> on_token,
+                         std::function<void(const std::string&)> on_reasoning = nullptr,
+                         std::function<void(const InferResult&)> on_done = nullptr) override;
+
+private:
+    std::string endpoint_;
+    std::string model_;
+    std::string api_key_;
+};
+
+}

@@ -1,0 +1,35 @@
+# Config file (contains secrets — keep out of git)
+config.json
+
+# Model files (large binaries)
+models/*.gguf
+
+# Build output
+build/
+build_nocuda/
+
+# RAG data
+data/
+
+# Node/web
+web/node_modules/
+web/.next/
+web/.env
+web/.env.local
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Cache
+.cache/
+
+# Core dumps
+*.core
+core

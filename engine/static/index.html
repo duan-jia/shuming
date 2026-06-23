@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fast LLM Reasoner</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f9fafb; }
+.login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.login-box { background: #fff; padding: 2rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); width: 24rem; }
+.login-box h1 { font-size: 1.5rem; font-weight: 700; text-align: center; margin-bottom: 0.5rem; }
+.login-box p { font-size: 0.875rem; color: #6b7280; text-align: center; margin-bottom: 1.5rem; }
+.login-box input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; font-size: 0.875rem; }
+.login-box button { width: 100%; background: #2563eb; color: #fff; padding: 0.5rem; border: none; border-radius: 0.25rem; cursor: pointer; font-size: 0.875rem; }
+.login-box button:hover { background: #1d4ed8; }
+.login-error { background: #fef2f2; color: #dc2626; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 1rem; font-size: 0.875rem; }
+.app { display: flex; min-height: 100vh; }
+.sidebar { width: 16rem; background: #111827; color: #fff; display: flex; flex-direction: column; }
+.sidebar-header { padding: 0.75rem; border-bottom: 1px solid #374151; }
+.sidebar-header button { width: 100%; background: #374151; color: #fff; border: none; padding: 0.5rem 0.75rem; border-radius: 0.25rem; cursor: pointer; font-size: 0.75rem; }
+.sidebar-header button:hover { background: #4b5563; }
+.sidebar-sessions { flex: 1; overflow-y: auto; }
+.session-item { display: flex; align-items: center; padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.75rem; }
+.session-item:hover { background: #1f2937; }
+.session-item.active { background: #374151; }
+.session-item span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-item .del { display: none; color: #9ca3af; margin-left: 0.25rem; }
+.session-item:hover .del { display: inline; }
+.session-item .del:hover { color: #f87171; }
+.sidebar-empty { color: #6b7280; font-size: 0.75rem; text-align: center; margin-top: 1rem; }
+.sidebar-footer { padding: 0.75rem; border-top: 1px solid #374151; }
+.sidebar-footer button { background: none; border: none; color: #9ca3af; cursor: pointer; font-size: 0.75rem; }
+.sidebar-footer button:hover { color: #fff; }
+.main { flex: 1; display: flex; flex-direction: column; }
+.header { background: #fff; border-bottom: 1px solid #e5e7eb; padding: 0.75rem 1rem; display: flex; align-items: center; gap: 0.75rem; }
+.header button { background: none; border: none; color: #6b7280; cursor: pointer; font-size: 1rem; }
+.header h1 { font-weight: 700; font-size: 1.125rem; }
+.messages { flex: 1; overflow-y: auto; padding: 1rem; max-width: 48rem; margin: 0 auto; width: 100%; }
+.messages-empty { text-align: center; color: #9ca3af; margin-top: 5rem; }
+.messages-empty p:first-child { font-size: 1.25rem; margin-bottom: 0.5rem; }
+.msg { margin-bottom: 1rem; }
+.msg.user { text-align: right; }
+.msg.assistant { text-align: left; }
+.msg-bubble { display: inline-block; max-width: 80%; padding: 0.75rem; border-radius: 0.5rem; font-size: 0.875rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.msg.user .msg-bubble { background: #2563eb; color: #fff; }
+.msg.assistant .msg-bubble { background: #fff; border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.reasoning-toggle { font-size: 0.75rem; color: #6b7280; cursor: pointer; border: none; background: none; display: flex; align-items: center; gap: 0.25rem; margin-bottom: 0.5rem; }
+.reasoning-toggle:hover { color: #374151; }
+.reasoning-content { font-size: 0.75rem; color: #6b7280; background: #f9fafb; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem; white-space: pre-wrap; }
+.cursor { display: inline-block; width: 0.5rem; height: 1rem; background: #9ca3af; animation: blink 1s infinite; margin-left: 0.25rem; vertical-align: middle; }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.input-bar { border-top: 1px solid #e5e7eb; background: #fff; padding: 1rem; }
+.input-bar-inner { max-width: 48rem; margin: 0 auto; display: flex; gap: 0.5rem; }
+.input-bar input { flex: 1; border: 1px solid #d1d5db; border-radius: 0.25rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; }
+.input-bar input:focus { outline: none; box-shadow: 0 0 0 2px #3b82f6; }
+.input-bar button { background: #2563eb; color: #fff; padding: 0.5rem 1rem; border: none; border-radius: 0.25rem; cursor: pointer; font-size: 0.875rem; }
+.input-bar button:hover { background: #1d4ed8; }
+.input-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<div id="login-page" class="login-page">
+  <div class="login-box">
+    <h1>Fast LLM Reasoner</h1>
+    <p>Enterprise Private LLM Platform</p>
+    <div id="login-error" class="login-error" style="display:none"></div>
+    <input id="username" placeholder="Username" autocomplete="username" />
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
+    <button id="login-btn">Login</button>
+  </div>
+</div>
+
+<div id="app-page" class="app" style="display:none">
+  <div id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+      <button id="new-chat-btn">+ New Chat</button>
+    </div>
+    <div id="session-list" class="sidebar-sessions"></div>
+    <div class="sidebar-footer">
+      <button id="logout-btn">Logout</button>
+    </div>
+  </div>
+  <div class="main">
+    <div class="header">
+      <button id="toggle-sidebar">&#9664;</button>
+      <h1>Fast LLM Reasoner</h1>
+    </div>
+    <div id="messages" class="messages">
+      <div class="messages-empty">
+        <p>Start a conversation</p>
+        <p>Ask questions to the local LLM</p>
+      </div>
+    </div>
+    <div class="input-bar">
+      <div class="input-bar-inner">
+        <input id="msg-input" placeholder="Type a message..." />
+        <button id="send-btn">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var API = location.port === '8080' ? '' : '';
+var token = '';
+var sessions = [];
+var activeSession = '';
+var loading = false;
+
+function $(id) { return document.getElementById(id); }
+
+function api(path, opts) {
+  opts = opts || {};
+  var headers = opts.headers || {};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  if (opts.body) headers['Content-Type'] = 'application/json';
+  return fetch(API + path, { method: opts.method || 'GET', headers: headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+}
+
+$('login-btn').onclick = doLogin;
+$('password').onkeydown = function(e) { if (e.key === 'Enter') doLogin(); };
+$('username').onkeydown = function(e) { if (e.key === 'Enter') doLogin(); };
+
+async function doLogin() {
+  var u = $('username').value.trim();
+  var p = $('password').value.trim();
+  if (!u || !p) return;
+  try {
+    var res = await api('/api/auth/login', { method: 'POST', body: { username: u, password: p } });
+    var data = await res.json();
+    if (data.token) {
+      token = data.token;
+      $('login-page').style.display = 'none';
+      $('app-page').style.display = 'flex';
+      $('login-error').style.display = 'none';
+      loadSessions();
+    } else {
+      $('login-error').textContent = data.error || 'Login failed';
+      $('login-error').style.display = 'block';
+    }
+  } catch (e) {
+    $('login-error').textContent = 'Network error: ' + e.message;
+    $('login-error').style.display = 'block';
+  }
+}
+
+$('logout-btn').onclick = function() {
+  token = '';
+  activeSession = '';
+  sessions = [];
+  $('login-page').style.display = 'flex';
+  $('app-page').style.display = 'none';
+};
+
+$('new-chat-btn').onclick = async function() {
+  try {
+    var res = await api('/api/sessions', { method: 'POST', body: { title: 'New Chat' } });
+    var data = await res.json();
+    if (data.id) {
+      activeSession = data.id;
+      $('messages').innerHTML = '<div class="messages-empty"><p>Start a conversation</p><p>Ask questions to the local LLM</p></div>';
+      loadSessions();
+    }
+  } catch (e) {}
+};
+
+$('toggle-sidebar').onclick = function() {
+  var sb = $('sidebar');
+  sb.style.display = sb.style.display === 'none' ? 'flex' : 'none';
+  this.textContent = sb.style.display === 'none' ? '\u25B6' : '\u25C4';
+};
+
+$('send-btn').onclick = doSend;
+$('msg-input').onkeydown = function(e) { if (e.key === 'Enter' && !e.shiftKey) doSend(); };
+
+async function loadSessions() {
+  try {
+    var res = await api('/api/sessions');
+    var data = await res.json();
+    sessions = data.sessions || [];
+    renderSessions();
+  } catch (e) {}
+}
+
+function renderSessions() {
+  var html = '';
+  for (var i = 0; i < sessions.length; i++) {
+    var s = sessions[i];
+    var cls = s.id === activeSession ? 'session-item active' : 'session-item';
+    html += '<div class="' + cls + '" data-id="' + s.id + '" onclick="switchSession(\'' + s.id + '\')">';
+    html += '<span>' + escHtml(s.title) + '</span>';
+    html += '<span class="del" onclick="deleteSession(\'' + s.id + '\', event)">x</span>';
+    html += '</div>';
+  }
+  if (sessions.length === 0) html = '<div class="sidebar-empty">No sessions yet</div>';
+  $('session-list').innerHTML = html;
+}
+
+window.switchSession = async function(id) {
+  activeSession = id;
+  renderSessions();
+  $('messages').innerHTML = '';
+  try {
+    var res = await api('/api/sessions/' + id);
+    var data = await res.json();
+    var msgs = data.messages || [];
+    var html = '';
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      html += renderMsg(m.role, m.content, m.reasoning || '', false);
+    }
+    if (msgs.length === 0) html = '<div class="messages-empty"><p>Start a conversation</p><p>Ask questions to the local LLM</p></div>';
+    $('messages').innerHTML = html;
+  } catch (e) {}
+};
+
+window.deleteSession = async function(id, e) {
+  e.stopPropagation();
+  try {
+    await api('/api/sessions/' + id, { method: 'DELETE' });
+    if (activeSession === id) {
+      activeSession = '';
+      $('messages').innerHTML = '<div class="messages-empty"><p>Start a conversation</p><p>Ask questions to the local LLM</p></div>';
+    }
+    loadSessions();
+  } catch (e) {}
+};
+
+function escHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function renderMsg(role, content, reasoning, streaming) {
+  var h = '<div class="msg ' + role + '"><div class="msg-bubble">';
+  if (role === 'assistant' && reasoning) {
+    var rid = 'r' + Math.random().toString(36).substr(2, 8);
+    h += '<button class="reasoning-toggle" onclick="var c=document.getElementById(\'' + rid + '\');c.style.display=c.style.display===\'none\'?\'block\':\'none\';this.textContent=this.textContent[0]===\'\u25B6\'?\'\u25BC Reasoning\':\'\u25B6 Reasoning\'">\u25B6 Reasoning</button>';
+    h += '<div id="' + rid + '" class="reasoning-content" style="display:none">' + escHtml(reasoning) + '</div>';
+  }
+  h += escHtml(content);
+  if (streaming) h += '<span class="cursor"></span>';
+  h += '</div></div>';
+  return h;
+}
+
+async function doSend() {
+  var text = $('msg-input').value.trim();
+  if (!text || loading) return;
+  loading = true;
+  $('send-btn').disabled = true;
+
+  var sid = activeSession;
+  if (!sid) {
+    try {
+      var res = await api('/api/sessions', { method: 'POST', body: { title: text.slice(0, 40) } });
+      var data = await res.json();
+      if (data.id) { sid = data.id; activeSession = sid; loadSessions(); }
+    } catch (e) { loading = false; $('send-btn').disabled = false; return; }
+  }
+
+  var emptyEl = document.querySelector('.messages-empty');
+  if (emptyEl) emptyEl.remove();
+
+  $('messages').insertAdjacentHTML('beforeend', renderMsg('user', text, '', false));
+  var streamId = 'stream-' + Date.now();
+  $('messages').insertAdjacentHTML('beforeend', '<div id="' + streamId + '" class="msg assistant"><div class="msg-bubble"><span class="cursor"></span></div></div>');
+  $('msg-input').value = '';
+
+  var streamContent = '';
+  var streamReasoning = '';
+
+  try {
+    var res = await api('/api/chat/stream', { method: 'POST', body: { message: text, session_id: sid } });
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+    var finished = false;
+
+    while (!finished) {
+      var result = await reader.read();
+      if (result.done) break;
+      buffer += decoder.decode(result.value, { stream: true });
+
+      var lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        if (line.indexOf('data: ') !== 0) continue;
+        var payload = line.slice(6);
+        if (payload === '[DONE]') { finished = true; break; }
+        try {
+          var parsed = JSON.parse(payload);
+          if (parsed.type === 'reasoning') streamReasoning += parsed.content;
+          else if (parsed.type === 'answer') streamContent += parsed.content;
+          else if (parsed.type === 'error') streamContent += parsed.error || 'Error';
+        } catch (e) {}
+      }
+
+      var el = $(streamId);
+      if (el) {
+        var inner = '<div class="msg-bubble">';
+        if (streamReasoning) {
+          var rid = streamId + '-r';
+          inner += '<button class="reasoning-toggle" onclick="var c=document.getElementById(\'' + rid + '\');c.style.display=c.style.display===\'none\'?\'block\':\'none\';this.textContent=this.textContent[0]===\'\u25B6\'?\'\u25BC Reasoning\':\'\u25B6 Reasoning\'">\u25B6 Reasoning</button>';
+          inner += '<div id="' + rid + '" class="reasoning-content" style="display:none">' + escHtml(streamReasoning) + '</div>';
+        }
+        inner += escHtml(streamContent);
+        inner += '<span class="cursor"></span>';
+        inner += '</div>';
+        el.innerHTML = inner;
+      }
+    }
+
+    var el = $(streamId);
+    if (el) {
+      var inner = '<div class="msg-bubble">';
+      if (streamReasoning) {
+        var rid = streamId + '-r';
+        inner += '<button class="reasoning-toggle" onclick="var c=document.getElementById(\'' + rid + '\');c.style.display=c.style.display===\'none\'?\'block\':\'none\';this.textContent=this.textContent[0]===\'\u25B6\'?\'\u25BC Reasoning\':\'\u25B6 Reasoning\'">\u25B6 Reasoning</button>';
+        inner += '<div id="' + rid + '" class="reasoning-content" style="display:none">' + escHtml(streamReasoning) + '</div>';
+      }
+      inner += escHtml(streamContent);
+      inner += '</div>';
+      el.innerHTML = inner;
+    }
+  } catch (e) {
+    var el = $(streamId);
+    if (el) el.innerHTML = '<div class="msg-bubble">Network error: ' + escHtml(e.message) + '</div>';
+  }
+
+  loading = false;
+  $('send-btn').disabled = false;
+  $('messages').scrollTop = $('messages').scrollHeight;
+}
+
+$('messages').addEventListener('DOMNodeInserted', function() {
+  this.scrollTop = this.scrollHeight;
+});
+</script>
+</body>
+</html>
