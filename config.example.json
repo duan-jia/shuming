@@ -40,7 +40,7 @@
     "top_k": 40,
     "repeat_penalty": 1.1,
     "repeat_last_n": 64,
-    "system_prompt": "You are a helpful AI assistant for enterprise internal use."
+    "system_prompt": "You are a helpful AI assistant for lab internal use."
   },
   "rag": {
     "storage_dir": "data/rag"
