@@ -6,6 +6,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <thread>
 
 #include "rag/chunker.h"
 #include "rag/embedder.h"
@@ -49,6 +52,10 @@ public:
                      const std::string& visibility = "group",
                      int uploaded_by = 0,
                      bool save = true);
+    int enqueue_document(int tenant_id, const std::string& filename,
+                         const std::string& content, const std::string& category = "",
+                         const std::string& visibility = "group",
+                         int uploaded_by = 0);
     void remove_document(int doc_id);
 
     std::vector<SearchResult> retrieve(const std::string& query,
@@ -83,6 +90,25 @@ public:
     bool load_all();
 
 private:
+    struct DocumentJob {
+        int doc_id = 0;
+        int tenant_id = 0;
+        std::string filename;
+        std::string content;
+        std::string category;
+        std::string visibility = "group";
+        int uploaded_by = 0;
+    };
+
+    void start_worker();
+    void stop_worker();
+    void worker_loop();
+    bool process_document_job(const DocumentJob& job, bool save);
+    int insert_processing_document(int tenant_id, const std::string& filename,
+                                   const std::string& content,
+                                   const std::string& visibility,
+                                   int uploaded_by);
+
     Chunker chunker_;
     std::unique_ptr<Embedder> embedder_;
     VectorIndex index_;
@@ -92,6 +118,12 @@ private:
     MysqlPool* mysql_pool_ = nullptr;
     std::string storage_dir_;
     mutable std::recursive_mutex mutex_;
+    std::mutex queue_mutex_;
+    std::condition_variable queue_cv_;
+    std::queue<DocumentJob> jobs_;
+    std::thread worker_;
+    bool worker_started_ = false;
+    bool stopping_ = false;
 };
 
 }

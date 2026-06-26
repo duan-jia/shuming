@@ -21,6 +21,7 @@ static std::string escape_sql(MYSQL* mysql, const std::string& input) {
 RagService::RagService() : chunker_(Chunker::Config{}), storage_dir_("data/rag") {}
 
 RagService::~RagService() {
+    stop_worker();
     save_all();
 }
 
@@ -175,18 +176,47 @@ bool RagService::load_embedding_model(const std::string& model_path) {
     return ok;
 }
 
-int RagService::add_document(int tenant_id, const std::string& filename,
-                               const std::string& content, const std::string& category,
-                               const std::string& visibility, int uploaded_by, bool save) {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
+void RagService::start_worker() {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    if (worker_started_) return;
+    stopping_ = false;
+    worker_ = std::thread(&RagService::worker_loop, this);
+    worker_started_ = true;
+}
 
-    if (!embedder_ || !embedder_->is_loaded()) {
-        spdlog::error("Embedding model not loaded, cannot add document");
-        return -1;
+void RagService::stop_worker() {
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        if (!worker_started_) return;
+        stopping_ = true;
     }
+    queue_cv_.notify_all();
+    if (worker_.joinable()) {
+        worker_.join();
+    }
+    worker_started_ = false;
+}
 
+void RagService::worker_loop() {
+    while (true) {
+        DocumentJob job;
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex_);
+            queue_cv_.wait(lock, [this] { return stopping_ || !jobs_.empty(); });
+            if (stopping_ && jobs_.empty()) return;
+            job = std::move(jobs_.front());
+            jobs_.pop();
+        }
+        process_document_job(job, true);
+    }
+}
+
+int RagService::insert_processing_document(int tenant_id, const std::string& filename,
+                                           const std::string& content,
+                                           const std::string& visibility,
+                                           int uploaded_by) {
     if (!mysql_pool_) {
-        spdlog::error("MySQL pool not set, cannot add document");
+        spdlog::error("MySQL pool not set, cannot insert document");
         return -1;
     }
 
@@ -210,64 +240,146 @@ int RagService::add_document(int tenant_id, const std::string& filename,
         return -1;
     }
     int doc_id = static_cast<int>(mysql_insert_id(raw));
+    mysql_pool_->release(conn);
+    return doc_id;
+}
+
+bool RagService::process_document_job(const DocumentJob& job, bool save) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    if (!embedder_ || !embedder_->is_loaded()) {
+        spdlog::error("Embedding model not loaded, cannot process document {}", job.doc_id);
+        return false;
+    }
+
+    if (!mysql_pool_) {
+        spdlog::error("MySQL pool not set, cannot process document {}", job.doc_id);
+        return false;
+    }
+
+    auto conn = mysql_pool_->acquire();
+    if (!conn) {
+        spdlog::error("Cannot acquire MySQL connection");
+        return false;
+    }
+    MYSQL* raw = conn->raw();
 
     // 2. Chunk the content
-    auto chunks = chunker_.chunk(doc_id, content, category);
+    auto chunks = chunker_.chunk(job.doc_id, job.content, job.category);
 
-    // 3. For each chunk: INSERT into document_chunks → embed → add to FAISS + BM25
+    int indexed_count = 0;
+    std::string sql;
+
+    // 3. For each chunk: INSERT into document_chunks -> embed -> add to FAISS + BM25
     for (auto& chunk : chunks) {
         sql = "INSERT INTO document_chunks (document_id, tenant_id, chunk_index, content, visibility) VALUES ("
-            + std::to_string(doc_id) + ","
-            + std::to_string(tenant_id) + ","
+            + std::to_string(job.doc_id) + ","
+            + std::to_string(job.tenant_id) + ","
             + std::to_string(chunk.chunk_index) + ",'"
             + escape_sql(raw, chunk.content) + "','"
-            + escape_sql(raw, visibility) + "')";
+            + escape_sql(raw, job.visibility) + "')";
         if (!conn->execute(sql)) {
-            spdlog::warn("Failed to insert chunk {} of doc {}", chunk.chunk_index, doc_id);
+            spdlog::warn("Failed to insert chunk {} of doc {}", chunk.chunk_index, job.doc_id);
             continue;
         }
         int64_t chunk_id = static_cast<int64_t>(mysql_insert_id(raw));
 
         auto embedding = embedder_->embed(chunk.content);
         if (embedding.empty()) {
-            spdlog::warn("Failed to embed chunk {} of doc {}", chunk.chunk_index, doc_id);
+            spdlog::warn("Failed to embed chunk {} of doc {}", chunk.chunk_index, job.doc_id);
             continue;
         }
 
         VectorEntry entry;
-        entry.doc_id = doc_id;
+        entry.doc_id = job.doc_id;
         entry.chunk_index = chunk.chunk_index;
-        entry.tenant_id = tenant_id;
-        entry.visibility = visibility;
+        entry.tenant_id = job.tenant_id;
+        entry.visibility = job.visibility;
         entry.content = chunk.content;
         entry.metadata = chunk.metadata;
 
         index_.add(embedding, entry, chunk_id);
-        bm25_.add(doc_id, chunk.chunk_index, chunk.content, chunk.metadata, tenant_id, visibility);
+        bm25_.add(job.doc_id, chunk.chunk_index, chunk.content, chunk.metadata,
+                  job.tenant_id, job.visibility);
         known_dishes_.insert(chunk.metadata.dish);
+        indexed_count++;
     }
 
-    // 4. UPDATE document status to 'ready'
-    sql = "UPDATE documents SET status='ready', chunk_count="
-        + std::to_string(chunks.size()) + " WHERE id=" + std::to_string(doc_id);
+    // 4. UPDATE document status
+    std::string status = indexed_count > 0 ? "ready" : "failed";
+    sql = "UPDATE documents SET status='" + status + "', chunk_count="
+        + std::to_string(indexed_count) + " WHERE id=" + std::to_string(job.doc_id);
     conn->execute(sql);
 
     mysql_pool_->release(conn);
 
+    if (indexed_count == 0) {
+        spdlog::error("Document '{}' failed: id={}, tenant={}, chunks={}",
+                      job.filename, job.doc_id, job.tenant_id, chunks.size());
+        return false;
+    }
+
     // 5. Update in-memory documents_ map
     Document doc;
-    doc.id = doc_id;
-    doc.tenant_id = tenant_id;
-    doc.filename = filename;
-    doc.content = content;
-    doc.visibility = visibility;
-    doc.uploaded_by = uploaded_by;
-    doc.chunk_count = static_cast<int>(chunks.size());
-    documents_[doc_id] = doc;
+    doc.id = job.doc_id;
+    doc.tenant_id = job.tenant_id;
+    doc.filename = job.filename;
+    doc.content = job.content;
+    doc.visibility = job.visibility;
+    doc.uploaded_by = job.uploaded_by;
+    doc.chunk_count = indexed_count;
+    documents_[job.doc_id] = doc;
 
-    spdlog::info("Document '{}' added: id={}, tenant={}, chunks={}", filename, doc_id, tenant_id, chunks.size());
+    spdlog::info("Document '{}' added: id={}, tenant={}, chunks={}",
+                 job.filename, job.doc_id, job.tenant_id, chunks.size());
 
     if (save) save_all();
+    return true;
+}
+
+int RagService::add_document(int tenant_id, const std::string& filename,
+                               const std::string& content, const std::string& category,
+                               const std::string& visibility, int uploaded_by, bool save) {
+    int doc_id = insert_processing_document(tenant_id, filename, content, visibility, uploaded_by);
+    if (doc_id <= 0) return -1;
+
+    DocumentJob job;
+    job.doc_id = doc_id;
+    job.tenant_id = tenant_id;
+    job.filename = filename;
+    job.content = content;
+    job.category = category;
+    job.visibility = visibility;
+    job.uploaded_by = uploaded_by;
+    return process_document_job(job, save) ? doc_id : -1;
+}
+
+int RagService::enqueue_document(int tenant_id, const std::string& filename,
+                                 const std::string& content, const std::string& category,
+                                 const std::string& visibility, int uploaded_by) {
+    if (!embedder_ || !embedder_->is_loaded()) {
+        spdlog::error("Embedding model not loaded, cannot enqueue document");
+        return -1;
+    }
+
+    int doc_id = insert_processing_document(tenant_id, filename, content, visibility, uploaded_by);
+    if (doc_id <= 0) return -1;
+
+    DocumentJob job;
+    job.doc_id = doc_id;
+    job.tenant_id = tenant_id;
+    job.filename = filename;
+    job.content = content;
+    job.category = category;
+    job.visibility = visibility;
+    job.uploaded_by = uploaded_by;
+
+    start_worker();
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        jobs_.push(std::move(job));
+    }
+    queue_cv_.notify_one();
     return doc_id;
 }
 

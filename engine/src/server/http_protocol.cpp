@@ -76,7 +76,7 @@ std::string HttpResponse::serialize() const {
     }
 
     oss << "Access-Control-Allow-Origin: *\r\n";
-    oss << "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    oss << "Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-Id\r\n";
     oss << "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
 
     if (!has_content_type) {

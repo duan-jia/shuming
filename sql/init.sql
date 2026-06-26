@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS documents (
     chunk_count       INT DEFAULT 0,
     visibility        ENUM('group','public') DEFAULT 'group',
     uploaded_by       INT NOT NULL DEFAULT 0,
-    status            ENUM('processing','ready','deleted') DEFAULT 'processing',
+    status            ENUM('processing','ready','failed','deleted') DEFAULT 'processing',
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
@@ -95,17 +95,42 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     INDEX idx_tenant_time (tenant_id, created_at)
 );
 
--- ========== 8. 计费记录 ==========
-CREATE TABLE IF NOT EXISTS billing_records (
+-- ========== 8. 用户每日 Token 用量 ==========
+CREATE TABLE IF NOT EXISTS user_token_usage_daily (
+    id                BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id         INT NOT NULL,
+    user_id           INT NOT NULL,
+    usage_date        DATE NOT NULL,
+    token_limit       INT NOT NULL,
+    tokens_used       INT NOT NULL DEFAULT 0,
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_user_date (user_id, usage_date),
+    INDEX idx_tenant_date (tenant_id, usage_date),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ========== 9. Token 使用记录 ==========
+CREATE TABLE IF NOT EXISTS token_usage_records (
     id                BIGINT PRIMARY KEY AUTO_INCREMENT,
     tenant_id         INT NOT NULL,
     user_id           INT NOT NULL,
     session_id        VARCHAR(36),
-    tokens_used       INT NOT NULL DEFAULT 0,
-    request_id        VARCHAR(64),
+    request_id        VARCHAR(64) NOT NULL,
+    usage_date        DATE NOT NULL,
+    prompt_tokens     INT NOT NULL DEFAULT 0,
+    completion_tokens INT NOT NULL DEFAULT 0,
+    total_tokens      INT NOT NULL DEFAULT 0,
+    status            ENUM('pending','success','failed') DEFAULT 'pending',
+    failure_reason    VARCHAR(128),
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_tenant_date (tenant_id, created_at),
-    INDEX idx_session (session_id)
+    UNIQUE KEY uk_request_id (request_id),
+    INDEX idx_user_date (user_id, usage_date),
+    INDEX idx_tenant_date (tenant_id, usage_date),
+    INDEX idx_session (session_id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- ========== 初始数据 ==========

@@ -7,15 +7,27 @@ add_executable(fast-llm-reasoner
     src/server/http_protocol.cpp
     src/server/router.cpp
     src/server/sse_connection.cpp
+    src/app/app_bootstrap.cpp
     src/persistence/mysql_pool.cpp
-    src/persistence/redis_manager.cpp
+    src/persistence/billing_service.cpp
+    src/persistence/message_repository.cpp
+    src/persistence/session_repository.cpp
+    src/services/admin_service.cpp
+    src/services/auth_service.cpp
+    src/services/chat_service.cpp
+    src/services/document_service.cpp
+    src/services/session_service.cpp
+    src/routes/admin_routes.cpp
+    src/routes/auth_routes.cpp
+    src/routes/chat_routes.cpp
+    src/routes/document_routes.cpp
+    src/routes/session_routes.cpp
     src/auth/jwt_handler.cpp
     src/security/rbac_manager.cpp
     src/security/audit_logger.cpp
     src/security/tenant_isolator.cpp
     src/security/crypto_utils.cpp
     src/security/rate_limiter.cpp
-    src/persistence/billing.cpp
     src/inference/llm_engine.cpp
     src/inference/reasoning_parser.cpp
     src/inference/model_manager.cpp
@@ -40,7 +52,6 @@ target_link_libraries(fast-llm-reasoner PRIVATE
     spdlog::spdlog
     jwt-cpp::jwt-cpp
     mysqlclient
-    hiredis
     llama
     faiss
     gfortran
