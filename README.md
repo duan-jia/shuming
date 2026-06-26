@@ -14,7 +14,7 @@
 | 嵌入模型 | bge-small-zh-v1.5 Q4_K_M (~15MB, 512-dim) |
 | 向量检索 | FAISS IndexFlatIP (进程内, 无额外服务) |
 | 关键词检索 | BM25 (CJK unigram+bigram) |
-| 存储 | MySQL 8.x (主存储), Redis (限流/计费) |
+| 存储 | MySQL 8.x (主存储) |
 | 安全 | JWT + RBAC + 租户隔离 + 限流 + PBKDF2 密码哈希 |
 | 前端 | Next.js (React/TypeScript) |
 
@@ -40,9 +40,9 @@ CUDA 架构号对照:
 ```bash
 # Ubuntu/Debian
 sudo apt install -y build-essential cmake git \
-  libssl-dev libmysqlclient-dev libhiredis-dev \
+  libssl-dev libmysqlclient-dev \
   libopenblas-dev gfortran \
-  mysql-server redis-server \
+  mysql-server \
   nodejs npm
 
 # CUDA Toolkit (有 GPU 时需要, 无 GPU 跳过)
@@ -73,7 +73,7 @@ vim config.json   # 修改 MySQL 密码、JWT secret、admin 默认密码
 ### 4. 初始化数据库
 
 ```bash
-sudo systemctl start mysql redis
+sudo systemctl start mysql
 mysql -u root < sql/init.sql
 ```
 
@@ -143,12 +143,11 @@ cd web && npm install && npm run dev
 ```
 server.port          HTTP 端口 (默认 8080)
 mysql.{host,port,user,password,database,pool_size}
-redis.{host,port,db}
 jwt.{secret,expiry_seconds}
 admin.{username,default_password}         首次启动创建的管理员
 inference.{n_ctx,n_batch,n_threads,...}   LLM 推理参数
 rag.storage_dir                           向量索引存储目录
-rate_limiter.rules[]                      限流规则
+rate_limiter.rules[]                      聊天接口进程内固定窗口限流
 scheduler.num_workers                     推理线程数
 http_threads                              HTTP 线程数
 remote_engine.{endpoint,model,api_key}    DeepSeek 作为 fallback
@@ -180,8 +179,8 @@ remote_engine.{endpoint,model,api_key}    DeepSeek 作为 fallback
 ### 文档 (RAG)
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/documents` | 上传文档 (自动 chunk + embed) |
-| GET | `/api/documents` | 文档列表 (本组 + 公共) |
+| POST | `/api/documents` | 上传文档, 返回 processing 后后台 chunk + embed |
+| GET | `/api/documents` | 文档列表 (本组 + 公共, 含状态) |
 | DELETE | `/api/documents/:id` | 删除文档 (admin, 软删除) |
 | POST | `/api/documents/search` | RAG 检索 (混合:向量+BM25) |
 
@@ -201,7 +200,7 @@ remote_engine.{endpoint,model,api_key}    DeepSeek 作为 fallback
 ### 健康检查
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/health` | 服务状态 (MySQL/Redis/模型) |
+| GET | `/api/health` | 服务状态 (MySQL/模型) |
 
 ## 项目结构
 
@@ -210,14 +209,14 @@ fast-llm-reasoner/
 ├── CMakeLists.txt              # 顶层 CMake (FetchContent 拉取依赖)
 ├── config.example.json         # 配置模板 (进 git)
 ├── config.json                 # 实际配置 (gitignore)
-├── sql/init.sql                # 数据库初始化 (8 张表)
+├── sql/init.sql                # 数据库初始化 (9 张表)
 ├── models/                     # GGUF 模型文件 (gitignore)
 ├── data/rag/                   # FAISS + BM25 索引文件
 ├── engine/
 │   ├── CMakeLists.txt
 │   ├── include/                # 头文件
 │   │   ├── server/             # HTTP 服务器, SSE
-│   │   ├── persistence/        # MySQL 池, Redis, DoubleBuffer
+│   │   ├── persistence/        # MySQL 池, Token 配额
 │   │   ├── auth/               # JWT
 │   │   ├── security/           # RBAC, 限流, 审计, 密码哈希
 │   │   ├── inference/          # llama.cpp 封装, KV Cache, 调度器
@@ -232,7 +231,7 @@ fast-llm-reasoner/
 └── tests/                      # 测试
 ```
 
-## 数据库设计 (8 张表)
+## 数据库设计 (9 张表)
 
 ```
 tenants       — 租户 (id, name, token_limit_daily, status)
@@ -241,10 +240,11 @@ sessions      — 对话会话 (id, tenant_id, user_id, title, model)
 messages      — 消息记录 (id, session_id, role, content, tokens_in/out, rag_references)
 documents     — 文档 (id, tenant_id, filename, content, chunk_count, visibility, status)
 document_chunks — 文档分块 (id, document_id, tenant_id, chunk_index, content, visibility)
-billing_records — 计费记录 (tenant_id, user_id, tokens_used, session_id)
 audit_logs    — 审计日志 (tenant_id, user_id, action, resource, result)
+user_token_usage_daily — 用户每日 Token 用量 (tenant_id, user_id, usage_date, token_limit, tokens_used)
+token_usage_records — 请求级 Token 使用记录 (request_id, session_id, prompt/completion/total_tokens, status)
 ```
 
-- 软删除: documents.status = 'deleted'
+- 文档状态: documents.status = 'processing' | 'ready' | 'failed' | 'deleted'
 - 多租户隔离: 所有表含 tenant_id, 文档搜索过滤 tenant_id + visibility
 - chunk_id (MySQL auto_increment) 同时作为 FAISS entry_id, 无需额外映射
