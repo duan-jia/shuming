@@ -43,7 +43,7 @@ static void load_dir(RagService& rag, const std::string& dir) {
         auto rel = std::filesystem::relative(path, dir);
         auto it = rel.begin();
         std::string category = (it != rel.end()) ? it->string() : "general";
-        int doc_id = rag.add_document(1, path.filename().string(), content, category, "all", false);
+        int doc_id = rag.add_document(1, path.filename().string(), content, category, "group", 0, false);
         if (doc_id >= 0)
             std::cout << "  loaded: " << category << "/" << path.filename() << " (id=" << doc_id << ")" << std::endl;
     }
@@ -55,7 +55,7 @@ static void search_and_print(RagService& rag, const std::string& query, int top_
         std::cout << "(RAG not available)" << std::endl;
         return;
     }
-    auto results = rag.retrieve(query, top_k, 1, "all");
+    auto results = rag.retrieve(query, top_k, 1);
     if (results.empty()) {
         std::cout << "(no matching documents)" << std::endl;
         return;
@@ -75,7 +75,7 @@ static void vec_and_print(RagService& rag, const std::string& query, int top_k =
         std::cout << "(RAG not available)" << std::endl;
         return;
     }
-    auto results = rag.vector_only_search(query, top_k, 1, "all");
+    auto results = rag.vector_only_search(query, top_k, 1);
     if (results.empty()) {
         std::cout << "(no matching documents)" << std::endl;
         return;
@@ -103,7 +103,7 @@ static void bm5_and_print(RagService& rag, const std::string& query, int top_k =
 }
 
 static void parents_and_print(RagService& rag, const std::string& query, int top_k = 3) {
-    auto results = rag.retrieve_parents(query, top_k, 1, "all");
+    auto results = rag.retrieve_parents(query, top_k, 1);
     if (results.empty()) {
         std::cout << "(no matching documents)" << std::endl;
         return;
@@ -135,7 +135,7 @@ static void bench_and_print(RagService& rag) {
     std::cout << "Running " << total << " iterations (warmup=" << warmup << ")..." << std::flush;
     for (int i = 0; i < total; ++i) {
         auto t0 = std::chrono::steady_clock::now();
-        rag.vector_only_search(query, 3, 1, "all");
+        rag.vector_only_search(query, 3, 1);
         auto t1 = std::chrono::steady_clock::now();
         if (i >= warmup) vec_us.push_back(us(t0, t1));
 
@@ -145,7 +145,7 @@ static void bench_and_print(RagService& rag) {
         if (i >= warmup) bm5_us.push_back(us(t0, t2));
 
         t0 = std::chrono::steady_clock::now();
-        rag.retrieve(query, 3, 1, "all");
+        rag.retrieve(query, 3, 1);
         auto t3 = std::chrono::steady_clock::now();
         if (i >= warmup) hybrid_us.push_back(us(t0, t3));
     }
@@ -298,7 +298,7 @@ int main(int argc, char** argv) {
             if (!rag.is_ready()) {
                 std::cout << "(RAG not available)" << std::endl;
             } else {
-                auto rag_prompt = rag.build_rag_prompt_from_parents(line.substr(5), 1, "all", 3);
+                auto rag_prompt = rag.build_rag_prompt_from_parents(line.substr(5), 1, 3);
                 stream_chat(mgr, rag_prompt, params);
             }
         } else if (line.rfind("/search ", 0) == 0) {
@@ -317,7 +317,7 @@ int main(int argc, char** argv) {
             } else {
                 std::string fname = std::filesystem::path(path).filename().string();
                 std::string category = std::filesystem::path(path).parent_path().filename().string();
-                int doc_id = rag.add_document(1, fname, content, category, "all");
+                int doc_id = rag.add_document(1, fname, content, category, "group");
                 if (doc_id >= 0)
                     std::cout << "Loaded document #" << doc_id << ": " << fname
                               << " (" << content.size() << " bytes)" << std::endl;

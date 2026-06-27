@@ -16,6 +16,7 @@
 #include "rag/bm25_index.h"
 #include "rag/query_filter.h"
 #include "persistence/mysql_pool.h"
+#include "persistence/rag_document_repository.h"
 
 namespace fastllm {
 
@@ -45,7 +46,7 @@ public:
 
     void set_embedder(std::unique_ptr<Embedder> embedder);
     bool load_embedding_model(const std::string& model_path);
-    void set_mysql_pool(MysqlPool* pool) { mysql_pool_ = pool; }
+    void set_mysql_pool(MysqlPool* pool);
 
     int add_document(int tenant_id, const std::string& filename,
                      const std::string& content, const std::string& category = "",
@@ -116,6 +117,7 @@ private:
     std::unordered_map<int, Document> documents_;
     std::unordered_set<std::string> known_dishes_;
     MysqlPool* mysql_pool_ = nullptr;
+    std::unique_ptr<RagDocumentRepository> document_repository_;
     std::string storage_dir_;
     mutable std::recursive_mutex mutex_;
     std::mutex queue_mutex_;
