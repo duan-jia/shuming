@@ -26,9 +26,42 @@ std::string SessionService::generate_uuid() {
     return std::string(buf);
 }
 
+nlohmann::json SessionService::session_to_json(const SessionSummary& session) {
+    nlohmann::json j;
+    j["id"] = session.id;
+    j["title"] = session.title;
+    j["model"] = session.model;
+    j["created_at"] = session.created_at;
+    j["updated_at"] = session.updated_at;
+    return j;
+}
+
+nlohmann::json SessionService::message_to_json(const MessageSummary& message) {
+    nlohmann::json j;
+    j["id"] = message.id;
+    j["role"] = message.role;
+    j["content"] = message.content;
+    j["reasoning"] = message.reasoning;
+    j["tokens_in"] = message.tokens_in;
+    j["tokens_out"] = message.tokens_out;
+    j["created_at"] = message.created_at;
+    return j;
+}
+
+nlohmann::json SessionService::messages_to_json(const std::vector<MessageSummary>& messages) {
+    nlohmann::json result = nlohmann::json::array();
+    for (const auto& message : messages) {
+        result.push_back(message_to_json(message));
+    }
+    return result;
+}
+
 void SessionService::list(const UserInfo& user, HttpResponse& resp) {
     nlohmann::json j;
-    j["sessions"] = sessions_.list_user_sessions(user.tenant_id, user.id);
+    j["sessions"] = nlohmann::json::array();
+    for (const auto& session : sessions_.list_user_sessions(user.tenant_id, user.id)) {
+        j["sessions"].push_back(session_to_json(session));
+    }
     resp.json(j.dump());
 }
 
@@ -62,13 +95,14 @@ void SessionService::detail(const RouteParams& params, const UserInfo& user, Htt
         return;
     }
 
-    nlohmann::json j;
-    if (!sessions_.get_session(session_id, user.tenant_id, user.id, j)) {
+    SessionSummary session;
+    if (!sessions_.get_session(session_id, user.tenant_id, user.id, session)) {
         resp.json_error(404, "Session not found");
         return;
     }
 
-    j["messages"] = sessions_.list_messages(session_id);
+    nlohmann::json j = session_to_json(session);
+    j["messages"] = messages_to_json(sessions_.list_messages(session_id));
     resp.json(j.dump());
 }
 
@@ -90,14 +124,14 @@ void SessionService::messages(const RouteParams& params, const UserInfo& user, H
         return;
     }
 
-    nlohmann::json session;
+    SessionSummary session;
     if (!sessions_.get_session(session_id, user.tenant_id, user.id, session)) {
         resp.json_error(404, "Session not found");
         return;
     }
 
     nlohmann::json j;
-    j["messages"] = sessions_.list_messages(session_id);
+    j["messages"] = messages_to_json(sessions_.list_messages(session_id));
     resp.json(j.dump());
 }
 
