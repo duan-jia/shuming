@@ -12,6 +12,7 @@ add_executable(fast-llm-reasoner
     src/persistence/billing_service.cpp
     src/persistence/document_repository.cpp
     src/persistence/message_repository.cpp
+    src/persistence/rag_document_repository.cpp
     src/persistence/session_repository.cpp
     src/persistence/tenant_repository.cpp
     src/persistence/token_usage_repository.cpp
@@ -80,6 +81,8 @@ endif()
 # CLI chat tool (no HTTP, no auth, no DB — testing only)
 add_executable(fast-llm-cli
     src/cli.cpp
+    src/persistence/mysql_pool.cpp
+    src/persistence/rag_document_repository.cpp
     src/inference/llm_engine.cpp
     src/inference/model_manager.cpp
     src/inference/reasoning_parser.cpp
@@ -98,6 +101,7 @@ target_include_directories(fast-llm-cli PRIVATE
 target_link_libraries(fast-llm-cli PRIVATE
     nlohmann_json::nlohmann_json
     spdlog::spdlog
+    mysqlclient
     llama
     faiss
     gfortran

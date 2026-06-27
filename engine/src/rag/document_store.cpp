@@ -11,13 +11,6 @@
 
 namespace fastllm {
 
-static std::string escape_sql(MYSQL* mysql, const std::string& input) {
-    std::string output(input.size() * 2 + 1, '\0');
-    size_t len = mysql_real_escape_string(mysql, &output[0], input.c_str(), input.size());
-    output.resize(len);
-    return output;
-}
-
 RagService::RagService() : chunker_(Chunker::Config{}), storage_dir_("data/rag") {}
 
 RagService::~RagService() {
@@ -28,6 +21,15 @@ RagService::~RagService() {
 void RagService::set_storage_dir(const std::string& dir) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     storage_dir_ = dir;
+}
+
+void RagService::set_mysql_pool(MysqlPool* pool) {
+    mysql_pool_ = pool;
+    if (mysql_pool_) {
+        document_repository_ = std::make_unique<RagDocumentRepository>(*mysql_pool_);
+    } else {
+        document_repository_.reset();
+    }
 }
 
 bool RagService::save_all() {
@@ -64,7 +66,7 @@ bool RagService::load_all() {
         return false;
     }
 
-    if (!mysql_pool_) {
+    if (!document_repository_) {
         spdlog::warn("RagService: no MySQL pool, cannot load");
         return false;
     }
@@ -78,54 +80,30 @@ bool RagService::load_all() {
             faiss_loaded = index_.load(index_path);
         }
 
-        auto conn = mysql_pool_->acquire();
-        if (!conn) {
-            spdlog::error("RagService: cannot acquire MySQL connection for load");
-            return false;
-        }
-        MYSQL* raw = conn->raw();
-
-        // Load documents (only ready ones)
         documents_.clear();
-        auto* res = conn->query("SELECT id, tenant_id, filename, content, visibility, uploaded_by, chunk_count FROM documents WHERE status='ready'");
-        if (res) {
-            auto* row = mysql_fetch_row(res);
-            while (row) {
-                Document doc;
-                doc.id = std::stoi(row[0]);
-                doc.tenant_id = std::stoi(row[1]);
-                doc.filename = row[2] ? row[2] : "";
-                doc.content = row[3] ? row[3] : "";
-                doc.visibility = row[4] ? row[4] : "group";
-                doc.uploaded_by = row[5] ? std::stoi(row[5]) : 0;
-                doc.chunk_count = row[6] ? std::stoi(row[6]) : 0;
-                documents_[doc.id] = doc;
-                row = mysql_fetch_row(res);
-            }
-            mysql_free_result(res);
+        for (const auto& record : document_repository_->load_ready_documents()) {
+            Document doc;
+            doc.id = record.id;
+            doc.tenant_id = record.tenant_id;
+            doc.filename = record.filename;
+            doc.content = record.content;
+            doc.visibility = record.visibility;
+            doc.uploaded_by = record.uploaded_by;
+            doc.chunk_count = record.chunk_count;
+            documents_[doc.id] = doc;
         }
 
-        // Load chunks → restore VectorEntry in memory
         int chunk_count = 0;
-        res = conn->query("SELECT id, document_id, tenant_id, chunk_index, content, visibility FROM document_chunks dc WHERE EXISTS (SELECT 1 FROM documents d WHERE d.id = dc.document_id AND d.status='ready')");
-        if (res) {
-            auto* row = mysql_fetch_row(res);
-            while (row) {
-                int64_t chunk_id = std::stoll(row[0]);
-                VectorEntry entry;
-                entry.doc_id = std::stoi(row[1]);
-                entry.tenant_id = std::stoi(row[2]);
-                entry.chunk_index = std::stoi(row[3]);
-                entry.content = row[4] ? row[4] : "";
-                entry.visibility = row[5] ? row[5] : "group";
-                index_.restore_entry(static_cast<faiss::idx_t>(chunk_id), entry);
-                chunk_count++;
-                row = mysql_fetch_row(res);
-            }
-            mysql_free_result(res);
+        for (const auto& chunk : document_repository_->load_ready_chunks()) {
+            VectorEntry entry;
+            entry.doc_id = chunk.document_id;
+            entry.tenant_id = chunk.tenant_id;
+            entry.chunk_index = chunk.chunk_index;
+            entry.content = chunk.content;
+            entry.visibility = chunk.visibility;
+            index_.restore_entry(static_cast<faiss::idx_t>(chunk.id), entry);
+            chunk_count++;
         }
-
-        mysql_pool_->release(conn);
 
         // Load BM25 from file (or leave empty — will be rebuilt on new uploads)
         if (std::filesystem::exists(bm25_path)) {
@@ -215,33 +193,12 @@ int RagService::insert_processing_document(int tenant_id, const std::string& fil
                                            const std::string& content,
                                            const std::string& visibility,
                                            int uploaded_by) {
-    if (!mysql_pool_) {
+    if (!document_repository_) {
         spdlog::error("MySQL pool not set, cannot insert document");
         return -1;
     }
-
-    auto conn = mysql_pool_->acquire();
-    if (!conn) {
-        spdlog::error("Cannot acquire MySQL connection");
-        return -1;
-    }
-    MYSQL* raw = conn->raw();
-
-    // 1. INSERT document with status='processing'
-    std::string sql = "INSERT INTO documents (tenant_id, filename, content, visibility, uploaded_by, status) VALUES ("
-        + std::to_string(tenant_id) + ",'"
-        + escape_sql(raw, filename) + "','"
-        + escape_sql(raw, content) + "','"
-        + escape_sql(raw, visibility) + "',"
-        + std::to_string(uploaded_by) + ",'processing')";
-    if (!conn->execute(sql)) {
-        mysql_pool_->release(conn);
-        spdlog::error("Failed to insert document");
-        return -1;
-    }
-    int doc_id = static_cast<int>(mysql_insert_id(raw));
-    mysql_pool_->release(conn);
-    return doc_id;
+    return document_repository_->insert_processing_document(
+        tenant_id, filename, content, visibility, uploaded_by);
 }
 
 bool RagService::process_document_job(const DocumentJob& job, bool save) {
@@ -252,37 +209,25 @@ bool RagService::process_document_job(const DocumentJob& job, bool save) {
         return false;
     }
 
-    if (!mysql_pool_) {
+    if (!document_repository_) {
         spdlog::error("MySQL pool not set, cannot process document {}", job.doc_id);
         return false;
     }
-
-    auto conn = mysql_pool_->acquire();
-    if (!conn) {
-        spdlog::error("Cannot acquire MySQL connection");
-        return false;
-    }
-    MYSQL* raw = conn->raw();
 
     // 2. Chunk the content
     auto chunks = chunker_.chunk(job.doc_id, job.content, job.category);
 
     int indexed_count = 0;
-    std::string sql;
 
     // 3. For each chunk: INSERT into document_chunks -> embed -> add to FAISS + BM25
     for (auto& chunk : chunks) {
-        sql = "INSERT INTO document_chunks (document_id, tenant_id, chunk_index, content, visibility) VALUES ("
-            + std::to_string(job.doc_id) + ","
-            + std::to_string(job.tenant_id) + ","
-            + std::to_string(chunk.chunk_index) + ",'"
-            + escape_sql(raw, chunk.content) + "','"
-            + escape_sql(raw, job.visibility) + "')";
-        if (!conn->execute(sql)) {
+        int64_t chunk_id = 0;
+        if (!document_repository_->insert_chunk(job.doc_id, job.tenant_id,
+                                                chunk.chunk_index, chunk.content,
+                                                job.visibility, chunk_id)) {
             spdlog::warn("Failed to insert chunk {} of doc {}", chunk.chunk_index, job.doc_id);
             continue;
         }
-        int64_t chunk_id = static_cast<int64_t>(mysql_insert_id(raw));
 
         auto embedding = embedder_->embed(chunk.content);
         if (embedding.empty()) {
@@ -305,13 +250,9 @@ bool RagService::process_document_job(const DocumentJob& job, bool save) {
         indexed_count++;
     }
 
-    // 4. UPDATE document status
+    // 4. Persist document status
     std::string status = indexed_count > 0 ? "ready" : "failed";
-    sql = "UPDATE documents SET status='" + status + "', chunk_count="
-        + std::to_string(indexed_count) + " WHERE id=" + std::to_string(job.doc_id);
-    conn->execute(sql);
-
-    mysql_pool_->release(conn);
+    document_repository_->update_document_status(job.doc_id, status, indexed_count);
 
     if (indexed_count == 0) {
         spdlog::error("Document '{}' failed: id={}, tenant={}, chunks={}",
@@ -394,14 +335,8 @@ void RagService::remove_document(int doc_id) {
     spdlog::info("Document removed: id={}", doc_id);
     documents_.erase(it);
 
-    // Soft delete in MySQL
-    if (mysql_pool_) {
-        auto conn = mysql_pool_->acquire();
-        if (conn) {
-            std::string sql = "UPDATE documents SET status='deleted' WHERE id=" + std::to_string(doc_id);
-            conn->execute(sql);
-            mysql_pool_->release(conn);
-        }
+    if (document_repository_) {
+        document_repository_->mark_document_deleted(doc_id);
     }
 
     save_all();
