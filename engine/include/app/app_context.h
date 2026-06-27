@@ -7,9 +7,12 @@
 #include "inference/batch_scheduler.h"
 #include "inference/model_manager.h"
 #include "persistence/billing_service.h"
+#include "persistence/document_repository.h"
 #include "persistence/message_repository.h"
 #include "persistence/mysql_pool.h"
 #include "persistence/session_repository.h"
+#include "persistence/tenant_repository.h"
+#include "persistence/user_repository.h"
 #include "rag/document_store.h"
 #include "security/rate_limiter.h"
 #include "security/rbac_manager.h"
@@ -28,6 +31,9 @@ struct AppContext {
     std::unique_ptr<RagService> rag;
     std::unique_ptr<RateLimiter> rate_limiter;
     std::unique_ptr<BillingService> billing_service;
+    std::unique_ptr<UserRepository> user_repository;
+    std::unique_ptr<TenantRepository> tenant_repository;
+    std::unique_ptr<DocumentRepository> document_repository;
     std::unique_ptr<MessageRepository> message_repository;
     std::unique_ptr<SessionRepository> session_repository;
     std::unique_ptr<SessionService> session_service;

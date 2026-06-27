@@ -3,6 +3,7 @@
 #include <string>
 
 #include "persistence/mysql_pool.h"
+#include "persistence/token_usage_repository.h"
 
 namespace fastllm {
 
@@ -27,12 +28,10 @@ public:
 
 private:
     MysqlPool& mysql_;
+    TokenUsageRepository token_usage_;
 
-    static std::string escape_sql(MYSQL* mysql, const std::string& input);
-    bool ensure_daily_usage(MysqlConnection& conn, int tenant_id, int user_id);
-    bool load_existing(MysqlConnection& conn, const std::string& request_id,
-                       ChargeResult& result);
-    bool load_daily_usage(MysqlConnection& conn, int user_id, ChargeResult& result);
+    static void apply_daily_usage(const DailyTokenUsage& usage, ChargeResult& result);
+    bool load_existing(MysqlConnection& conn, const std::string& request_id, ChargeResult& result);
 };
 
 }

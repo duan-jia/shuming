@@ -68,6 +68,9 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
     }
 
     ctx.billing_service = std::make_unique<BillingService>(*ctx.mysql_pool);
+    ctx.user_repository = std::make_unique<UserRepository>(*ctx.mysql_pool);
+    ctx.tenant_repository = std::make_unique<TenantRepository>(*ctx.mysql_pool);
+    ctx.document_repository = std::make_unique<DocumentRepository>(*ctx.mysql_pool);
     ctx.message_repository = std::make_unique<MessageRepository>(*ctx.mysql_pool);
     ctx.session_repository = std::make_unique<SessionRepository>(*ctx.mysql_pool);
     ctx.session_service = std::make_unique<SessionService>(*ctx.session_repository);
