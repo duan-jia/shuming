@@ -10,8 +10,12 @@ add_executable(fast-llm-reasoner
     src/app/app_bootstrap.cpp
     src/persistence/mysql_pool.cpp
     src/persistence/billing_service.cpp
+    src/persistence/document_repository.cpp
     src/persistence/message_repository.cpp
     src/persistence/session_repository.cpp
+    src/persistence/tenant_repository.cpp
+    src/persistence/token_usage_repository.cpp
+    src/persistence/user_repository.cpp
     src/services/admin_service.cpp
     src/services/auth_service.cpp
     src/services/chat_service.cpp

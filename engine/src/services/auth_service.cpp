@@ -1,6 +1,5 @@
 #include "services/auth_service.h"
 
-#include <mysql/mysql.h>
 #include <nlohmann/json.hpp>
 
 #include "security/crypto_utils.h"
@@ -8,13 +7,6 @@
 namespace fastllm {
 
 AuthService::AuthService(AppContext& ctx) : ctx_(ctx) {}
-
-std::string AuthService::escape_sql(MYSQL* mysql, const std::string& input) {
-    std::string output(input.size() * 2 + 1, '\0');
-    size_t len = mysql_real_escape_string(mysql, &output[0], input.c_str(), input.size());
-    output.resize(len);
-    return output;
-}
 
 UserInfo AuthService::extract_user(const HttpRequest& req) const {
     UserInfo info{0, 0, "", Role::USER};
@@ -55,48 +47,36 @@ void AuthService::login(const HttpRequest& req, HttpResponse& resp) {
         std::string username = body.value("username", "");
         std::string password = body.value("password", "");
 
-        auto conn = ctx_.mysql_pool->acquire();
-        if (!conn) {
+        if (!ctx_.user_repository) {
             resp.json_error(503, "Database unavailable");
             return;
         }
-        std::string sql = "SELECT id, tenant_id, role, password_hash FROM users WHERE username='"
-            + escape_sql(conn->raw(), username) + "'";
-        auto* result = conn->query(sql);
-        if (!result) {
-            ctx_.mysql_pool->release(conn);
-            resp.json_error(500, "Database error");
+
+        LoginUser login_user;
+        auto lookup_status = ctx_.user_repository->find_login_user(username, login_user);
+        if (lookup_status == UserLookupStatus::Unavailable) {
+            resp.json_error(503, "Database unavailable");
             return;
         }
-
-        auto* row = mysql_fetch_row(result);
-        if (!row) {
-            mysql_free_result(result);
-            ctx_.mysql_pool->release(conn);
+        if (lookup_status == UserLookupStatus::NotFound) {
             resp.json_error(401, "Invalid credentials");
             return;
         }
 
-        int user_id = std::stoi(row[0]);
-        int tenant_id = std::stoi(row[1]);
-        std::string role = row[2] ? row[2] : "user";
-        std::string password_hash = row[3] ? row[3] : "";
-        mysql_free_result(result);
-        ctx_.mysql_pool->release(conn);
-
-        if (!CryptoUtils::verify_password(password, password_hash)) {
+        if (!CryptoUtils::verify_password(password, login_user.password_hash)) {
             resp.json_error(401, "Invalid credentials");
             return;
         }
 
-        std::string token = ctx_.jwt->generate_token(user_id, tenant_id, username, role);
+        std::string token = ctx_.jwt->generate_token(
+            login_user.id, login_user.tenant_id, login_user.username, login_user.role);
 
         nlohmann::json j;
         j["token"] = token;
-        j["user"]["id"] = user_id;
-        j["user"]["username"] = username;
-        j["user"]["role"] = role;
-        j["user"]["tenant_id"] = tenant_id;
+        j["user"]["id"] = login_user.id;
+        j["user"]["username"] = login_user.username;
+        j["user"]["role"] = login_user.role;
+        j["user"]["tenant_id"] = login_user.tenant_id;
         resp.json(j.dump());
     } catch (const std::exception& e) {
         resp.json_error(400, std::string("Invalid request: ") + e.what());

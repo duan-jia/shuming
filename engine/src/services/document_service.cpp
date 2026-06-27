@@ -1,6 +1,5 @@
 #include "services/document_service.h"
 
-#include <mysql/mysql.h>
 #include <nlohmann/json.hpp>
 
 namespace fastllm {
@@ -47,31 +46,20 @@ void DocumentService::upload(const HttpRequest& req, const UserInfo& user, HttpR
 }
 
 void DocumentService::list(const UserInfo& user, HttpResponse& resp) {
-    auto conn = ctx_.mysql_pool->acquire();
-    if (!conn) { resp.json_error(500, "Database error"); return; }
-
     nlohmann::json result = nlohmann::json::array();
-    std::string sql = "SELECT id, tenant_id, filename, chunk_count, visibility, status, created_at "
-        "FROM documents WHERE status<>'deleted' AND (tenant_id="
-        + std::to_string(user.tenant_id) + " OR visibility='public') ORDER BY created_at DESC";
-    auto* res = conn->query(sql);
-    if (res) {
-        auto* row = mysql_fetch_row(res);
-        while (row) {
+    if (ctx_.document_repository) {
+        for (const auto& doc : ctx_.document_repository->list_visible_documents(user.tenant_id)) {
             nlohmann::json d;
-            d["id"] = row[0] ? std::stoi(row[0]) : 0;
-            d["tenant_id"] = row[1] ? std::stoi(row[1]) : 0;
-            d["filename"] = row[2] ? row[2] : "";
-            d["chunk_count"] = row[3] ? std::stoi(row[3]) : 0;
-            d["visibility"] = row[4] ? row[4] : "group";
-            d["status"] = row[5] ? row[5] : "processing";
-            d["created_at"] = row[6] ? row[6] : "";
+            d["id"] = doc.id;
+            d["tenant_id"] = doc.tenant_id;
+            d["filename"] = doc.filename;
+            d["chunk_count"] = doc.chunk_count;
+            d["visibility"] = doc.visibility;
+            d["status"] = doc.status;
+            d["created_at"] = doc.created_at;
             result.push_back(d);
-            row = mysql_fetch_row(res);
         }
-        mysql_free_result(res);
     }
-    ctx_.mysql_pool->release(conn);
 
     nlohmann::json j;
     j["documents"] = result;
@@ -91,6 +79,17 @@ void DocumentService::remove(const RouteParams& params, const UserInfo& user, Ht
     }
 
     int doc_id = std::stoi(doc_id_str);
+    int doc_tenant_id = 0;
+    if (!ctx_.document_repository
+        || !ctx_.document_repository->find_document_tenant(doc_id, doc_tenant_id)) {
+        resp.json_error(404, "Document not found");
+        return;
+    }
+    if (doc_tenant_id != user.tenant_id) {
+        resp.json_error(403, "Forbidden");
+        return;
+    }
+
     ctx_.rag->remove_document(doc_id);
 
     resp.json(R"({"status":"deleted"})");

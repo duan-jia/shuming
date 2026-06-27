@@ -1,7 +1,5 @@
 #pragma once
 
-#include <mysql/mysql.h>
-
 #include "app/app_context.h"
 #include "security/rbac_manager.h"
 #include "server/http_protocol.h"
@@ -20,8 +18,6 @@ public:
 
 private:
     AppContext& ctx_;
-
-    static std::string escape_sql(MYSQL* mysql, const std::string& input);
 };
 
 }
