@@ -13,8 +13,8 @@ std::string SessionRepository::escape_sql(MYSQL* mysql, const std::string& input
     return output;
 }
 
-nlohmann::json SessionRepository::list_user_sessions(int tenant_id, int user_id, int limit) {
-    nlohmann::json result = nlohmann::json::array();
+std::vector<SessionSummary> SessionRepository::list_user_sessions(int tenant_id, int user_id, int limit) {
+    std::vector<SessionSummary> result;
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) return result;
 
@@ -26,12 +26,12 @@ nlohmann::json SessionRepository::list_user_sessions(int tenant_id, int user_id,
     if (res) {
         auto* row = mysql_fetch_row(res);
         while (row) {
-            nlohmann::json s;
-            s["id"] = row[0] ? row[0] : "";
-            s["title"] = row[1] ? row[1] : "New Chat";
-            s["model"] = row[2] ? row[2] : "";
-            s["created_at"] = row[3] ? row[3] : "";
-            s["updated_at"] = row[4] ? row[4] : "";
+            SessionSummary s;
+            s.id = row[0] ? row[0] : "";
+            s.title = row[1] ? row[1] : "New Chat";
+            s.model = row[2] ? row[2] : "";
+            s.created_at = row[3] ? row[3] : "";
+            s.updated_at = row[4] ? row[4] : "";
             result.push_back(s);
             row = mysql_fetch_row(res);
         }
@@ -59,7 +59,7 @@ bool SessionRepository::create_session(const std::string& session_id, int tenant
 }
 
 bool SessionRepository::get_session(const std::string& session_id, int tenant_id, int user_id,
-                                    nlohmann::json& session) {
+                                    SessionSummary& session) {
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) return false;
 
@@ -72,11 +72,11 @@ bool SessionRepository::get_session(const std::string& session_id, int tenant_id
     if (res) {
         auto* row = mysql_fetch_row(res);
         if (row) {
-            session["id"] = row[0] ? row[0] : "";
-            session["title"] = row[1] ? row[1] : "New Chat";
-            session["model"] = row[2] ? row[2] : "";
-            session["created_at"] = row[3] ? row[3] : "";
-            session["updated_at"] = row[4] ? row[4] : "";
+            session.id = row[0] ? row[0] : "";
+            session.title = row[1] ? row[1] : "New Chat";
+            session.model = row[2] ? row[2] : "";
+            session.created_at = row[3] ? row[3] : "";
+            session.updated_at = row[4] ? row[4] : "";
             found = true;
         }
         mysql_free_result(res);
@@ -98,8 +98,8 @@ bool SessionRepository::delete_session(const std::string& session_id, int tenant
     return ok;
 }
 
-nlohmann::json SessionRepository::list_messages(const std::string& session_id, int limit) {
-    nlohmann::json msgs = nlohmann::json::array();
+std::vector<MessageSummary> SessionRepository::list_messages(const std::string& session_id, int limit) {
+    std::vector<MessageSummary> msgs;
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) return msgs;
 
@@ -110,14 +110,14 @@ nlohmann::json SessionRepository::list_messages(const std::string& session_id, i
     if (res) {
         auto* row = mysql_fetch_row(res);
         while (row) {
-            nlohmann::json m;
-            m["id"] = row[0] ? std::stoi(row[0]) : 0;
-            m["role"] = row[1] ? row[1] : "";
-            m["content"] = row[2] ? row[2] : "";
-            m["reasoning"] = row[3] ? row[3] : "";
-            m["tokens_in"] = row[4] ? std::stoi(row[4]) : 0;
-            m["tokens_out"] = row[5] ? std::stoi(row[5]) : 0;
-            m["created_at"] = row[6] ? row[6] : "";
+            MessageSummary m;
+            m.id = row[0] ? std::stoi(row[0]) : 0;
+            m.role = row[1] ? row[1] : "";
+            m.content = row[2] ? row[2] : "";
+            m.reasoning = row[3] ? row[3] : "";
+            m.tokens_in = row[4] ? std::stoi(row[4]) : 0;
+            m.tokens_out = row[5] ? std::stoi(row[5]) : 0;
+            m.created_at = row[6] ? row[6] : "";
             msgs.push_back(m);
             row = mysql_fetch_row(res);
         }
