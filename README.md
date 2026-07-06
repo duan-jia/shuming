@@ -147,6 +147,7 @@ jwt.{secret,expiry_seconds}
 admin.{username,default_password}         首次启动创建的管理员
 inference.{n_ctx,n_batch,n_threads,...}   LLM 推理参数
 rag.storage_dir                           向量索引存储目录
+rag.query_rewrite.{enabled,model,...}     将用户查询重写为英文检索 query, 失败自动回退
 rate_limiter.rules[]                      聊天接口进程内固定窗口限流
 scheduler.num_workers                     推理线程数
 http_threads                              HTTP 线程数
@@ -183,6 +184,121 @@ remote_engine.{endpoint,model,api_key}    DeepSeek 作为 fallback
 | GET | `/api/documents` | 文档列表 (本组 + 公共, 含状态) |
 | DELETE | `/api/documents/:id` | 删除文档 (admin, 软删除) |
 | POST | `/api/documents/search` | RAG 检索 (混合:向量+BM25) |
+
+## 实验室文档治理与导入
+
+RAG v2 只导入 `document_card.md`，不导入正文全文 chunks。每个 PDF/PPTX/DOCX/MD/TXT 原始文件都会先生成一个轻量 `document_card.json` 和 `document_card.md`；JSON 用于治理，Markdown 用于向量检索和 BM25 检索。原始文件继续放在 `data/` 下，不进入 git。
+
+`document_card` 主体字段使用英文，降低 BM25 对中文分词的依赖；同时保留 `aliases` 字段，用于中文姓名、中文标题、拼音和缩写召回，例如 `段佳兵`、`Duan Jiabing`、`duanjiabing`。
+
+文档目录按权限语义组织：
+
+```text
+data/public/          # 全系统可见文档
+data/tenants/RDMA/    # RDMA 租户/小组内共享文档
+```
+
+基础依赖:
+
+```bash
+python3 -m venv /tmp/fastllm-docling-venv
+/tmp/fastllm-docling-venv/bin/python -m pip install --upgrade pip
+/tmp/fastllm-docling-venv/bin/python -m pip install pypdf python-pptx python-docx
+
+# 先检查抽取文本，不调用 API
+/tmp/fastllm-docling-venv/bin/python scripts/generate_document_cards.py \
+  --input data/tenants/RDMA \
+  --output data/document_cards/tenants/RDMA \
+  --only dcqcn \
+  --dry-run
+
+# 真实生成 RDMA document cards。API key 从环境变量读取，避免写入配置文件。
+export DEEPSEEK_API_KEY=...
+/tmp/fastllm-docling-venv/bin/python scripts/generate_document_cards.py \
+  --input data/tenants/RDMA \
+  --output data/document_cards/tenants/RDMA \
+  --model deepseek-v4-flash \
+  --force
+
+# 生成公共文档 cards
+/tmp/fastllm-docling-venv/bin/python scripts/generate_document_cards.py \
+  --input data/public \
+  --output data/document_cards/public \
+  --topic public \
+  --owner lab \
+  --model deepseek-v4-flash \
+  --force
+```
+
+输出目录中每个文档会包含 `document_card.json` 和 `document_card.md`，汇总文件为 `cards.jsonl`。`document_card.md` 包含 title、aliases、doc_type、owner、topic、keywords、summary、main_contribution、useful_for 和 questions_answered，这些增强字段会参与 FAISS 向量检索和 BM25 关键词检索。
+
+在线检索时，后端会在 RAG 前把用户 query 重写为英文检索 query，并拼回 aliases 和原始 query。重写使用 `remote_engine.api_key` 与 `rag.query_rewrite.model`；如果 API 不可用、超时或解析失败，系统直接使用原始 query。
+
+### 文档治理清单
+
+导入 RAG 前先生成治理清单，明确哪些源文件已经有 `document_card`，以及哪些文件命名需要人工确认。该脚本只生成派生清单，不移动或改写原始文件。
+
+```bash
+python3 scripts/plan_document_governance.py \
+  --input data/tenants/RDMA \
+  --document-cards data/document_cards/tenants/RDMA \
+  --output-dir data/governance/tenants/RDMA \
+  --topic RDMA \
+  --visibility group \
+  --tenant-name RDMA
+
+python3 scripts/plan_document_governance.py \
+  --input data/public \
+  --document-cards data/document_cards/public \
+  --output-dir data/governance/public \
+  --topic public \
+  --visibility public
+```
+
+输出包括 `governance_report.md`、`governance_manifest.jsonl`、`rag_import_manifest.jsonl` 和 `rename_manifest.jsonl`。其中 `rag_import_manifest.jsonl` 只包含 `document_card.md`，并带有 `visibility` 与 `tenant_name`；`rename_manifest.jsonl` 只是重命名建议，需要人工确认后再执行。
+
+### 按治理清单导入 RAG
+
+启动后端并确保 embedding 模型可用后，可以直接按 `rag_import_manifest.jsonl` 批量上传 `document_card.md`。脚本会调用现有 `/api/documents` 接口，不直接写数据库。
+
+```bash
+# 先检查将要上传哪些租户文档
+python3 scripts/import_rag_manifest.py \
+  --manifest data/governance/tenants/RDMA/rag_import_manifest.jsonl \
+  --dry-run
+
+# 先导入公共文档
+python3 scripts/import_rag_manifest.py \
+  --manifest data/governance/public/rag_import_manifest.jsonl \
+  --result data/governance/public/rag_upload_results.jsonl \
+  --api-base http://localhost:9006 \
+  --username admin \
+  --password changeme123 \
+  --wait
+
+# 再导入 RDMA 租户文档
+python3 scripts/import_rag_manifest.py \
+  --manifest data/governance/tenants/RDMA/rag_import_manifest.jsonl \
+  --result data/governance/tenants/RDMA/rag_upload_results.jsonl \
+  --api-base http://localhost:9006 \
+  --username admin \
+  --password changeme123 \
+  --wait
+```
+
+导入完成后运行回归验证：
+
+```bash
+python3 scripts/validate_rag_import.py \
+  --api-base http://localhost:9006 \
+  --username admin \
+  --password changeme123 \
+  --rdma-queries tests/rdma_rag_queries.json
+```
+
+验证脚本会检查文档数量、ready 状态、RDMA 召回、public 召回，以及 OTHER 租户只能看到 public 文档。当前验收基线是 22 个文档：1 个 public，21 个 RDMA group 文档。
+
+主流程脚本是 `generate_document_cards.py`、`plan_document_governance.py`、`import_rag_manifest.py` 和 `validate_rag_import.py`。`generate_paper_cards.py` 与 `ingest_documents.py` 是早期实验脚本，不建议作为新的导入入口。
 
 ### 租户管理 (admin only)
 | 方法 | 路径 | 说明 |

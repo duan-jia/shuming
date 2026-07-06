@@ -45,7 +45,7 @@ add_executable(fast-llm-reasoner
     src/rag/vector_index.cpp
     src/rag/bm25_index.cpp
     src/rag/document_store.cpp
-    src/rag/query_filter.cpp
+    src/rag/query_rewriter.cpp
 )
 
 target_include_directories(fast-llm-reasoner PRIVATE
@@ -91,7 +91,7 @@ add_executable(fast-llm-cli
     src/rag/vector_index.cpp
     src/rag/bm25_index.cpp
     src/rag/document_store.cpp
-    src/rag/query_filter.cpp
+    src/rag/query_rewriter.cpp
 )
 
 target_include_directories(fast-llm-cli PRIVATE
@@ -106,4 +106,9 @@ target_link_libraries(fast-llm-cli PRIVATE
     faiss
     gfortran
     pthread
+    httplib::httplib
+    OpenSSL::SSL
+    OpenSSL::Crypto
 )
+
+target_compile_definitions(fast-llm-cli PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)

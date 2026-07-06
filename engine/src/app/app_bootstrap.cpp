@@ -79,6 +79,14 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
     ctx.rag = std::make_unique<RagService>();
     ctx.rag->set_storage_dir(ctx.rag_dir);
     ctx.rag->set_mysql_pool(ctx.mysql_pool.get());
+    ctx.rag->set_query_rewriter(std::make_unique<QueryRewriter>(
+        config.get_bool("rag.query_rewrite.enabled", true),
+        config.get_str("remote_engine.endpoint", "https://api.deepseek.com/v1"),
+        config.get_str("rag.query_rewrite.model",
+            config.get_str("remote_engine.model", "deepseek-chat")),
+        config.get_str("remote_engine.api_key", ""),
+        config.get_int("rag.query_rewrite.timeout_seconds", 10)
+    ));
 
     if (!options.model_path.empty()) {
         spdlog::info("Loading main model: {}", options.model_path);
