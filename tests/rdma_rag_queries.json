@@ -1,0 +1,138 @@
+[
+  {
+    "query": "段佳兵做了哪些 RDMA 相关工作？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/duanjiabing_ca5207a9cf/document_card.md",
+      "tenants/RDMA/cards/duanjiabing_b50f728688/document_card.md"
+    ]
+  },
+  {
+    "query": "有哪些文档提到了 RDMA 拥塞控制？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/duanjiabing_b50f728688/document_card.md",
+      "tenants/RDMA/cards/duanjiabing_ca5207a9cf/document_card.md",
+      "tenants/RDMA/cards/duanjiabing_103f03b4b3/document_card.md",
+      "tenants/RDMA/cards/paper_pdf_conga_364c43eeaa/document_card.md"
+    ]
+  },
+  {
+    "query": "段佳兵的文献综述在哪里？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/duanjiabing_b50f728688/document_card.md"
+    ]
+  },
+  {
+    "query": "开题报告主要研究什么问题？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/duanjiabing_ca5207a9cf/document_card.md",
+      "tenants/RDMA/cards/duanjiabing_3c047a9b0e/document_card.md"
+    ]
+  },
+  {
+    "query": "What RDMA-related work did Duan Jiabing do?",
+    "expected_filenames": [
+      "tenants/RDMA/cards/duanjiabing_ca5207a9cf/document_card.md",
+      "tenants/RDMA/cards/duanjiabing_b50f728688/document_card.md",
+      "tenants/RDMA/cards/duanjiabing_3c047a9b0e/document_card.md"
+    ]
+  },
+  {
+    "query": "段佳兵 traffic prediction RDMA load balancing",
+    "expected_filenames": [
+      "tenants/RDMA/cards/duanjiabing_ca5207a9cf/document_card.md",
+      "tenants/RDMA/cards/duanjiabing_b50f728688/document_card.md",
+      "tenants/RDMA/cards/duanjiabing_3c047a9b0e/document_card.md"
+    ]
+  },
+  {
+    "query": "哪些文档讨论了基于宽度学习的 RDMA 流量预测？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/duanjiabing_1dea9694b5/document_card.md"
+    ]
+  },
+  {
+    "query": "CONGA 主要解决数据中心里的什么负载均衡问题？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_conga_364c43eeaa/document_card.md"
+    ]
+  },
+  {
+    "query": "DCQCN 和 RDMA 拥塞控制相关资料在哪里？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_dcqcn_320ce06a5a/document_card.md"
+    ]
+  },
+  {
+    "query": "IRN 这篇论文和 RoCE、PFC 有什么关系？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_irn_2905b6aff8/document_card.md"
+    ]
+  },
+  {
+    "query": "有哪些资料讲 flowlet switching 或 LetFlow？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_letflow_a638279cce/document_card.md",
+      "tenants/RDMA/cards/paper_pdf_conga_364c43eeaa/document_card.md"
+    ]
+  },
+  {
+    "query": "ConWeave 是如何支持 RDMA 网络负载均衡的？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_conweave_a62ab49b37/document_card.md"
+    ]
+  },
+  {
+    "query": "哪篇文档讨论了低延迟数据中心网络中的 micro load balancing？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_drill_df47f40b18/document_card.md"
+    ]
+  },
+  {
+    "query": "Hedera dynamic flow scheduling data center networks",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_hedera_6bd251b58f/document_card.md"
+    ]
+  },
+  {
+    "query": "LCMP inter-datacenter RDMA multi-path routing",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_lcmp_7d461814cd/document_card.md"
+    ]
+  },
+  {
+    "query": "NCCL GPU communication protocols and InfiniBand",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_nccl_b3e043a155/document_card.md"
+    ]
+  },
+  {
+    "query": "Megatron-LM model parallelism transformer training",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_megatron_776007a72a/document_card.md"
+    ]
+  },
+  {
+    "query": "SGLB global load balancing AI clusters",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_sglb_7607fdbdf4/document_card.md"
+    ]
+  },
+  {
+    "query": "TCP incast throughput collapse datacenter networks",
+    "expected_filenames": [
+      "tenants/RDMA/cards/paper_pdf_incast_7fb8b1167d/document_card.md"
+    ]
+  },
+  {
+    "query": "段佳兵第四次高级专题讲了哪些 RDMA traffic engineering 方法？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/duanjiabing_547a0dcdd0/document_card.md"
+    ]
+  },
+  {
+    "query": "段佳兵第五次高级专题和 FIGRET MicroTE 有关吗？",
+    "expected_filenames": [
+      "tenants/RDMA/cards/duanjiabing_53ef1605fb/document_card.md"
+    ]
+  }
+]

@@ -14,7 +14,7 @@
 #include "rag/embedder.h"
 #include "rag/vector_index.h"
 #include "rag/bm25_index.h"
-#include "rag/query_filter.h"
+#include "rag/query_rewriter.h"
 #include "persistence/mysql_pool.h"
 #include "persistence/rag_document_repository.h"
 
@@ -47,6 +47,8 @@ public:
     void set_embedder(std::unique_ptr<Embedder> embedder);
     bool load_embedding_model(const std::string& model_path);
     void set_mysql_pool(MysqlPool* pool);
+    void set_query_rewriter(std::unique_ptr<QueryRewriter> query_rewriter);
+    QueryRewriteResult rewrite_query(const std::string& query) const;
 
     int add_document(int tenant_id, const std::string& filename,
                      const std::string& content, const std::string& category = "",
@@ -63,6 +65,10 @@ public:
                                         int top_k = 5,
                                         int tenant_id = -1);
 
+    std::vector<SearchResult> retrieve_prepared(const QueryRewriteResult& query,
+                                                int top_k = 5,
+                                                int tenant_id = -1);
+
     std::vector<SearchResult> vector_only_search(const std::string& query,
                                                   int top_k = 5,
                                                   int tenant_id = -1);
@@ -74,6 +80,11 @@ public:
                                                 int top_k = 5,
                                                 int tenant_id = -1,
                                                 int oversample = 3);
+
+    std::vector<ParentResult> retrieve_parents_prepared(const QueryRewriteResult& query,
+                                                         int top_k = 5,
+                                                         int tenant_id = -1,
+                                                         int oversample = 3);
 
     std::string build_rag_prompt(const std::string& query,
                                   int tenant_id = -1,
@@ -112,10 +123,10 @@ private:
 
     Chunker chunker_;
     std::unique_ptr<Embedder> embedder_;
+    std::unique_ptr<QueryRewriter> query_rewriter_;
     VectorIndex index_;
     Bm25Index bm25_;
     std::unordered_map<int, Document> documents_;
-    std::unordered_set<std::string> known_dishes_;
     MysqlPool* mysql_pool_ = nullptr;
     std::unique_ptr<RagDocumentRepository> document_repository_;
     std::string storage_dir_;

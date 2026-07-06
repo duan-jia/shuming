@@ -1,6 +1,4 @@
 #include "rag/document_store.h"
-#include "rag/query_filter.h"
-
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <sstream>
@@ -30,6 +28,22 @@ void RagService::set_mysql_pool(MysqlPool* pool) {
     } else {
         document_repository_.reset();
     }
+}
+
+void RagService::set_query_rewriter(std::unique_ptr<QueryRewriter> query_rewriter) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    query_rewriter_ = std::move(query_rewriter);
+}
+
+QueryRewriteResult RagService::rewrite_query(const std::string& query) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!query_rewriter_) {
+        QueryRewriteResult result;
+        result.original_query = query;
+        result.search_query = query;
+        return result;
+    }
+    return query_rewriter_->rewrite(query);
 }
 
 bool RagService::save_all() {
@@ -246,7 +260,6 @@ bool RagService::process_document_job(const DocumentJob& job, bool save) {
         index_.add(embedding, entry, chunk_id);
         bm25_.add(job.doc_id, chunk.chunk_index, chunk.content, chunk.metadata,
                   job.tenant_id, job.visibility);
-        known_dishes_.insert(chunk.metadata.dish);
         indexed_count++;
     }
 
@@ -350,17 +363,37 @@ std::vector<SearchResult> RagService::vector_only_search(const std::string& quer
     if (!embedder_ || !embedder_->is_loaded()) return {};
     auto emb = embedder_->embed(query);
     if (emb.empty()) return {};
-    return index_.search(emb, top_k, tenant_id);
+    auto results = index_.search(emb, top_k, tenant_id);
+    for (auto& r : results) {
+        auto doc_it = documents_.find(r.doc_id);
+        if (doc_it != documents_.end()) {
+            r.filename = doc_it->second.filename;
+        }
+    }
+    return results;
 }
 
 std::vector<SearchResult> RagService::bm25_only_search(const std::string& query, int top_k,
                                                         int tenant_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    return bm25_.search(query, top_k, tenant_id);
+    auto results = bm25_.search(query, top_k, tenant_id);
+    for (auto& r : results) {
+        auto doc_it = documents_.find(r.doc_id);
+        if (doc_it != documents_.end()) {
+            r.filename = doc_it->second.filename;
+        }
+    }
+    return results;
 }
 
 std::vector<SearchResult> RagService::retrieve(const std::string& query, int top_k,
                                                  int tenant_id) {
+    return retrieve_prepared(rewrite_query(query), top_k, tenant_id);
+}
+
+std::vector<SearchResult> RagService::retrieve_prepared(const QueryRewriteResult& rewritten_query,
+                                                          int top_k,
+                                                          int tenant_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     if (!embedder_ || !embedder_->is_loaded()) {
@@ -368,12 +401,13 @@ std::vector<SearchResult> RagService::retrieve(const std::string& query, int top
         return {};
     }
 
-    auto query_emb = embedder_->embed(query);
+    std::string search_query = rewritten_query.combined_query();
+    auto query_emb = embedder_->embed(search_query);
     if (query_emb.empty()) return {};
 
     int oversample = std::max(top_k, 5) * 3;
     auto vec_results = index_.search(query_emb, oversample, tenant_id);
-    auto bm25_results = bm25_.search(query, oversample, tenant_id);
+    auto bm25_results = bm25_.search(search_query, oversample, tenant_id);
 
     const double k_rrf = 60.0;
     auto make_key = [](int doc, int chunk) -> uint64_t {
@@ -404,36 +438,17 @@ std::vector<SearchResult> RagService::retrieve(const std::string& query, int top
     std::sort(ranked.begin(), ranked.end(),
               [](const auto& a, const auto& b) { return a.second > b.second; });
 
-    auto filter = parse_query_filters(query, known_dishes_);
-
     std::vector<SearchResult> results;
     for (size_t i = 0; i < ranked.size(); ++i) {
         auto it = entry_map.find(ranked[i].first);
         if (it == entry_map.end()) continue;
 
-        if (filter.active()) {
-            const auto& meta = it->second->metadata;
-            int stars = 0;
-            for (size_t ci = 0; ci < meta.difficulty.size(); ) {
-                unsigned char c = static_cast<unsigned char>(meta.difficulty[ci]);
-                if (c == 0xE2 && ci + 2 < meta.difficulty.size() &&
-                    static_cast<unsigned char>(meta.difficulty[ci+1]) == 0x98 &&
-                    static_cast<unsigned char>(meta.difficulty[ci+2]) == 0x85) {
-                    stars++;
-                    ci += 3;
-                } else {
-                    ci++;
-                }
-            }
-            if (filter.min_difficulty > 0 && stars < filter.min_difficulty) continue;
-            if (filter.max_difficulty > 0 && stars > filter.max_difficulty) continue;
-            if (!filter.dish_keyword.empty() &&
-                meta.dish.find(filter.dish_keyword) == std::string::npos) continue;
-            if (!filter.category.empty() && meta.category != filter.category) continue;
-        }
-
         SearchResult r = *it->second;
         r.score = static_cast<float>(ranked[i].second);
+        auto doc_it = documents_.find(r.doc_id);
+        if (doc_it != documents_.end()) {
+            r.filename = doc_it->second.filename;
+        }
         results.push_back(r);
         if (static_cast<int>(results.size()) >= top_k) break;
     }
@@ -445,7 +460,8 @@ std::string RagService::build_rag_prompt(const std::string& query,
                                            int tenant_id,
                                            int top_k) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    auto results = retrieve(query, top_k, tenant_id);
+    auto rewritten = rewrite_query(query);
+    auto results = retrieve_prepared(rewritten, top_k, tenant_id);
     if (results.empty()) return query;
 
     std::ostringstream oss;
@@ -454,14 +470,21 @@ std::string RagService::build_rag_prompt(const std::string& query,
 
     for (size_t i = 0; i < results.size(); ++i) {
         auto& r = results[i];
-        oss << "[" << (i + 1) << "] " << r.metadata.category << "/"
-            << r.metadata.dish << " " << r.metadata.difficulty
-            << " (relevance: " << std::fixed << std::setprecision(3) << r.score << ")\n";
+        std::string filename = r.filename.empty()
+            ? ("document #" + std::to_string(r.doc_id))
+            : r.filename;
+        oss << "[" << (i + 1) << "] " << filename
+            << " (chunk " << r.chunk_index
+            << ", relevance: " << std::fixed << std::setprecision(3) << r.score << ")\n";
         oss << r.content << "\n\n";
     }
 
     oss << "=== User Question ===\n";
     oss << query << "\n\n";
+    if (rewritten.rewritten && rewritten.search_query != query) {
+        oss << "=== Search Query Used For Retrieval ===\n";
+        oss << rewritten.combined_query() << "\n\n";
+    }
     oss << "Please answer based on the reference documents above. "
         << "If the documents don't contain relevant information, say so.\n";
 
@@ -472,8 +495,15 @@ std::vector<ParentResult> RagService::retrieve_parents(const std::string& query,
                                                          int top_k,
                                                          int tenant_id,
                                                          int oversample) {
+    return retrieve_parents_prepared(rewrite_query(query), top_k, tenant_id, oversample);
+}
+
+std::vector<ParentResult> RagService::retrieve_parents_prepared(const QueryRewriteResult& query,
+                                                                 int top_k,
+                                                                 int tenant_id,
+                                                                 int oversample) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    auto chunks = retrieve(query, top_k * oversample, tenant_id);
+    auto chunks = retrieve_prepared(query, top_k * oversample, tenant_id);
     if (chunks.empty()) return {};
 
     std::unordered_map<int, std::pair<int, float>> stats;
@@ -523,7 +553,8 @@ std::string RagService::build_rag_prompt_from_parents(const std::string& query,
                                                          int tenant_id,
                                                          int top_k) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    auto parents = retrieve_parents(query, top_k, tenant_id);
+    auto rewritten = rewrite_query(query);
+    auto parents = retrieve_parents_prepared(rewritten, top_k, tenant_id);
     if (parents.empty()) return query;
 
     std::ostringstream oss;
@@ -532,8 +563,10 @@ std::string RagService::build_rag_prompt_from_parents(const std::string& query,
 
     for (size_t i = 0; i < parents.size(); ++i) {
         auto& p = parents[i];
-        oss << "[" << (i + 1) << "] " << p.metadata.category << "/"
-            << p.metadata.dish << " " << p.metadata.difficulty
+        std::string filename = p.filename.empty()
+            ? ("document #" + std::to_string(p.doc_id))
+            : p.filename;
+        oss << "[" << (i + 1) << "] " << filename
             << " (" << p.matched_chunks << " matching sections"
             << ", best score: " << std::fixed << std::setprecision(3) << p.max_score << ")\n";
         oss << p.content << "\n\n";
@@ -541,6 +574,10 @@ std::string RagService::build_rag_prompt_from_parents(const std::string& query,
 
     oss << "=== User Question ===\n";
     oss << query << "\n\n";
+    if (rewritten.rewritten && rewritten.search_query != query) {
+        oss << "=== Search Query Used For Retrieval ===\n";
+        oss << rewritten.combined_query() << "\n\n";
+    }
     oss << "Please answer based on the reference documents above. "
         << "If the documents don't contain relevant information, say so.\n";
 

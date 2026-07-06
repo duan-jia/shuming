@@ -38,7 +38,12 @@
     "system_prompt": "You are a helpful AI assistant for lab internal use."
   },
   "rag": {
-    "storage_dir": "data/rag"
+    "storage_dir": "data/rag",
+    "query_rewrite": {
+      "enabled": true,
+      "model": "deepseek-v4-flash",
+      "timeout_seconds": 10
+    }
   },
   "rate_limiter": {
     "rules": [

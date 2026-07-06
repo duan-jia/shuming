@@ -26,6 +26,7 @@ struct SearchResult {
     int doc_id;
     int chunk_index;
     float score;
+    std::string filename;
     std::string content;
     ChunkMetadata metadata;
 };
