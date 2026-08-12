@@ -33,3 +33,10 @@ __pycache__/
 # Core dumps
 *.core
 core
+
+# Local agent skills
+.agents/
+skills-lock.json
+
+# Agent change records
+.tmp/
