@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fast LLM Reasoner</title>
+<title>EMOS</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f9fafb; }
@@ -33,8 +33,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .sidebar-footer button { background: none; border: none; color: #9ca3af; cursor: pointer; font-size: 0.75rem; }
 .sidebar-footer button:hover { color: #fff; }
 .main { flex: 1; display: flex; flex-direction: column; }
-.header { background: #fff; border-bottom: 1px solid #e5e7eb; padding: 0.75rem 1rem; display: flex; align-items: center; gap: 0.75rem; }
-.header button { background: none; border: none; color: #6b7280; cursor: pointer; font-size: 1rem; }
+.header { background: #fff; border-bottom: 1px solid #e5e7eb; padding: 0.75rem 1rem; display: flex; align-items: center; }
 .header h1 { font-weight: 700; font-size: 1.125rem; }
 .messages { flex: 1; overflow-y: auto; padding: 1rem; max-width: 48rem; margin: 0 auto; width: 100%; }
 .messages-empty { text-align: center; color: #9ca3af; margin-top: 5rem; }
@@ -45,9 +44,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .msg-bubble { display: inline-block; max-width: 80%; padding: 0.75rem; border-radius: 0.5rem; font-size: 0.875rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .msg.user .msg-bubble { background: #2563eb; color: #fff; }
 .msg.assistant .msg-bubble { background: #fff; border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-.reasoning-toggle { font-size: 0.75rem; color: #6b7280; cursor: pointer; border: none; background: none; display: flex; align-items: center; gap: 0.25rem; margin-bottom: 0.5rem; }
-.reasoning-toggle:hover { color: #374151; }
-.reasoning-content { font-size: 0.75rem; color: #6b7280; background: #f9fafb; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem; white-space: pre-wrap; }
 .cursor { display: inline-block; width: 0.5rem; height: 1rem; background: #9ca3af; animation: blink 1s infinite; margin-left: 0.25rem; vertical-align: middle; }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 .input-bar { border-top: 1px solid #e5e7eb; background: #fff; padding: 1rem; }
@@ -63,40 +59,39 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 
 <div id="login-page" class="login-page">
   <div class="login-box">
-    <h1>Fast LLM Reasoner</h1>
-    <p>Enterprise Private LLM Platform</p>
+    <h1>EMOS</h1>
+    <p>内部资料问答</p>
     <div id="login-error" class="login-error" style="display:none"></div>
-    <input id="username" placeholder="Username" autocomplete="username" />
-    <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
-    <button id="login-btn">Login</button>
+    <input id="username" placeholder="用户名" autocomplete="username" />
+    <input id="password" type="password" placeholder="密码" autocomplete="current-password" />
+    <button id="login-btn">登录</button>
   </div>
 </div>
 
 <div id="app-page" class="app" style="display:none">
   <div id="sidebar" class="sidebar">
     <div class="sidebar-header">
-      <button id="new-chat-btn">+ New Chat</button>
+      <button id="new-chat-btn">新建对话</button>
     </div>
     <div id="session-list" class="sidebar-sessions"></div>
     <div class="sidebar-footer">
-      <button id="logout-btn">Logout</button>
+      <button id="logout-btn">退出</button>
     </div>
   </div>
   <div class="main">
     <div class="header">
-      <button id="toggle-sidebar">&#9664;</button>
-      <h1>Fast LLM Reasoner</h1>
+      <h1>对话</h1>
     </div>
     <div id="messages" class="messages">
       <div class="messages-empty">
-        <p>Start a conversation</p>
-        <p>Ask questions to the local LLM</p>
+        <p>暂无消息</p>
+        <p>输入问题开始对话。</p>
       </div>
     </div>
     <div class="input-bar">
       <div class="input-bar-inner">
-        <input id="msg-input" placeholder="Type a message..." />
-        <button id="send-btn">Send</button>
+        <input id="msg-input" placeholder="输入问题" />
+        <button id="send-btn">发送</button>
       </div>
     </div>
   </div>
@@ -137,11 +132,11 @@ async function doLogin() {
       $('login-error').style.display = 'none';
       loadSessions();
     } else {
-      $('login-error').textContent = data.error || 'Login failed';
+      $('login-error').textContent = data.error || '登录失败';
       $('login-error').style.display = 'block';
     }
   } catch (e) {
-    $('login-error').textContent = 'Network error: ' + e.message;
+    $('login-error').textContent = '暂时无法登录，请稍后再试。';
     $('login-error').style.display = 'block';
   }
 }
@@ -156,20 +151,14 @@ $('logout-btn').onclick = function() {
 
 $('new-chat-btn').onclick = async function() {
   try {
-    var res = await api('/api/sessions', { method: 'POST', body: { title: 'New Chat' } });
+    var res = await api('/api/sessions', { method: 'POST', body: { title: '新对话' } });
     var data = await res.json();
     if (data.id) {
       activeSession = data.id;
-      $('messages').innerHTML = '<div class="messages-empty"><p>Start a conversation</p><p>Ask questions to the local LLM</p></div>';
+      $('messages').innerHTML = '<div class="messages-empty"><p>暂无消息</p><p>输入问题开始对话。</p></div>';
       loadSessions();
     }
   } catch (e) {}
-};
-
-$('toggle-sidebar').onclick = function() {
-  var sb = $('sidebar');
-  sb.style.display = sb.style.display === 'none' ? 'flex' : 'none';
-  this.textContent = sb.style.display === 'none' ? '\u25B6' : '\u25C4';
 };
 
 $('send-btn').onclick = doSend;
@@ -194,7 +183,7 @@ function renderSessions() {
     html += '<span class="del" onclick="deleteSession(\'' + s.id + '\', event)">x</span>';
     html += '</div>';
   }
-  if (sessions.length === 0) html = '<div class="sidebar-empty">No sessions yet</div>';
+  if (sessions.length === 0) html = '<div class="sidebar-empty">暂无会话</div>';
   $('session-list').innerHTML = html;
 }
 
@@ -209,9 +198,9 @@ window.switchSession = async function(id) {
     var html = '';
     for (var i = 0; i < msgs.length; i++) {
       var m = msgs[i];
-      html += renderMsg(m.role, m.content, m.reasoning || '', false);
+      html += renderMsg(m.role, m.content, false);
     }
-    if (msgs.length === 0) html = '<div class="messages-empty"><p>Start a conversation</p><p>Ask questions to the local LLM</p></div>';
+    if (msgs.length === 0) html = '<div class="messages-empty"><p>暂无消息</p><p>输入问题开始对话。</p></div>';
     $('messages').innerHTML = html;
   } catch (e) {}
 };
@@ -222,7 +211,7 @@ window.deleteSession = async function(id, e) {
     await api('/api/sessions/' + id, { method: 'DELETE' });
     if (activeSession === id) {
       activeSession = '';
-      $('messages').innerHTML = '<div class="messages-empty"><p>Start a conversation</p><p>Ask questions to the local LLM</p></div>';
+      $('messages').innerHTML = '<div class="messages-empty"><p>暂无消息</p><p>输入问题开始对话。</p></div>';
     }
     loadSessions();
   } catch (e) {}
@@ -234,13 +223,8 @@ function escHtml(s) {
   return d.innerHTML;
 }
 
-function renderMsg(role, content, reasoning, streaming) {
+function renderMsg(role, content, streaming) {
   var h = '<div class="msg ' + role + '"><div class="msg-bubble">';
-  if (role === 'assistant' && reasoning) {
-    var rid = 'r' + Math.random().toString(36).substr(2, 8);
-    h += '<button class="reasoning-toggle" onclick="var c=document.getElementById(\'' + rid + '\');c.style.display=c.style.display===\'none\'?\'block\':\'none\';this.textContent=this.textContent[0]===\'\u25B6\'?\'\u25BC Reasoning\':\'\u25B6 Reasoning\'">\u25B6 Reasoning</button>';
-    h += '<div id="' + rid + '" class="reasoning-content" style="display:none">' + escHtml(reasoning) + '</div>';
-  }
   h += escHtml(content);
   if (streaming) h += '<span class="cursor"></span>';
   h += '</div></div>';
@@ -265,14 +249,12 @@ async function doSend() {
   var emptyEl = document.querySelector('.messages-empty');
   if (emptyEl) emptyEl.remove();
 
-  $('messages').insertAdjacentHTML('beforeend', renderMsg('user', text, '', false));
+  $('messages').insertAdjacentHTML('beforeend', renderMsg('user', text, false));
   var streamId = 'stream-' + Date.now();
   $('messages').insertAdjacentHTML('beforeend', '<div id="' + streamId + '" class="msg assistant"><div class="msg-bubble"><span class="cursor"></span></div></div>');
   $('msg-input').value = '';
 
   var streamContent = '';
-  var streamReasoning = '';
-
   try {
     var res = await api('/api/chat/stream', { method: 'POST', body: { message: text, session_id: sid } });
     var reader = res.body.getReader();
@@ -295,8 +277,7 @@ async function doSend() {
         if (payload === '[DONE]') { finished = true; break; }
         try {
           var parsed = JSON.parse(payload);
-          if (parsed.type === 'reasoning') streamReasoning += parsed.content;
-          else if (parsed.type === 'answer') streamContent += parsed.content;
+          if (parsed.type === 'answer') streamContent += parsed.content;
           else if (parsed.type === 'error') streamContent += parsed.error || 'Error';
         } catch (e) {}
       }
@@ -304,11 +285,6 @@ async function doSend() {
       var el = $(streamId);
       if (el) {
         var inner = '<div class="msg-bubble">';
-        if (streamReasoning) {
-          var rid = streamId + '-r';
-          inner += '<button class="reasoning-toggle" onclick="var c=document.getElementById(\'' + rid + '\');c.style.display=c.style.display===\'none\'?\'block\':\'none\';this.textContent=this.textContent[0]===\'\u25B6\'?\'\u25BC Reasoning\':\'\u25B6 Reasoning\'">\u25B6 Reasoning</button>';
-          inner += '<div id="' + rid + '" class="reasoning-content" style="display:none">' + escHtml(streamReasoning) + '</div>';
-        }
         inner += escHtml(streamContent);
         inner += '<span class="cursor"></span>';
         inner += '</div>';
@@ -319,18 +295,13 @@ async function doSend() {
     var el = $(streamId);
     if (el) {
       var inner = '<div class="msg-bubble">';
-      if (streamReasoning) {
-        var rid = streamId + '-r';
-        inner += '<button class="reasoning-toggle" onclick="var c=document.getElementById(\'' + rid + '\');c.style.display=c.style.display===\'none\'?\'block\':\'none\';this.textContent=this.textContent[0]===\'\u25B6\'?\'\u25BC Reasoning\':\'\u25B6 Reasoning\'">\u25B6 Reasoning</button>';
-        inner += '<div id="' + rid + '" class="reasoning-content" style="display:none">' + escHtml(streamReasoning) + '</div>';
-      }
       inner += escHtml(streamContent);
       inner += '</div>';
       el.innerHTML = inner;
     }
   } catch (e) {
     var el = $(streamId);
-    if (el) el.innerHTML = '<div class="msg-bubble">Network error: ' + escHtml(e.message) + '</div>';
+    if (el) el.innerHTML = '<div class="msg-bubble">暂时无法生成答案，请稍后再试。</div>';
   }
 
   loading = false;
