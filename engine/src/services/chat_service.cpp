@@ -129,7 +129,6 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         infer_req->engine = engine;
 
         auto utf8_buf = std::make_shared<std::string>();
-        auto reasoning_buf = std::make_shared<std::string>();
 
         infer_req->on_token = [sse, utf8_buf](const std::string& token) {
             if (!sse->is_active()) return;
@@ -164,18 +163,17 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             }
         };
 
-        infer_req->on_reasoning = [sse, reasoning_buf](const std::string& token) {
+        infer_req->on_reasoning = [sse](const std::string& token) {
             if (!sse->is_active()) return;
-            *reasoning_buf += token;
             nlohmann::json j;
             j["type"] = "reasoning";
             try {
-                j["content"] = *reasoning_buf;
+                j["content"] = token;
                 sse->send_event("message", j.dump());
             } catch (...) {}
         };
 
-        infer_req->on_done = [ctx, sse, utf8_buf, reasoning_buf, message, session_id, request_id, bill_tenant, bill_user](const InferResult& result) {
+        infer_req->on_done = [ctx, sse, utf8_buf, message, session_id, request_id, bill_tenant, bill_user](const InferResult& result) {
             int total_tokens = result.prompt_tokens + result.completion_tokens;
             BillingService::ChargeResult charge_result;
             if (ctx->billing_service && total_tokens > 0) {
@@ -200,12 +198,6 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
                 j["content"] = *utf8_buf;
                 sse->send_event("message", j.dump());
                 utf8_buf->clear();
-            }
-            if (!reasoning_buf->empty()) {
-                nlohmann::json j;
-                j["type"] = "reasoning";
-                j["content"] = *reasoning_buf;
-                try { sse->send_event("message", j.dump()); } catch (...) {}
             }
 
             nlohmann::json j;
