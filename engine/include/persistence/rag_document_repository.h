@@ -36,7 +36,10 @@ public:
     int insert_processing_document(int tenant_id, const std::string& filename,
                                    const std::string& content,
                                    const std::string& visibility,
-                                   int uploaded_by);
+                                   int uploaded_by,
+                                   const std::string& source_filename = "",
+                                   const std::string& source_storage_name = "",
+                                   std::uint64_t source_size_bytes = 0);
     bool insert_chunk(int document_id, int tenant_id, int chunk_index,
                       const std::string& content, const std::string& visibility,
                       int64_t& chunk_id);

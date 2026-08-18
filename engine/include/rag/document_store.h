@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <memory>
@@ -54,12 +55,18 @@ public:
                      const std::string& content, const std::string& category = "",
                      const std::string& visibility = "group",
                      int uploaded_by = 0,
-                     bool save = true);
+                     bool save = true,
+                     const std::string& source_filename = "",
+                     const std::string& source_storage_name = "",
+                     std::uint64_t source_size_bytes = 0);
     int enqueue_document(int tenant_id, const std::string& filename,
                          const std::string& content, const std::string& category = "",
                          const std::string& visibility = "group",
-                         int uploaded_by = 0);
-    void remove_document(int doc_id);
+                         int uploaded_by = 0,
+                         const std::string& source_filename = "",
+                         const std::string& source_storage_name = "",
+                         std::uint64_t source_size_bytes = 0);
+    bool remove_document(int doc_id);
 
     std::vector<SearchResult> retrieve(const std::string& query,
                                         int top_k = 5,
@@ -119,7 +126,10 @@ private:
     int insert_processing_document(int tenant_id, const std::string& filename,
                                    const std::string& content,
                                    const std::string& visibility,
-                                   int uploaded_by);
+                                   int uploaded_by,
+                                   const std::string& source_filename = "",
+                                   const std::string& source_storage_name = "",
+                                   std::uint64_t source_size_bytes = 0);
 
     Chunker chunker_;
     std::unique_ptr<Embedder> embedder_;
@@ -127,6 +137,7 @@ private:
     VectorIndex index_;
     Bm25Index bm25_;
     std::unordered_map<int, Document> documents_;
+    std::unordered_set<int> deleted_documents_;
     MysqlPool* mysql_pool_ = nullptr;
     std::unique_ptr<RagDocumentRepository> document_repository_;
     std::string storage_dir_;

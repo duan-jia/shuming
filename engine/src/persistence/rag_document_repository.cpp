@@ -74,19 +74,32 @@ int RagDocumentRepository::insert_processing_document(int tenant_id,
                                                       const std::string& filename,
                                                       const std::string& content,
                                                       const std::string& visibility,
-                                                      int uploaded_by) {
+                                                      int uploaded_by,
+                                                      const std::string& source_filename,
+                                                      const std::string& source_storage_name,
+                                                      std::uint64_t source_size_bytes) {
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) {
         spdlog::error("Cannot acquire MySQL connection");
         return -1;
     }
 
-    std::string sql = "INSERT INTO documents (tenant_id, filename, content, visibility, uploaded_by, status) VALUES ("
+    std::string source_filename_sql = source_filename.empty()
+        ? "NULL" : "'" + escape_sql(conn->raw(), source_filename) + "'";
+    std::string source_storage_sql = source_storage_name.empty()
+        ? "NULL" : "'" + escape_sql(conn->raw(), source_storage_name) + "'";
+    std::string source_size_sql = source_filename.empty()
+        ? "NULL" : std::to_string(source_size_bytes);
+    std::string sql = "INSERT INTO documents (tenant_id, filename, content, visibility, uploaded_by, "
+        "source_filename, source_storage_name, source_size_bytes, status) VALUES ("
         + std::to_string(tenant_id) + ",'"
         + escape_sql(conn->raw(), filename) + "','"
         + escape_sql(conn->raw(), content) + "','"
         + escape_sql(conn->raw(), visibility) + "',"
-        + std::to_string(uploaded_by) + ",'processing')";
+        + std::to_string(uploaded_by) + ","
+        + source_filename_sql + ","
+        + source_storage_sql + ","
+        + source_size_sql + ",'processing')";
     if (!conn->execute(sql)) {
         mysql_.release(conn);
         spdlog::error("Failed to insert document");
