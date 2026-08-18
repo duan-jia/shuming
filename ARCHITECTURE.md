@@ -92,53 +92,36 @@ token 限额以用户为主，租户表中的 `token_limit_daily` 表示该 tena
 
 ## 6. RAG 文档导入流程
 
-当前 RAG v2 采用 document_card-only 策略：不把 PDF/PPT/DOCX 全文直接入库，而是先生成轻量 `document_card`，再把 card 导入 RAG。
-
-`document_card` 的主要语义字段使用英文，包括 title、keywords、summary、main_contribution、useful_for 和 questions_answered；同时保留 aliases，用于中文姓名、中文标题、拼音、缩写和原始文件名。这样可以减少 BM25 对中文分词的依赖，同时保留实验室场景中常见的人名和中文题名入口。
-
-后台预导入流程：
+文档入口只支持 PDF。系统保留源 PDF 和最终文档卡片，不保存全文转换稿、治理清单或
+批量导入 manifest：
 
 ```text
-原始文件：data/public 或 data/tenants/RDMA
+用户上传 PDF → data/pdfs
 ↓
-生成卡片：data/document_cards/public 或 data/document_cards/tenants/RDMA
+scripts/pdf_to_markdown.py 抽取文本并调用远程大模型
 ↓
-生成治理清单：data/governance/public 或 data/governance/tenants/RDMA
+data/processed 中生成同名 Markdown 和 JSON
 ↓
-批量导入：scripts/import_rag_manifest.py
+Markdown 提交 POST /api/documents，visibility=group
 ↓
-写入 documents/document_chunks，并更新 FAISS + BM25
+写入 documents/document_chunks，更新 data/rag 中的 FAISS/BM25
 ```
 
-`data/governance/...` 的作用是治理中间层：检查哪些源文件已经生成 card，输出导入清单和治理报告，避免导入脚本盲扫目录。`data/public` 导入为 `public`；`data/tenants/<tenant>` 导入为当前代码中的 `group`，业务语义是 tenant 内共享。
-
-租户上传文档流程应与后台导入复用同一套后端文档模型，但导入时设置为 tenant/group 可见：
-
-```text
-用户上传文件
-↓
-保存 document 记录，status=processing
-↓
-生成 document_card
-↓
-切块、向量化、写入 document_chunks
-↓
-更新 FAISS/BM25
-↓
-status=ready
-```
+Markdown 用于 RAG，JSON 用于记录来源哈希、生成模型和结构化摘要。无法提取文本的扫描版
+PDF 会停止在压缩阶段，不进入 RAG。
 
 ## 7. 检索架构
 
 RAG 检索由 `engine/src/rag/` 负责，采用混合检索：
 
-- QueryRewriter：将用户中文或混合语言 query 重写为英文检索 query，并保留 aliases 与原始 query；失败时回退原始 query。
+- QueryRewriter：将用户中文或混合语言 query 重写为英文检索 query，并保留原始 query；失败时回退原始 query。
 - FAISS：对 card/chunk 内容做向量召回。
-- BM25：对英文关键词、缩写、aliases 和必要中文姓名做词面召回。
+- BM25：对标题、英文关键词、缩写和正文摘要做词面召回。
 - 权限过滤：检索时只返回 `public` 文档或当前用户 tenant 下的 `group` 文档。
 - DocumentStore：统一管理文档、chunk、向量索引和 BM25 索引。
 
-因为当前只导入 `document_card.md`，aliases、summary、keywords、main_contribution、questions_answered 等增强字段都会参与向量检索和 BM25 检索。该策略适合“找某个师兄做过什么”“哪篇文档提到某方向”的实验室检索场景。
+RAG 只导入压缩后的 Markdown；标题、关键词、Summary、Key Takeaways 和 Scope and Positioning
+都会参与向量检索和 BM25 检索。精确数字、公式和原文措辞仍应回到源 PDF 核验。
 
 早期菜谱场景中的类别、难度、菜名过滤不属于通用文档 RAG 默认逻辑，后续如需领域过滤，应以独立插件或显式 metadata filter 的方式加入。
 
@@ -147,7 +130,7 @@ RAG 检索由 `engine/src/rag/` 负责，采用混合检索：
 当前系统依赖：
 
 - MySQL：主业务数据、会话、消息、文档元数据、计费记录。
-- 本地文件：原始资料、document cards、模型文件、配置文件。
+- 本地文件：源 PDF、压缩后的 Markdown/JSON、模型文件、配置文件。
 - 进程内索引：FAISS 与 BM25 索引文件位于 `rag.storage_dir`。
 - 本地/远程模型：优先本地 llama.cpp 推理，可配置远程模型 fallback。
 
@@ -157,10 +140,10 @@ RAG 检索由 `engine/src/rag/` 负责，采用混合检索：
 
 短期优先级：
 
-1. 将当前 English document_card + aliases RAG 流程作为稳定主线，持续用 `validate_rag_import.py` 回归。
+1. 稳定 PDF 压缩卡片的生成质量，并用固定检索问题做轻量回归。
 2. 明确文档 visibility 命名，代码中的 `group` 可逐步迁移为更直观的 `tenant`。
 3. 完善用户上传文档的状态机和失败重试。
-4. 扩展 RAG 评测集，覆盖更多学生、论文和 public 文档查询。
+4. 扩展 RAG 评测集，覆盖更多论文和租户文档查询。
 5. 为 C++ 后端补充关键 service/repository 单元测试。
 
 中长期可以考虑：

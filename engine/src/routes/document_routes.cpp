@@ -15,6 +15,12 @@ void register_document_routes(HttpServer& server, DocumentService& documents, Au
         documents.list(user, resp);
     });
 
+    server.router().get("/api/documents/:id", [&documents, require_auth](const HttpRequest& req, RouteParams params, HttpResponse& resp) {
+        UserInfo user;
+        if (!require_auth(req, resp, user)) return;
+        documents.detail(params, user, resp);
+    });
+
     server.router().del("/api/documents/:id", [&documents, require_auth](const HttpRequest& req, RouteParams params, HttpResponse& resp) {
         UserInfo user;
         if (!require_auth(req, resp, user)) return;

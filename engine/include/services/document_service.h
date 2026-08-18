@@ -13,6 +13,7 @@ public:
 
     void upload(const HttpRequest& req, const UserInfo& user, HttpResponse& resp);
     void list(const UserInfo& user, HttpResponse& resp);
+    void detail(const RouteParams& params, const UserInfo& user, HttpResponse& resp);
     void remove(const RouteParams& params, const UserInfo& user, HttpResponse& resp);
     void search(const HttpRequest& req, const UserInfo& user, HttpResponse& resp);
 

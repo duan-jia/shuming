@@ -206,17 +206,26 @@ void RagService::worker_loop() {
 int RagService::insert_processing_document(int tenant_id, const std::string& filename,
                                            const std::string& content,
                                            const std::string& visibility,
-                                           int uploaded_by) {
+                                           int uploaded_by,
+                                           const std::string& source_filename,
+                                           const std::string& source_storage_name,
+                                           std::uint64_t source_size_bytes) {
     if (!document_repository_) {
         spdlog::error("MySQL pool not set, cannot insert document");
         return -1;
     }
     return document_repository_->insert_processing_document(
-        tenant_id, filename, content, visibility, uploaded_by);
+        tenant_id, filename, content, visibility, uploaded_by,
+        source_filename, source_storage_name, source_size_bytes);
 }
 
 bool RagService::process_document_job(const DocumentJob& job, bool save) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    if (deleted_documents_.count(job.doc_id) > 0) {
+        spdlog::info("Skipping deleted document job: id={}", job.doc_id);
+        return false;
+    }
 
     if (!embedder_ || !embedder_->is_loaded()) {
         spdlog::error("Embedding model not loaded, cannot process document {}", job.doc_id);
@@ -293,8 +302,12 @@ bool RagService::process_document_job(const DocumentJob& job, bool save) {
 
 int RagService::add_document(int tenant_id, const std::string& filename,
                                const std::string& content, const std::string& category,
-                               const std::string& visibility, int uploaded_by, bool save) {
-    int doc_id = insert_processing_document(tenant_id, filename, content, visibility, uploaded_by);
+                               const std::string& visibility, int uploaded_by, bool save,
+                               const std::string& source_filename,
+                               const std::string& source_storage_name,
+                               std::uint64_t source_size_bytes) {
+    int doc_id = insert_processing_document(tenant_id, filename, content, visibility, uploaded_by,
+                                            source_filename, source_storage_name, source_size_bytes);
     if (doc_id <= 0) return -1;
 
     DocumentJob job;
@@ -310,13 +323,17 @@ int RagService::add_document(int tenant_id, const std::string& filename,
 
 int RagService::enqueue_document(int tenant_id, const std::string& filename,
                                  const std::string& content, const std::string& category,
-                                 const std::string& visibility, int uploaded_by) {
+                                 const std::string& visibility, int uploaded_by,
+                                 const std::string& source_filename,
+                                 const std::string& source_storage_name,
+                                 std::uint64_t source_size_bytes) {
     if (!embedder_ || !embedder_->is_loaded()) {
         spdlog::error("Embedding model not loaded, cannot enqueue document");
         return -1;
     }
 
-    int doc_id = insert_processing_document(tenant_id, filename, content, visibility, uploaded_by);
+    int doc_id = insert_processing_document(tenant_id, filename, content, visibility, uploaded_by,
+                                            source_filename, source_storage_name, source_size_bytes);
     if (doc_id <= 0) return -1;
 
     DocumentJob job;
@@ -337,22 +354,25 @@ int RagService::enqueue_document(int tenant_id, const std::string& filename,
     return doc_id;
 }
 
-void RagService::remove_document(int doc_id) {
+bool RagService::remove_document(int doc_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
-    auto it = documents_.find(doc_id);
-    if (it == documents_.end()) return;
+    if (!document_repository_ || !document_repository_->mark_document_deleted(doc_id)) {
+        spdlog::error("Failed to mark document deleted: id={}", doc_id);
+        return false;
+    }
 
+    deleted_documents_.insert(doc_id);
+    auto it = documents_.find(doc_id);
     index_.remove_by_doc(doc_id);
     bm25_.remove_by_doc(doc_id);
     spdlog::info("Document removed: id={}", doc_id);
-    documents_.erase(it);
-
-    if (document_repository_) {
-        document_repository_->mark_document_deleted(doc_id);
+    if (it != documents_.end()) {
+        documents_.erase(it);
     }
 
     save_all();
+    return true;
 }
 
 std::vector<SearchResult> RagService::vector_only_search(const std::string& query,
