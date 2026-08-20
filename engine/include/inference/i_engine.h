@@ -23,6 +23,7 @@ struct InferParams {
 struct InferResult {
     std::string text;
     std::string reasoning;
+    std::string error;
     int prompt_tokens = 0;
     int completion_tokens = 0;
 };

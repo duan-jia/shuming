@@ -58,14 +58,21 @@ public:
                      bool save = true,
                      const std::string& source_filename = "",
                      const std::string& source_storage_name = "",
-                     std::uint64_t source_size_bytes = 0);
+                     std::uint64_t source_size_bytes = 0,
+                     const std::string& source_sha256 = "");
     int enqueue_document(int tenant_id, const std::string& filename,
                          const std::string& content, const std::string& category = "",
                          const std::string& visibility = "group",
                          int uploaded_by = 0,
                          const std::string& source_filename = "",
                          const std::string& source_storage_name = "",
-                         std::uint64_t source_size_bytes = 0);
+                         std::uint64_t source_size_bytes = 0,
+                         const std::string& source_sha256 = "",
+                         bool needs_review = false,
+                         const std::string& review_reason = "");
+    bool approve_document(int doc_id, int tenant_id, const std::string& filename,
+                          const std::string& content, const std::string& visibility,
+                          int uploaded_by);
     bool remove_document(int doc_id);
 
     std::vector<SearchResult> retrieve(const std::string& query,
@@ -129,7 +136,10 @@ private:
                                    int uploaded_by,
                                    const std::string& source_filename = "",
                                    const std::string& source_storage_name = "",
-                                   std::uint64_t source_size_bytes = 0);
+                                   std::uint64_t source_size_bytes = 0,
+                                   const std::string& source_sha256 = "",
+                                   bool needs_review = false,
+                                   const std::string& review_reason = "");
 
     Chunker chunker_;
     std::unique_ptr<Embedder> embedder_;

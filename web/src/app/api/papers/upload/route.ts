@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -40,6 +40,30 @@ function safePdfFilename(filename: string) {
   return sanitized && sanitized.toLowerCase() !== ".pdf" ? sanitized : "";
 }
 
+function truncateUtf8(value: string, maxBytes: number) {
+  let result = "";
+  let bytes = 0;
+  for (const character of value) {
+    const size = Buffer.byteLength(character, "utf8");
+    if (bytes + size > maxBytes) break;
+    result += character;
+    bytes += size;
+  }
+  return result;
+}
+
+function safeDocumentTitle(title: string | undefined, fallbackFilename: string) {
+  const fallback = path.parse(fallbackFilename).name;
+  const sanitized = (title || fallback)
+    .normalize("NFKC")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/\s+/g, " ")
+    .replace(/\.(?:pdf|md)$/i, "")
+    .replace(/[. ]+$/g, "")
+    .trim();
+  return truncateUtf8(sanitized || fallback || "document", 160);
+}
+
 async function tokenIsValid(authorization: string) {
   const backendBase = process.env.BACKEND_API_BASE || "http://127.0.0.1:9006";
   try {
@@ -58,8 +82,29 @@ type CompressionResult = {
   markdown_path?: string;
   json_path?: string;
   model?: string;
+  source_sha256?: string;
+  title?: string;
+  needs_review?: boolean;
+  review_reason?: string;
   error?: string;
 };
+
+type BackendDocumentResult = {
+  id?: number;
+  filename?: string;
+  status?: string;
+  error?: string;
+};
+
+class BackendRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly result: BackendDocumentResult
+  ) {
+    super(message);
+  }
+}
 
 async function compressPdf(destination: string): Promise<CompressionResult> {
   const outputDirectory = processedDirectory();
@@ -105,7 +150,10 @@ async function submitToRag(
   markdown: string,
   sourceFilename: string,
   sourceStorageName: string,
-  sourceSizeBytes: number
+  sourceSizeBytes: number,
+  sourceSha256: string,
+  needsReview: boolean,
+  reviewReason: string
 ) {
   const backendBase = process.env.BACKEND_API_BASE || "http://127.0.0.1:9006";
   const response = await fetch(`${backendBase.replace(/\/$/, "")}/api/documents`, {
@@ -121,17 +169,48 @@ async function submitToRag(
       source_filename: sourceFilename,
       source_storage_name: sourceStorageName,
       source_size_bytes: sourceSizeBytes,
+      source_sha256: sourceSha256,
+      needs_review: needsReview,
+      review_reason: reviewReason,
     }),
     cache: "no-store",
     signal: AbortSignal.timeout(60_000),
   });
-  const data = (await response.json().catch(() => ({}))) as {
-    id?: number;
-    status?: string;
-    error?: string;
-  };
+  const data = (await response.json().catch(() => ({}))) as BackendDocumentResult;
   if (!response.ok || !data.id) {
-    throw new Error(data.error || `RAG 接口返回 HTTP ${response.status}。`);
+    throw new BackendRequestError(
+      data.error || `RAG 接口返回 HTTP ${response.status}。`,
+      response.status,
+      data
+    );
+  }
+  return data;
+}
+
+async function findDuplicate(authorization: string, sourceSha256: string) {
+  const backendBase = process.env.BACKEND_API_BASE || "http://127.0.0.1:9006";
+  const response = await fetch(
+    `${backendBase.replace(/\/$/, "")}/api/documents/deduplicate`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: authorization,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ source_sha256: sourceSha256 }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+    }
+  );
+  const data = (await response.json().catch(() => ({}))) as BackendDocumentResult & {
+    duplicate?: boolean;
+  };
+  if (!response.ok) {
+    throw new BackendRequestError(
+      data.error || `文档查重接口返回 HTTP ${response.status}。`,
+      response.status,
+      data
+    );
   }
   return data;
 }
@@ -170,8 +249,32 @@ export async function POST(request: Request) {
     return Response.json({ error: "文件内容不是有效的 PDF。" }, { status: 415 });
   }
 
+  const sourceSha256 = createHash("sha256").update(bytes).digest("hex");
+  try {
+    const duplicate = await findDuplicate(authorization, sourceSha256);
+    if (duplicate.duplicate) {
+      return Response.json(
+        {
+          error: `该 PDF 已存在于文档库中（文档 #${duplicate.id}，状态：${duplicate.status}）。`,
+          document_id: duplicate.id,
+          filename: duplicate.filename,
+          status: duplicate.status,
+        },
+        { status: 409 }
+      );
+    }
+  } catch (error) {
+    return Response.json(
+      {
+        error: error instanceof Error ? `PDF 查重失败：${error.message}` : "PDF 查重失败。",
+      },
+      { status: error instanceof BackendRequestError ? error.status : 502 }
+    );
+  }
+
   const sourceDirectory = pdfDirectory();
-  const storageName = `${randomUUID()}.pdf`;
+  const uploadId = randomUUID();
+  const storageName = `${uploadId}.pdf`;
   const destination = path.join(sourceDirectory, storageName);
   try {
     await mkdir(sourceDirectory, { recursive: true });
@@ -180,7 +283,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "保存 PDF 失败。" }, { status: 500 });
   }
 
-  const generatedPaths: string[] = [];
+  const generatedPaths = new Set<string>();
   try {
     const compression = await compressPdf(destination);
     const markdownPath = path.resolve(/* turbopackIgnore: true */ compression.markdown_path || "");
@@ -197,21 +300,47 @@ export async function POST(request: Request) {
     if (markdownPath !== expectedMarkdownPath || jsonPath !== expectedJsonPath) {
       throw new Error("文档处理器返回了无效的输出路径。");
     }
-    generatedPaths.push(markdownPath, jsonPath);
-    const markdown = await readFile(markdownPath, "utf8");
-    const markdownFilename = `${path.parse(filename).name}.md`;
+    generatedPaths.add(markdownPath);
+    generatedPaths.add(jsonPath);
+    if (compression.source_sha256 !== sourceSha256) {
+      throw new Error("文档处理前后的 SHA-256 不一致。");
+    }
+
+    const title = safeDocumentTitle(compression.title, filename);
+    const titledStem = `${uploadId}--${title}`;
+    const sourceStorageName = `${titledStem}.pdf`;
+    const titledPdfPath = path.join(sourceDirectory, sourceStorageName);
+    const titledMarkdownPath = path.join(processedDirectory(), `${titledStem}.md`);
+    const titledJsonPath = path.join(processedDirectory(), `${titledStem}.json`);
+    generatedPaths.add(titledPdfPath);
+    generatedPaths.add(titledMarkdownPath);
+    generatedPaths.add(titledJsonPath);
+    await rename(destination, titledPdfPath);
+    await rename(markdownPath, titledMarkdownPath);
+    await rename(jsonPath, titledJsonPath);
+
+    const markdown = await readFile(titledMarkdownPath, "utf8");
+    const sourceFilename = `${title}.pdf`;
+    const markdownFilename = `${title}.md`;
+    const metadata = JSON.parse(await readFile(titledJsonPath, "utf8")) as Record<string, unknown>;
+    metadata.source_pdf = sourceFilename;
+    metadata.source_storage_name = sourceStorageName;
+    await writeFile(titledJsonPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
     const ragResult = await submitToRag(
       authorization,
       markdownFilename,
       markdown,
-      filename,
-      storageName,
-      file.size
+      sourceFilename,
+      sourceStorageName,
+      file.size,
+      sourceSha256,
+      compression.needs_review === true,
+      compression.review_reason || ""
     );
     return Response.json({
-      filename,
+      filename: sourceFilename,
       markdown_filename: markdownFilename,
-      json_filename: `${path.parse(filename).name}.json`,
+      json_filename: `${title}.json`,
       model: compression.model,
       document_id: ragResult.id,
       status: ragResult.status || "processing",
@@ -227,6 +356,17 @@ export async function POST(request: Request) {
         })
       )
     );
+    if (error instanceof BackendRequestError && error.status === 409) {
+      return Response.json(
+        {
+          error: `该 PDF 已存在于文档库中（文档 #${error.result.id}，状态：${error.result.status}）。`,
+          document_id: error.result.id,
+          filename: error.result.filename,
+          status: error.result.status,
+        },
+        { status: 409 }
+      );
+    }
     return Response.json(
       {
         error: error instanceof Error

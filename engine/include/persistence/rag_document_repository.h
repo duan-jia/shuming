@@ -39,11 +39,15 @@ public:
                                    int uploaded_by,
                                    const std::string& source_filename = "",
                                    const std::string& source_storage_name = "",
-                                   std::uint64_t source_size_bytes = 0);
+                                   std::uint64_t source_size_bytes = 0,
+                                   const std::string& source_sha256 = "",
+                                   bool needs_review = false,
+                                   const std::string& review_reason = "");
     bool insert_chunk(int document_id, int tenant_id, int chunk_index,
                       const std::string& content, const std::string& visibility,
                       int64_t& chunk_id);
     bool update_document_status(int doc_id, const std::string& status, int chunk_count);
+    bool mark_document_processing(int doc_id, int tenant_id);
     bool mark_document_deleted(int doc_id);
 
 private:

@@ -9,6 +9,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   isStreaming: boolean;
+  isReasoning?: boolean;
 }
 
 interface Session {
@@ -24,11 +25,12 @@ interface DocumentItem {
   tenant_id: number;
   filename: string;
   source_filename: string | null;
+  review_reason: string | null;
   source_size_bytes: number;
   markdown_size_bytes: number;
   chunk_count: number;
   visibility: "group" | "public";
-  status: "processing" | "ready" | "failed";
+  status: "processing" | "pending" | "ready" | "failed";
   uploaded_by: number;
   uploader_username: string;
   has_pdf: boolean;
@@ -50,19 +52,30 @@ function formatDate(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN");
 }
 
+function createRequestId() {
+  try {
+    if (globalThis.isSecureContext && typeof globalThis.crypto?.randomUUID === "function") {
+      return globalThis.crypto.randomUUID();
+    }
+  } catch {}
+  return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 const documentStatus: Record<DocumentItem["status"], { label: string; className: string }> = {
   processing: { label: "处理中", className: "bg-blue-50 text-blue-700" },
+  pending: { label: "待审核", className: "bg-amber-50 text-amber-700" },
   ready: { label: "可用", className: "bg-emerald-50 text-emerald-700" },
   failed: { label: "失败", className: "bg-rose-50 text-rose-700" },
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
+const API_BASE = "";
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [token, setToken] = useState("");
   const [loggedIn, setLoggedIn] = useState(false);
+  const [userRole, setUserRole] = useState<"admin" | "user">("user");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -215,6 +228,7 @@ export default function Home() {
       const data = await res.json();
       if (data.token) {
         setToken(data.token);
+        setUserRole(data.user?.role === "admin" ? "admin" : "user");
         setLoggedIn(true);
         setLoginError("");
       } else {
@@ -253,7 +267,9 @@ export default function Home() {
         }
         setUploadNotice({
           type: "success",
-          message: `${data.filename} 已压缩为 Markdown，并已提交 RAG（文档 #${data.document_id}，状态：${data.status}）。`,
+          message: data.status === "pending"
+            ? `${data.filename} 已转换为 Markdown，并进入待审核队列（文档 #${data.document_id}）。`
+            : `${data.filename} 已压缩为 Markdown，并已提交 RAG（文档 #${data.document_id}，状态：${data.status}）。`,
         });
         await fetchDocuments();
       } catch (error) {
@@ -293,6 +309,24 @@ export default function Home() {
       });
     }
   }, [token]);
+
+  const approveDocument = useCallback(async (document: DocumentItem) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/documents/${document.id}/approve`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "审核通过失败。");
+      setUploadNotice({ type: "success", message: `${document.filename} 已通过审核并提交 RAG。` });
+      await fetchDocuments();
+    } catch (error) {
+      setUploadNotice({
+        type: "error",
+        message: error instanceof Error ? error.message : "审核通过失败。",
+      });
+    }
+  }, [token, fetchDocuments]);
 
   const deleteDocument = useCallback(async (document: DocumentItem) => {
     const displayName = document.source_filename || document.filename;
@@ -373,7 +407,7 @@ export default function Home() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
-          "X-Request-Id": crypto.randomUUID(),
+          "X-Request-Id": createRequestId(),
         },
         body: JSON.stringify({ message: userMsg.content, session_id: sid }),
       });
@@ -383,6 +417,7 @@ export default function Home() {
 
       const decoder = new TextDecoder();
       let buffer = "";
+      let eventType = "message";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -393,26 +428,14 @@ export default function Home() {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (line.startsWith("data: ")) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7);
+          } else if (line.startsWith("data: ")) {
             const data = line.slice(6);
             if (data === "[DONE]") continue;
             try {
               const parsed = JSON.parse(data);
-              if (parsed.type === "answer") {
-                setMessages((prev) =>
-                  prev.map((message) =>
-                    message.id === msgId
-                      ? { ...message, content: message.content + parsed.content }
-                      : message
-                  )
-                );
-              } else if (parsed.type === "done") {
-                setMessages((prev) =>
-                  prev.map((message) =>
-                    message.id === msgId ? { ...message, isStreaming: false } : message
-                  )
-                );
-              } else if (parsed.type === "error") {
+              if (eventType === "error" || parsed.type === "error" || parsed.error) {
                 setMessages((prev) =>
                   prev.map((message) =>
                     message.id === msgId
@@ -420,22 +443,55 @@ export default function Home() {
                           ...message,
                           content: parsed.error || "Error",
                           isStreaming: false,
+                          isReasoning: false,
                         }
+                      : message
+                  )
+                );
+              } else if (parsed.type === "answer") {
+                setMessages((prev) =>
+                  prev.map((message) =>
+                    message.id === msgId
+                      ? {
+                          ...message,
+                          content: message.content + parsed.content,
+                          isReasoning: false,
+                        }
+                      : message
+                  )
+                );
+              } else if (parsed.type === "reasoning") {
+                setMessages((prev) =>
+                  prev.map((message) =>
+                    message.id === msgId ? { ...message, isReasoning: true } : message
+                  )
+                );
+              } else if (parsed.type === "done") {
+                setMessages((prev) =>
+                  prev.map((message) =>
+                    message.id === msgId
+                      ? { ...message, isStreaming: false, isReasoning: false }
                       : message
                   )
                 );
               }
             } catch {}
+          } else if (line === "") {
+            eventType = "message";
           }
         }
       }
-    } catch {
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error && error.message
+          ? `请求失败：${error.message}`
+          : "暂时无法生成答案，请稍后再试。";
       setMessages((prev) =>
         prev.map((message) =>
           message.id === msgId
             ? {
                 ...message,
-                content: "暂时无法生成答案，请稍后再试。",
+                content: errorMessage,
                 isStreaming: false,
               }
             : message
@@ -573,6 +629,7 @@ export default function Home() {
             onClick={() => {
               setLoggedIn(false);
               setToken("");
+              setUserRole("user");
             }}
           >
             退出
@@ -641,9 +698,13 @@ export default function Home() {
                   >
                     {msg.role === "assistant" ? (
                       <div className="prose prose-sm max-w-none prose-slate">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {msg.content}
-                        </ReactMarkdown>
+                        {msg.isReasoning && !msg.content ? (
+                          <span className="text-slate-500">正在思考…</span>
+                        ) : (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {msg.content}
+                          </ReactMarkdown>
+                        )}
                       </div>
                     ) : (
                       <span>{msg.content}</span>
@@ -722,6 +783,11 @@ export default function Home() {
                                 {documentStatus[doc.status].label}
                               </span>
                               <div className="mt-2 text-xs text-slate-400">{doc.chunk_count} 个分块</div>
+                              {doc.status === "pending" && doc.review_reason && (
+                                <div className="mt-2 text-xs leading-5 text-amber-700" title={doc.review_reason}>
+                                  {doc.review_reason}
+                                </div>
+                              )}
                             </td>
                             <td className="px-4 py-4 text-slate-600">{doc.visibility === "public" ? "公共" : "本课题组"}</td>
                             <td className="truncate px-4 py-4 text-slate-600" title={doc.uploader_username || "未知"}>
@@ -730,6 +796,14 @@ export default function Home() {
                             <td className="px-4 py-4 text-xs leading-5 text-slate-500">{formatDate(doc.created_at)}</td>
                             <td className="px-4 py-4">
                               <div className="flex flex-col items-end gap-2">
+                                {doc.status === "pending" && userRole === "admin" && (
+                                  <button
+                                    className="text-xs font-medium text-emerald-700 hover:text-emerald-900"
+                                    onClick={() => void approveDocument(doc)}
+                                  >
+                                    审核通过
+                                  </button>
+                                )}
                                 <button
                                   className="text-xs font-medium text-slate-700 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-300"
                                   disabled={!doc.has_pdf}
@@ -775,7 +849,13 @@ export default function Home() {
                           <span>{doc.uploader_username || "未知上传者"}</span>
                           <span>{formatDate(doc.created_at)}</span>
                         </div>
+                        {doc.status === "pending" && doc.review_reason && (
+                          <div className="mt-3 text-xs leading-5 text-amber-700">{doc.review_reason}</div>
+                        )}
                         <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                          {doc.status === "pending" && userRole === "admin" && (
+                            <button className="rounded-md border border-emerald-200 px-2.5 py-1.5 text-xs text-emerald-700" onClick={() => void approveDocument(doc)}>审核通过</button>
+                          )}
                           <button className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs disabled:text-slate-300" disabled={!doc.has_pdf} onClick={() => void downloadDocument(doc, "pdf")}>下载 PDF</button>
                           <button className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs" onClick={() => void downloadDocument(doc, "md")}>下载 MD</button>
                           {doc.can_delete && (

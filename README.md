@@ -197,9 +197,10 @@ data/processed/<name>.md + <name>.json
 data/rag/ (FAISS + BM25)
 ```
 
-聊天页面的“上传 PDF”会保存源文件、调用远程大模型生成紧凑文档卡片，再把 Markdown
-作为当前 tenant 的 `group` 文档提交给 RAG。Markdown 包含 Summary、Key Takeaways、
-Scope and Positioning；JSON 保存相同内容及来源哈希、模型和生成信息。扫描版 PDF 暂不支持。
+聊天页面的“上传 PDF”会保存源文件、调用远程大模型生成紧凑论文卡片，再把 Markdown
+作为当前 tenant 的 `group` 文档提交给 RAG。Markdown 包含 Problem and Context、Core Idea
+and Approach、Key Takeaways、Scope and Limitations；JSON 保存相同内容及来源哈希、模型和
+生成信息。论文卡片规则集中在 `scripts/paper_card.py`，扫描版 PDF 暂不支持。
 
 安装唯一的文档处理依赖：
 

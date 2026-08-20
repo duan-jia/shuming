@@ -174,6 +174,20 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         };
 
         infer_req->on_done = [ctx, sse, utf8_buf, message, session_id, request_id, bill_tenant, bill_user](const InferResult& result) {
+            if (!result.error.empty()) {
+                spdlog::error("Chat inference failed: session={} request={} error={}",
+                              session_id, request_id, result.error);
+                if (sse->is_active()) {
+                    nlohmann::json err;
+                    err["type"] = "error";
+                    err["error"] = result.error;
+                    err["request_id"] = request_id;
+                    sse->send_event("error", err.dump());
+                    sse->close();
+                }
+                return;
+            }
+
             int total_tokens = result.prompt_tokens + result.completion_tokens;
             BillingService::ChargeResult charge_result;
             if (ctx->billing_service && total_tokens > 0) {

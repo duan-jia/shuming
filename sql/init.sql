@@ -62,15 +62,18 @@ CREATE TABLE IF NOT EXISTS documents (
     visibility        ENUM('group','public') DEFAULT 'group',
     uploaded_by       INT NOT NULL DEFAULT 0,
     source_filename   VARCHAR(256) NULL,
-    source_storage_name VARCHAR(64) NULL,
+    source_storage_name VARCHAR(256) NULL,
     source_size_bytes BIGINT UNSIGNED NULL,
-    status            ENUM('processing','ready','failed','deleted') DEFAULT 'processing',
+    source_sha256     CHAR(64) NULL,
+    review_reason     VARCHAR(1000) NOT NULL DEFAULT '',
+    status            ENUM('processing','pending','ready','failed','deleted') DEFAULT 'processing',
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
     INDEX idx_tenant (tenant_id),
     INDEX idx_visibility (visibility),
-    INDEX idx_status (status)
+    INDEX idx_status (status),
+    UNIQUE INDEX uq_tenant_source_sha256 (tenant_id, source_sha256)
 );
 
 -- ========== 6. 文档分块 ==========
