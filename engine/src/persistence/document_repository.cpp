@@ -14,10 +14,12 @@ std::vector<DocumentSummary> DocumentRepository::list_visible_documents(int tena
     std::string sql =
         "SELECT d.id, d.tenant_id, d.filename, d.chunk_count, d.visibility, d.status, "
         "d.uploaded_by, COALESCE(u.username,''), COALESCE(d.source_filename,''), "
-        "COALESCE(d.source_size_bytes,0), OCTET_LENGTH(d.content), d.created_at, d.updated_at "
+        "COALESCE(d.source_size_bytes,0), OCTET_LENGTH(d.content), d.created_at, d.updated_at, "
+        "COALESCE(d.review_reason,'') "
         "FROM documents d LEFT JOIN users u ON u.id=d.uploaded_by "
         "WHERE d.status<>'deleted' AND (d.tenant_id="
-        + std::to_string(tenant_id) + " OR d.visibility='public') ORDER BY d.created_at DESC";
+        + std::to_string(tenant_id)
+        + " OR (d.visibility='public' AND d.status='ready')) ORDER BY d.created_at DESC";
     auto* res = conn->query(sql);
     if (res) {
         auto* row = mysql_fetch_row(res);
@@ -36,6 +38,7 @@ std::vector<DocumentSummary> DocumentRepository::list_visible_documents(int tena
             doc.markdown_size_bytes = row[10] ? std::stoull(row[10]) : 0;
             doc.created_at = row[11] ? row[11] : "";
             doc.updated_at = row[12] ? row[12] : "";
+            doc.review_reason = row[13] ? row[13] : "";
             documents.push_back(doc);
             row = mysql_fetch_row(res);
         }
@@ -54,11 +57,11 @@ bool DocumentRepository::find_visible_document(int doc_id, int tenant_id,
         "SELECT d.id, d.tenant_id, d.filename, d.chunk_count, d.visibility, d.status, "
         "d.uploaded_by, COALESCE(u.username,''), COALESCE(d.source_filename,''), "
         "COALESCE(d.source_size_bytes,0), OCTET_LENGTH(d.content), d.created_at, d.updated_at, "
-        "COALESCE(d.source_storage_name,''), d.content "
+        "COALESCE(d.source_storage_name,''), d.content, COALESCE(d.review_reason,'') "
         "FROM documents d LEFT JOIN users u ON u.id=d.uploaded_by "
         "WHERE d.id=" + std::to_string(doc_id)
         + " AND d.status<>'deleted' AND (d.tenant_id=" + std::to_string(tenant_id)
-        + " OR d.visibility='public') LIMIT 1";
+        + " OR (d.visibility='public' AND d.status='ready')) LIMIT 1";
     auto* res = conn->query(sql);
     if (!res) {
         mysql_.release(conn);
@@ -87,6 +90,7 @@ bool DocumentRepository::find_visible_document(int doc_id, int tenant_id,
     document.updated_at = row[12] ? row[12] : "";
     document.source_storage_name = row[13] ? row[13] : "";
     document.content = row[14] ? row[14] : "";
+    document.review_reason = row[15] ? row[15] : "";
 
     mysql_free_result(res);
     mysql_.release(conn);
@@ -139,6 +143,41 @@ bool DocumentRepository::find_document_tenant(int doc_id, int& tenant_id) {
     }
 
     tenant_id = row[0] ? std::stoi(row[0]) : 0;
+    mysql_free_result(res);
+    mysql_.release(conn);
+    return true;
+}
+
+bool DocumentRepository::find_duplicate_document(int tenant_id,
+                                                  const std::string& source_sha256,
+                                                  DocumentSummary& document) {
+    auto conn = mysql_.acquire();
+    if (!conn || !conn->valid()) return false;
+
+    std::string escaped_hash(source_sha256.size() * 2 + 1, '\0');
+    size_t escaped_length = mysql_real_escape_string(
+        conn->raw(), &escaped_hash[0], source_sha256.c_str(), source_sha256.size());
+    escaped_hash.resize(escaped_length);
+    std::string sql =
+        "SELECT id, filename, status FROM documents WHERE tenant_id="
+        + std::to_string(tenant_id) + " AND source_sha256='" + escaped_hash
+        + "' AND status IN ('processing','pending','ready') LIMIT 1";
+    auto* res = conn->query(sql);
+    if (!res) {
+        mysql_.release(conn);
+        return false;
+    }
+
+    auto* row = mysql_fetch_row(res);
+    if (!row) {
+        mysql_free_result(res);
+        mysql_.release(conn);
+        return false;
+    }
+    document.id = row[0] ? std::stoi(row[0]) : 0;
+    document.tenant_id = tenant_id;
+    document.filename = row[1] ? row[1] : "";
+    document.status = row[2] ? row[2] : "processing";
     mysql_free_result(res);
     mysql_.release(conn);
     return true;

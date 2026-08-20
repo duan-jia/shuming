@@ -12,9 +12,10 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from paper_card import build_prompt, markdown_for, normalize_card
 
 
 DEFAULT_ENDPOINT = "https://api.deepseek.com/v1"
@@ -108,50 +109,6 @@ def extract_pdf(path: Path, max_chars: int) -> tuple[str, int, int]:
     return context, len(reader.pages), full_length
 
 
-def prompt(filename: str, context: str) -> list[dict[str, str]]:
-    schema = {
-        "title": "",
-        "authors": [],
-        "venue_and_year": "",
-        "citation_key": "",
-        "canonical_url": "",
-        "keywords": [],
-        "summary": "",
-        "key_takeaways": [],
-        "scope_and_positioning": "",
-        "verification_flags": [],
-    }
-    return [
-        {
-            "role": "system",
-            "content": (
-                "You create accurate, compact document cards for research retrieval. "
-                "Return strict JSON only, with no Markdown fence or commentary. "
-                "Use English, while preserving original titles, names, and technical terms. "
-                "Never invent missing bibliographic facts, measurements, comparisons, or claims."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Compress the PDF {filename!r} into one coherent document card. "
-                "Follow these rules:\n"
-                "- Explain the problem and context, why prior approaches are insufficient, the central idea, "
-                "how it works at a useful abstraction, supporting evaluation or argument, and significance.\n"
-                "- Do not summarize section by section and do not copy the abstract.\n"
-                "- Keep only material that aids understanding, retrieval, comparison, or prevents overclaiming.\n"
-                "- Aim for 1,200-2,000 English words in summary when the source supports that length.\n"
-                "- Provide 3-5 non-redundant key takeaways.\n"
-                "- State assumptions, applicability, limitations, and unsupported boundaries in scope_and_positioning.\n"
-                "- Put uncertain source facts in verification_flags using '[VERIFY: ...]' and external comparisons "
-                "using '[CITE: ...]'. Use empty strings/lists for unknown bibliographic fields.\n\n"
-                f"Required JSON shape:\n{json.dumps(schema, ensure_ascii=False)}\n\n"
-                f"Extracted PDF text:\n{context}"
-            ),
-        },
-    ]
-
-
 def call_model(endpoint: str, model: str, api_key: str, messages: list[dict[str, str]], timeout: int) -> dict[str, Any]:
     if not api_key:
         raise RuntimeError("remote_engine.api_key or REMOTE_ENGINE_API_KEY is required")
@@ -193,68 +150,6 @@ def call_model(endpoint: str, model: str, api_key: str, messages: list[dict[str,
         if not match:
             raise RuntimeError("model response is not valid JSON")
         return json.loads(match.group(0))
-
-
-def string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item).strip()]
-
-
-def normalize_card(raw: dict[str, Any], source: Path, source_hash: str, model: str,
-                   page_count: int, extracted_chars: int) -> dict[str, Any]:
-    title = str(raw.get("title") or source.stem).strip()
-    summary = str(raw.get("summary") or "").strip()
-    scope = str(raw.get("scope_and_positioning") or "").strip()
-    takeaways = string_list(raw.get("key_takeaways"))[:5]
-    if not summary or not scope or not takeaways:
-        raise RuntimeError("model response is missing summary, key_takeaways, or scope_and_positioning")
-    return {
-        "schema_version": "document_summary.v1",
-        "status": "ready",
-        "source_pdf": source.name,
-        "source_sha256": source_hash,
-        "page_count": page_count,
-        "extracted_chars": extracted_chars,
-        "model": model,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "title": title,
-        "authors": string_list(raw.get("authors")),
-        "venue_and_year": str(raw.get("venue_and_year") or "").strip(),
-        "citation_key": str(raw.get("citation_key") or "").strip(),
-        "canonical_url": str(raw.get("canonical_url") or "").strip(),
-        "keywords": string_list(raw.get("keywords")),
-        "summary": summary,
-        "key_takeaways": takeaways,
-        "scope_and_positioning": scope,
-        "verification_flags": string_list(raw.get("verification_flags")),
-    }
-
-
-def markdown_for(card: dict[str, Any]) -> str:
-    def value_or_verify(value: str, label: str) -> str:
-        return value or f"[VERIFY: {label} unavailable in extracted PDF text]"
-
-    authors = ", ".join(card["authors"])
-    keywords = ", ".join(card["keywords"])
-    takeaways = "\n".join(f"- {item}" for item in card["key_takeaways"])
-    flags = card["verification_flags"]
-    verification = ""
-    if flags:
-        verification = "\n\n## Verification Notes\n\n" + "\n".join(f"- {item}" for item in flags)
-    return (
-        f"# {card['title']}\n\n"
-        f"- Authors: {value_or_verify(authors, 'authors')}\n"
-        f"- Venue and year: {value_or_verify(card['venue_and_year'], 'venue and year')}\n"
-        f"- Citation key: {value_or_verify(card['citation_key'], 'citation key')}\n"
-        f"- DOI or canonical URL: {value_or_verify(card['canonical_url'], 'canonical URL')}\n"
-        f"- Local PDF: `data/pdfs/{card['source_pdf']}`\n"
-        f"- Keywords: {value_or_verify(keywords, 'keywords')}\n\n"
-        f"## Summary\n\n{card['summary']}\n\n"
-        f"## Key Takeaways\n\n{takeaways}\n\n"
-        f"## Scope and Positioning\n\n{card['scope_and_positioning']}"
-        f"{verification}\n"
-    )
 
 
 def write_atomic(path: Path, content: str) -> None:
@@ -317,8 +212,11 @@ def main() -> int:
                 raise RuntimeError("output already exists; use --force to replace it")
 
         endpoint, model, api_key = load_remote_config(config_path)
-        raw = call_model(endpoint, model, api_key, prompt(source.name, context), args.timeout)
+        raw = call_model(endpoint, model, api_key, build_prompt(source.name, context), args.timeout)
         card = normalize_card(raw, source, source_hash, model, page_count, extracted_chars)
+        if extracted_chars < 2_000:
+            card["needs_review"] = True
+            card["review_reason"] = "The PDF contains less than 2,000 extracted characters."
         write_atomic(json_path, json.dumps(card, ensure_ascii=False, indent=2) + "\n")
         write_atomic(markdown_path, markdown_for(card))
         print(json.dumps({
@@ -327,6 +225,9 @@ def main() -> int:
             "json_path": str(json_path),
             "model": model,
             "source_sha256": source_hash,
+            "title": card["title"],
+            "needs_review": card["needs_review"],
+            "review_reason": card["review_reason"],
         }, ensure_ascii=False))
         return 0
     except Exception as exc:

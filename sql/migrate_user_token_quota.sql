@@ -51,8 +51,23 @@ SELECT
     0,
     tokens_used,
     tokens_used,
-    CASE WHEN status IN ('charged', 'pending') THEN 'success' ELSE 'failed' END,
-    failure_reason,
+    'success',
+    NULL,
     created_at
 FROM billing_records
 WHERE request_id IS NOT NULL AND request_id <> '';
+
+INSERT INTO user_token_usage_daily
+    (tenant_id, user_id, usage_date, token_limit, tokens_used)
+SELECT
+    b.tenant_id,
+    b.user_id,
+    DATE(b.created_at),
+    t.token_limit_daily,
+    SUM(b.tokens_used)
+FROM billing_records b
+JOIN tenants t ON t.id = b.tenant_id
+GROUP BY b.tenant_id, b.user_id, DATE(b.created_at), t.token_limit_daily
+ON DUPLICATE KEY UPDATE
+    token_limit = VALUES(token_limit),
+    tokens_used = GREATEST(tokens_used, VALUES(tokens_used));

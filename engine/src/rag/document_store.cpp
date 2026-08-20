@@ -209,14 +209,18 @@ int RagService::insert_processing_document(int tenant_id, const std::string& fil
                                            int uploaded_by,
                                            const std::string& source_filename,
                                            const std::string& source_storage_name,
-                                           std::uint64_t source_size_bytes) {
+                                           std::uint64_t source_size_bytes,
+                                           const std::string& source_sha256,
+                                           bool needs_review,
+                                           const std::string& review_reason) {
     if (!document_repository_) {
         spdlog::error("MySQL pool not set, cannot insert document");
         return -1;
     }
     return document_repository_->insert_processing_document(
         tenant_id, filename, content, visibility, uploaded_by,
-        source_filename, source_storage_name, source_size_bytes);
+        source_filename, source_storage_name, source_size_bytes,
+        source_sha256, needs_review, review_reason);
 }
 
 bool RagService::process_document_job(const DocumentJob& job, bool save) {
@@ -305,10 +309,12 @@ int RagService::add_document(int tenant_id, const std::string& filename,
                                const std::string& visibility, int uploaded_by, bool save,
                                const std::string& source_filename,
                                const std::string& source_storage_name,
-                               std::uint64_t source_size_bytes) {
+                               std::uint64_t source_size_bytes,
+                               const std::string& source_sha256) {
     int doc_id = insert_processing_document(tenant_id, filename, content, visibility, uploaded_by,
-                                            source_filename, source_storage_name, source_size_bytes);
-    if (doc_id <= 0) return -1;
+                                            source_filename, source_storage_name, source_size_bytes,
+                                            source_sha256);
+    if (doc_id <= 0) return doc_id;
 
     DocumentJob job;
     job.doc_id = doc_id;
@@ -326,15 +332,20 @@ int RagService::enqueue_document(int tenant_id, const std::string& filename,
                                  const std::string& visibility, int uploaded_by,
                                  const std::string& source_filename,
                                  const std::string& source_storage_name,
-                                 std::uint64_t source_size_bytes) {
-    if (!embedder_ || !embedder_->is_loaded()) {
+                                 std::uint64_t source_size_bytes,
+                                 const std::string& source_sha256,
+                                 bool needs_review,
+                                 const std::string& review_reason) {
+    if (!needs_review && (!embedder_ || !embedder_->is_loaded())) {
         spdlog::error("Embedding model not loaded, cannot enqueue document");
         return -1;
     }
 
     int doc_id = insert_processing_document(tenant_id, filename, content, visibility, uploaded_by,
-                                            source_filename, source_storage_name, source_size_bytes);
-    if (doc_id <= 0) return -1;
+                                            source_filename, source_storage_name, source_size_bytes,
+                                            source_sha256, needs_review, review_reason);
+    if (doc_id <= 0) return doc_id;
+    if (needs_review) return doc_id;
 
     DocumentJob job;
     job.doc_id = doc_id;
@@ -352,6 +363,33 @@ int RagService::enqueue_document(int tenant_id, const std::string& filename,
     }
     queue_cv_.notify_one();
     return doc_id;
+}
+
+bool RagService::approve_document(int doc_id, int tenant_id, const std::string& filename,
+                                  const std::string& content, const std::string& visibility,
+                                  int uploaded_by) {
+    if (!embedder_ || !embedder_->is_loaded() || !document_repository_) {
+        return false;
+    }
+    if (!document_repository_->mark_document_processing(doc_id, tenant_id)) {
+        return false;
+    }
+
+    DocumentJob job;
+    job.doc_id = doc_id;
+    job.tenant_id = tenant_id;
+    job.filename = filename;
+    job.content = content;
+    job.visibility = visibility;
+    job.uploaded_by = uploaded_by;
+
+    start_worker();
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        jobs_.push(std::move(job));
+    }
+    queue_cv_.notify_one();
+    return true;
 }
 
 bool RagService::remove_document(int doc_id) {
