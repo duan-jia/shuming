@@ -136,6 +136,17 @@ cd web && npm install && npm run dev
 - 模型文件不在 git 里, 两边各自下载/拷贝放到 `models/`
 - 配置各自一份 `config.json` (不进 git), 改 MySQL 密码等
 
+## 提交前验证
+
+提交前请运行以下 CPU 构建与前端 lint 检查：
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF
+cmake --build build --target fast-llm-reasoner -j$(nproc)
+cmake --build build --target fast-llm-cli -j$(nproc)
+cd web && npm run lint
+```
+
 ## 配置说明
 
 `config.json` 结构 (模板见 `config.example.json`):
