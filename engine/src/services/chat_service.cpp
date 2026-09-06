@@ -1,5 +1,6 @@
 #include "services/chat_service.h"
 
+#include <cctype>
 #include <cstdio>
 #include <random>
 
@@ -9,6 +10,17 @@
 #include "inference/batch_scheduler.h"
 
 namespace fastllm {
+
+namespace {
+
+bool has_non_whitespace(const std::string& value) {
+    for (unsigned char ch : value) {
+        if (!std::isspace(ch)) return true;
+    }
+    return false;
+}
+
+}
 
 ChatService::ChatService(AppContext& ctx) : ctx_(ctx) {}
 
@@ -60,7 +72,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
     try {
         auto body = nlohmann::json::parse(req.body);
         std::string message = body.value("message", "");
-        std::string session_id = body.value("session_id", "default");
+        std::string session_id = body.value("session_id", "");
         std::string model_name = body.value("model", "remote");
         std::string request_id = req.header("X-Request-Id", "");
         if (request_id.empty()) {
@@ -68,6 +80,31 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         }
         if (request_id.empty()) {
             request_id = generate_uuid();
+        }
+
+        if (!has_non_whitespace(message)) {
+            send_sse_error(sse_ctx, "Message is required");
+            return;
+        }
+        if (session_id.empty()) {
+            send_sse_error(sse_ctx, "Session ID is required");
+            return;
+        }
+
+        SessionSummary session;
+        if (!ctx_.session_repository
+            || !ctx_.session_repository->get_session(
+                session_id, claims.tenant_id, claims.user_id, session)) {
+            send_sse_error(sse_ctx, "Session not found");
+            return;
+        }
+
+        std::vector<ChatMessage> history;
+        for (const auto& stored : ctx_.session_repository->list_messages(session_id, 200)) {
+            if ((stored.role == "user" || stored.role == "assistant")
+                && !stored.content.empty()) {
+                history.push_back({stored.role, stored.content});
+            }
         }
 
         if (ctx_.billing_service) {
@@ -105,6 +142,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         infer_params.max_tokens = body.value("max_tokens", 512);
         infer_params.temperature = body.value("temperature", 0.7f);
         infer_params.top_p = body.value("top_p", 0.9f);
+        infer_params.history = std::move(history);
 
         bool enable_rag = body.value("enable_rag", false);
         if (enable_rag && ctx_.rag && ctx_.rag->is_ready()) {
@@ -122,6 +160,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         infer_req->session_id = session_id;
         infer_req->prompt = message;
         infer_req->system_prompt = infer_params.system_prompt;
+        infer_req->history = std::move(infer_params.history);
         infer_req->max_tokens = infer_params.max_tokens;
         infer_req->temperature = infer_params.temperature;
         infer_req->top_p = infer_params.top_p;

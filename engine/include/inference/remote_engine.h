@@ -8,7 +8,7 @@ namespace fastllm {
 class RemoteEngine : public IInferenceEngine {
 public:
     RemoteEngine(const std::string& endpoint, const std::string& model,
-                 const std::string& api_key);
+                 const std::string& api_key, int context_window_tokens = 32768);
     ~RemoteEngine() override = default;
 
     bool is_loaded() const override { return true; }
@@ -23,6 +23,7 @@ private:
     std::string endpoint_;
     std::string model_;
     std::string api_key_;
+    int context_window_tokens_;
 };
 
 }

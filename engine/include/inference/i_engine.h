@@ -2,8 +2,14 @@
 
 #include <string>
 #include <functional>
+#include <vector>
 
 namespace fastllm {
+
+struct ChatMessage {
+    std::string role;
+    std::string content;
+};
 
 struct InferParams {
     int n_ctx = 2048;
@@ -18,6 +24,7 @@ struct InferParams {
     int repeat_last_n = 64;
     std::string system_prompt;
     std::string session_id;
+    std::vector<ChatMessage> history;
 };
 
 struct InferResult {

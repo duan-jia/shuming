@@ -106,7 +106,8 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
     auto remote = std::make_unique<RemoteEngine>(
         config.get_str("remote_engine.endpoint", "https://api.deepseek.com/v1"),
         config.get_str("remote_engine.model", "deepseek-chat"),
-        config.get_str("remote_engine.api_key", "")
+        config.get_str("remote_engine.api_key", ""),
+        config.get_int("remote_engine.context_window_tokens", 32768)
     );
     ctx.model_mgr->add_engine("remote", std::move(remote));
 

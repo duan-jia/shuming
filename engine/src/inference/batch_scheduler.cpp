@@ -106,6 +106,7 @@ void BatchScheduler::process_request(std::shared_ptr<InferRequest> req) {
     InferParams params;
     params.session_id = req->session_id;
     params.system_prompt = req->system_prompt;
+    params.history = req->history;
     params.max_tokens = req->max_tokens;
     params.temperature = req->temperature;
     params.top_p = req->top_p;

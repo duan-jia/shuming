@@ -57,6 +57,7 @@
   "remote_engine": {
     "endpoint": "https://api.deepseek.com/v1",
     "model": "deepseek-chat",
+    "context_window_tokens": 32768,
     "api_key": ""
   }
 }

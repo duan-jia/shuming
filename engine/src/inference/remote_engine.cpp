@@ -1,5 +1,9 @@
 #include "inference/remote_engine.h"
 
+#include <algorithm>
+#include <optional>
+#include <vector>
+
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
 #include <httplib.h>
@@ -7,8 +11,9 @@
 namespace fastllm {
 
 RemoteEngine::RemoteEngine(const std::string& endpoint, const std::string& model,
-                           const std::string& api_key)
-    : endpoint_(endpoint), model_(model), api_key_(api_key) {}
+                           const std::string& api_key, int context_window_tokens)
+    : endpoint_(endpoint), model_(model), api_key_(api_key),
+      context_window_tokens_(context_window_tokens > 0 ? context_window_tokens : 32768) {}
 
 struct StreamCtx {
     std::function<void(const std::string&)> on_token;
@@ -20,6 +25,116 @@ struct StreamCtx {
     int completion_tokens = 0;
     std::string line_buf;
 };
+
+struct ConversationTurn {
+    ChatMessage user;
+    ChatMessage assistant;
+};
+
+static size_t estimate_text_tokens(const std::string& text) {
+    size_t ascii_count = 0;
+    size_t non_ascii_count = 0;
+
+    for (size_t i = 0; i < text.size();) {
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        if ((c & 0x80) == 0) {
+            ++ascii_count;
+            ++i;
+            continue;
+        }
+
+        size_t codepoint_bytes = 1;
+        if ((c & 0xE0) == 0xC0) codepoint_bytes = 2;
+        else if ((c & 0xF0) == 0xE0) codepoint_bytes = 3;
+        else if ((c & 0xF8) == 0xF0) codepoint_bytes = 4;
+        i += std::min(codepoint_bytes, text.size() - i);
+        ++non_ascii_count;
+    }
+
+    return (ascii_count + 3) / 4 + non_ascii_count * 2;
+}
+
+static size_t estimate_message_tokens(const ChatMessage& message) {
+    return estimate_text_tokens(message.content) + 4;
+}
+
+static std::vector<ConversationTurn> collect_complete_turns(
+    const std::vector<ChatMessage>& history) {
+    std::vector<ConversationTurn> turns;
+    std::optional<ChatMessage> pending_user;
+
+    for (const auto& message : history) {
+        if (message.role == "user") {
+            pending_user = message;
+        } else if (message.role == "assistant" && pending_user) {
+            turns.push_back({*pending_user, message});
+            pending_user.reset();
+        }
+    }
+    return turns;
+}
+
+static bool build_messages(const std::string& prompt, const InferParams& params,
+                           int context_window_tokens, nlohmann::json& messages,
+                           std::string& error) {
+    size_t safe_context = static_cast<size_t>(context_window_tokens) * 9 / 10;
+    size_t output_reserve = params.max_tokens > 0
+        ? static_cast<size_t>(params.max_tokens)
+        : 0;
+    if (output_reserve >= safe_context) {
+        error = "max_tokens exceeds the configured remote context window";
+        return false;
+    }
+
+    size_t input_budget = safe_context - output_reserve;
+    size_t required_tokens = estimate_message_tokens({"user", prompt});
+    if (!params.system_prompt.empty()) {
+        required_tokens += estimate_message_tokens({"system", params.system_prompt});
+    }
+    if (required_tokens > input_budget) {
+        error = "System prompt and current message exceed the configured remote context window";
+        return false;
+    }
+
+    auto turns = collect_complete_turns(params.history);
+    size_t first_selected = turns.size();
+    size_t selected_tokens = 0;
+    while (first_selected > 0) {
+        const auto& turn = turns[first_selected - 1];
+        size_t turn_tokens = estimate_message_tokens(turn.user)
+            + estimate_message_tokens(turn.assistant);
+        if (required_tokens + selected_tokens + turn_tokens > input_budget) break;
+        selected_tokens += turn_tokens;
+        --first_selected;
+    }
+
+    messages = nlohmann::json::array();
+    if (!params.system_prompt.empty()) {
+        messages.push_back({
+            {"role", "system"},
+            {"content", params.system_prompt}
+        });
+    }
+    for (size_t i = first_selected; i < turns.size(); ++i) {
+        messages.push_back({
+            {"role", turns[i].user.role},
+            {"content", turns[i].user.content}
+        });
+        messages.push_back({
+            {"role", turns[i].assistant.role},
+            {"content", turns[i].assistant.content}
+        });
+    }
+    messages.push_back({
+        {"role", "user"},
+        {"content", prompt}
+    });
+
+    if (first_selected > 0) {
+        spdlog::debug("RemoteEngine trimmed {} old conversation turn(s)", first_selected);
+    }
+    return true;
+}
 
 static bool parse_sse_line(const std::string& json_str, StreamCtx& ctx) {
     if (json_str == "[DONE]") return true;
@@ -125,18 +240,15 @@ void RemoteEngine::stream_complete(
     body["max_tokens"] = params.max_tokens;
     body["temperature"] = params.temperature;
     body["top_p"] = params.top_p;
-    body["messages"] = nlohmann::json::array();
-
-    if (!params.system_prompt.empty()) {
-        body["messages"].push_back({
-            {"role", "system"},
-            {"content", params.system_prompt}
-        });
+    std::string build_error;
+    if (!build_messages(prompt, params, context_window_tokens_, body["messages"], build_error)) {
+        if (on_done) {
+            InferResult result;
+            result.error = std::move(build_error);
+            on_done(result);
+        }
+        return;
     }
-    body["messages"].push_back({
-        {"role", "user"},
-        {"content", prompt}
-    });
 
     std::string body_str = body.dump();
 

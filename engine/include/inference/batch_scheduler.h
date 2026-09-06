@@ -17,6 +17,7 @@ struct InferRequest {
     std::string session_id;
     std::string prompt;
     std::string system_prompt;
+    std::vector<ChatMessage> history;
     int max_tokens = 512;
     float temperature = 0.7f;
     float top_p = 0.9f;
