@@ -1,5 +1,7 @@
 #include "persistence/session_repository.h"
 
+#include <algorithm>
+
 #include <mysql/mysql.h>
 
 namespace fastllm {
@@ -103,9 +105,13 @@ std::vector<MessageSummary> SessionRepository::list_messages(const std::string& 
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) return msgs;
 
-    std::string sql = "SELECT id, role, content, reasoning, tokens_in, tokens_out, created_at FROM messages WHERE session_id='"
-        + escape_sql(conn->raw(), session_id) + "' ORDER BY created_at ASC LIMIT "
-        + std::to_string(limit);
+    limit = std::max(1, limit);
+    std::string sql =
+        "SELECT id, role, content, reasoning, tokens_in, tokens_out, created_at "
+        "FROM (SELECT id, role, content, reasoning, tokens_in, tokens_out, created_at "
+        "FROM messages WHERE session_id='"
+        + escape_sql(conn->raw(), session_id) + "' ORDER BY id DESC LIMIT "
+        + std::to_string(limit) + ") AS recent_messages ORDER BY id ASC";
     auto* res = conn->query(sql);
     if (res) {
         auto* row = mysql_fetch_row(res);
