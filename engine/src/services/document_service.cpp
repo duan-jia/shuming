@@ -298,57 +298,59 @@ void DocumentService::remove(const RouteParams& params, const UserInfo& user, Ht
 void DocumentService::search(const HttpRequest& req, const UserInfo& user, HttpResponse& resp) {
     try {
         auto body = nlohmann::json::parse(req.body);
-        std::string query = body.value("query", "");
-        int top_k = body.value("top_k", 5);
-        std::string mode = body.value("mode", "chunks");
+        SearchKnowledgeRequest search_request;
+        search_request.query = body.value("query", "");
+        search_request.top_k = body.value("top_k", 5);
+        search_request.mode = parse_knowledge_search_mode(
+            body.value("mode", "chunks"));
 
-        if (query.empty()) {
-            resp.json_error(400, "query required");
-            return;
-        }
+        CallerContext caller;
+        caller.tenant_id = user.tenant_id;
+        caller.principal_id = user.id;
+        caller.principal_type = "user";
+        caller.trace_id = req.header("X-Request-Id", "");
 
-        if (!ctx_.rag || !ctx_.rag->is_ready()) {
+        if (!ctx_.knowledge_search_service) {
             resp.json_error(503, "RAG service not available");
             return;
         }
 
-        nlohmann::json result_arr = nlohmann::json::array();
-        auto rewritten = ctx_.rag->rewrite_query(query);
+        auto result = ctx_.knowledge_search_service->execute(search_request, caller);
 
-        if (mode == "parents") {
-            auto results = ctx_.rag->retrieve_parents_prepared(rewritten, top_k, user.tenant_id);
-            for (auto& p : results) {
+        nlohmann::json result_arr = nlohmann::json::array();
+        for (const auto& evidence : result.evidence) {
+            if (evidence.mode == KnowledgeSearchMode::PARENTS) {
                 nlohmann::json j;
-                j["doc_id"] = p.doc_id;
-                j["filename"] = p.filename;
-                j["content"] = p.content;
-                j["matched_chunks"] = p.matched_chunks;
-                j["max_score"] = p.max_score;
+                j["doc_id"] = evidence.document_id;
+                j["filename"] = evidence.filename;
+                j["content"] = evidence.content;
+                j["matched_chunks"] = evidence.matched_chunks;
+                j["max_score"] = evidence.score;
                 result_arr.push_back(j);
-            }
-        } else {
-            auto results = ctx_.rag->retrieve_prepared(rewritten, top_k, user.tenant_id);
-            for (auto& r : results) {
+            } else {
                 nlohmann::json j;
-                j["doc_id"] = r.doc_id;
-                j["filename"] = r.filename;
-                j["chunk_index"] = r.chunk_index;
-                j["score"] = r.score;
-                j["content"] = r.content;
+                j["doc_id"] = evidence.document_id;
+                j["filename"] = evidence.filename;
+                j["chunk_index"] = evidence.chunk_index;
+                j["score"] = evidence.score;
+                j["content"] = evidence.content;
                 result_arr.push_back(j);
             }
         }
 
         nlohmann::json j;
-        j["query"] = query;
-        j["rewritten_query"] = rewritten.search_query;
-        j["query_rewritten"] = rewritten.rewritten;
-        j["query_aliases"] = rewritten.aliases;
-        if (!rewritten.failure_reason.empty()) {
-            j["rewrite_failure_reason"] = rewritten.failure_reason;
+        j["query"] = result.query;
+        j["rewritten_query"] = result.rewrite.search_query;
+        j["query_rewritten"] = result.rewrite.rewritten;
+        j["query_aliases"] = result.rewrite.aliases;
+        if (!result.rewrite.failure_reason.empty()) {
+            j["rewrite_failure_reason"] = result.rewrite.failure_reason;
         }
         j["results"] = result_arr;
         resp.json(j.dump());
+    } catch (const KnowledgeSearchError& e) {
+        int status = e.code() == KnowledgeSearchErrorCode::UNAVAILABLE ? 503 : 400;
+        resp.json_error(status, e.what());
     } catch (const std::exception& e) {
         resp.json_error(400, std::string("Invalid request: ") + e.what());
     }

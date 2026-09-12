@@ -8,6 +8,7 @@
 #include <spdlog/spdlog.h>
 
 #include "inference/batch_scheduler.h"
+#include "services/rag_prompt_formatter.h"
 
 namespace fastllm {
 
@@ -145,10 +146,27 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         infer_params.history = std::move(history);
 
         bool enable_rag = body.value("enable_rag", false);
-        if (enable_rag && ctx_.rag && ctx_.rag->is_ready()) {
-            infer_params.system_prompt = ctx_.rag->build_rag_prompt(message, claims.tenant_id, 3);
-        } else {
-            infer_params.system_prompt = ctx_.system_prompt;
+        infer_params.system_prompt = ctx_.system_prompt;
+        if (enable_rag && ctx_.knowledge_search_service) {
+            SearchKnowledgeRequest search_request;
+            search_request.query = message;
+            search_request.top_k = 3;
+            search_request.mode = KnowledgeSearchMode::CHUNKS;
+
+            CallerContext caller;
+            caller.tenant_id = claims.tenant_id;
+            caller.principal_id = claims.user_id;
+            caller.principal_type = "user";
+            caller.trace_id = request_id;
+
+            try {
+                auto search_result = ctx_.knowledge_search_service->execute(
+                    search_request, caller);
+                infer_params.system_prompt = RagPromptFormatter::format(
+                    search_result, ctx_.system_prompt);
+            } catch (const KnowledgeSearchError& e) {
+                spdlog::warn("RAG search skipped for chat request {}: {}", request_id, e.what());
+            }
         }
 
         auto sse = sse_ctx;
