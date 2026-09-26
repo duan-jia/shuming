@@ -14,7 +14,8 @@ include(FetchContent)
 FetchContent_Declare(
     muduo
     GIT_REPOSITORY https://github.com/chenshuo/muduo.git
-    GIT_TAG        master
+    # Keep clean builds reproducible; do not follow the moving master branch.
+    GIT_TAG        f1fc77e0c13b80e5086ff457362c8a86d1b609d4
 )
 
 set(MUDUO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -38,6 +39,9 @@ FetchContent_Declare(
     GIT_TAG        v0.7.0
 )
 
+set(JWT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(JWT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+
 option(GGML_CUDA "Enable CUDA" ON)
 option(LLAMA_COMMON OFF)
 option(LLAMA_BUILD_TESTS OFF)
@@ -48,7 +52,8 @@ option(LLAMA_BUILD_TOOLS OFF)
 FetchContent_Declare(
     llama_cpp
     GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
-    GIT_TAG        master
+    # API compatibility is validated against this exact revision.
+    GIT_TAG        ad6c66839af3c5646fba8c6c2e2087a1e4e38948
 )
 
 set(FAISS_ENABLE_GPU OFF CACHE BOOL "" FORCE)
@@ -69,6 +74,10 @@ FetchContent_Declare(
     GIT_TAG        v0.14.3
 )
 
-FetchContent_MakeAvailable(muduo json spdlog jwt_cpp llama_cpp faiss httplib)
+# Make nlohmann-json available before jwt-cpp. jwt-cpp uses find_package() and
+# otherwise downloads a second copy, which creates a duplicate CMake target.
+FetchContent_MakeAvailable(muduo json spdlog)
+set(nlohmann_json_DIR "${json_BINARY_DIR}" CACHE PATH "" FORCE)
+FetchContent_MakeAvailable(jwt_cpp llama_cpp faiss httplib)
 
 add_subdirectory(engine)
