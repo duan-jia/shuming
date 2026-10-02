@@ -134,7 +134,8 @@ void LlmEngine::stream_complete(const std::string& prompt, const InferParams& pa
     auto sparams = llama_sampler_chain_default_params();
     llama_sampler* smpl = llama_sampler_chain_init(sparams);
     llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
-        params.repeat_last_n, params.repeat_penalty, 0.0f, 0.0f));
+        llama_vocab_n_tokens(vocab_), params.repeat_last_n,
+        params.repeat_penalty, 0.0f, 0.0f));
     llama_sampler_chain_add(smpl, llama_sampler_init_top_k(params.top_k));
     llama_sampler_chain_add(smpl, llama_sampler_init_top_p(params.top_p, 1));
     llama_sampler_chain_add(smpl, llama_sampler_init_temp(params.temperature));
