@@ -60,7 +60,7 @@ bool LlamaEmbedder::create_context() {
         return false;
     }
 
-    dim_ = llama_n_embd(model_);
+    dim_ = llama_model_n_embd(model_);
 
     auto ptype = llama_pooling_type(ctx_);
     spdlog::info("Embedding model loaded: dim={}, pooling={}", dim_, static_cast<int>(ptype));
