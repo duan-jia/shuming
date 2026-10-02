@@ -7,6 +7,8 @@ models/*.gguf
 # Build output
 build/
 build_nocuda/
+build-pr1/
+build-pr1b/
 
 # RAG data
 data/
@@ -16,6 +18,9 @@ web/node_modules/
 web/.next/
 web/.env
 web/.env.local
+mcp-gateway/node_modules/
+mcp-gateway/dist/
+mcp-gateway/.env
 
 # Python
 __pycache__/
