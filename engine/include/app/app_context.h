@@ -16,6 +16,8 @@
 #include "rag/document_store.h"
 #include "security/rate_limiter.h"
 #include "security/rbac_manager.h"
+#include "services/knowledge_search_service.h"
+#include "services/rag_knowledge_search_backend.h"
 #include "services/session_service.h"
 
 namespace fastllm {
@@ -29,6 +31,8 @@ struct AppContext {
     std::unique_ptr<RbacManager> rbac;
     std::unique_ptr<ModelManager> model_mgr;
     std::unique_ptr<RagService> rag;
+    std::unique_ptr<RagKnowledgeSearchBackend> knowledge_search_backend;
+    std::unique_ptr<KnowledgeSearchService> knowledge_search_service;
     std::unique_ptr<RateLimiter> rate_limiter;
     std::unique_ptr<BillingService> billing_service;
     std::unique_ptr<UserRepository> user_repository;
