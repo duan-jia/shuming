@@ -87,6 +87,9 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
         config.get_str("remote_engine.api_key", ""),
         config.get_int("rag.query_rewrite.timeout_seconds", 10)
     ));
+    ctx.knowledge_search_backend = std::make_unique<RagKnowledgeSearchBackend>(*ctx.rag);
+    ctx.knowledge_search_service = std::make_unique<KnowledgeSearchService>(
+        *ctx.knowledge_search_backend);
 
     if (!options.model_path.empty()) {
         spdlog::info("Loading main model: {}", options.model_path);

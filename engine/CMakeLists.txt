@@ -21,6 +21,9 @@ add_executable(fast-llm-reasoner
     src/services/auth_service.cpp
     src/services/chat_service.cpp
     src/services/document_service.cpp
+    src/services/knowledge_search_service.cpp
+    src/services/rag_knowledge_search_backend.cpp
+    src/services/rag_prompt_formatter.cpp
     src/services/session_service.cpp
     src/routes/admin_routes.cpp
     src/routes/auth_routes.cpp
@@ -112,3 +115,17 @@ target_link_libraries(fast-llm-cli PRIVATE
 )
 
 target_compile_definitions(fast-llm-cli PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+
+option(FASTLLM_BUILD_TESTS "Build focused backend unit tests" ON)
+if(FASTLLM_BUILD_TESTS)
+    enable_testing()
+    add_executable(knowledge-search-service-test
+        tests/knowledge_search_service_test.cpp
+        src/services/knowledge_search_service.cpp
+        src/services/rag_prompt_formatter.cpp
+    )
+    target_include_directories(knowledge-search-service-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    add_test(NAME knowledge-search-service-test COMMAND knowledge-search-service-test)
+endif()
