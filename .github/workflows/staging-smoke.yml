@@ -45,11 +45,37 @@ jobs:
           docker compose version
           docker info --format 'Server version={{.ServerVersion}}; CPUs={{.NCPU}}; memory={{.MemTotal}}'
 
-      - name: Run disposable container
+      - name: Run container without an external registry
         shell: bash
-        run: docker run --rm --pull=always hello-world:latest
+        run: |
+          set -euo pipefail
+          image='staging-smoke:local'
+          rootfs="$(mktemp -d)"
+          cleanup() {
+            docker image rm --force "$image" >/dev/null 2>&1 || true
+            rm -rf "$rootfs"
+          }
+          trap cleanup EXIT
 
-      - name: Remove smoke-test image
-        if: always()
+          install -D /bin/echo "$rootfs/bin/echo"
+          while read -r library; do
+            install -D "$library" "$rootfs$library"
+          done < <(
+            ldd /bin/echo |
+              awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^\//) { print $i; break } }'
+          )
+
+          tar -C "$rootfs" -cf - . | docker import - "$image"
+          docker run --rm "$image" /bin/echo 'staging container runtime is healthy'
+
+      - name: Probe Docker Hub connectivity
+        continue-on-error: true
+        timeout-minutes: 1
         shell: bash
-        run: docker image rm hello-world:latest || true
+        run: |
+          curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 20 \
+            --output /dev/null \
+            --write-out 'Docker Hub HTTP status: %{http_code}\n' \
+            https://registry-1.docker.io/v2/
