@@ -68,6 +68,17 @@ jobs:
           tar -C "$rootfs" -cf - . | docker import - "$image"
           docker run --rm "$image" /bin/echo 'staging container runtime is healthy'
 
+      - name: Pull through Tencent Docker mirror
+        shell: bash
+        run: |
+          set -euo pipefail
+          image='mirror.ccs.tencentyun.com/library/hello-world:latest'
+          cleanup() {
+            docker image rm --force "$image" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run --rm --pull=always "$image"
+
       - name: Probe container registries
         timeout-minutes: 2
         shell: bash
