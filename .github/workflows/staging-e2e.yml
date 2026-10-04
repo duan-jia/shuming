@@ -1,0 +1,88 @@
+name: Staging E2E
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/staging-e2e.yml
+      - .dockerignore
+      - deploy/staging/**
+      - CMakeLists.txt
+      - engine/**
+      - mcp-gateway/**
+      - sql/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare-model:
+    name: Prepare pinned embedding model
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Download and verify embedding model
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          curl --fail --location --retry 3 \
+            --output artifact/bge-small-zh-v1.5-q4_k_m.gguf \
+            'https://huggingface.co/CompendiumLabs/bge-small-zh-v1.5-gguf/resolve/5bf683e6a1bd454bbb60ba051088c50731d63fcb/bge-small-zh-v1.5-q4_k_m.gguf?download=true'
+          echo '0c17cc6ed7ec697db6768c2db6dd22c4e816a12c68ed14ff4d764927338532f8  artifact/bge-small-zh-v1.5-q4_k_m.gguf' \
+            | sha256sum --check
+
+      - name: Upload verified model
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-embedding-model
+          path: artifact/bge-small-zh-v1.5-q4_k_m.gguf
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy-and-test:
+    name: Deploy and test staging MCP
+    needs: prepare-model
+    environment: staging
+    runs-on: [self-hosted, Linux, X64, staging]
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Download verified model
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-embedding-model
+          path: .artifacts/embedding
+
+      - name: Deploy stack and run E2E
+        env:
+          EMBEDDING_MODEL_SOURCE: ${{ github.workspace }}/.artifacts/embedding/bge-small-zh-v1.5-q4_k_m.gguf
+          STAGING_ROOT: /opt/fast-llm-reasoner/staging
+        run: ./deploy/staging/deploy.sh
+
+      - name: Show service status after failure
+        if: failure()
+        env:
+          STAGING_ROOT: /opt/fast-llm-reasoner/staging
+        shell: bash
+        run: |
+          set +e
+          if [[ -f "$STAGING_ROOT/.env" ]]; then
+            export REPO_ROOT="$GITHUB_WORKSPACE"
+            docker compose \
+              --env-file "$STAGING_ROOT/.env" \
+              --file deploy/staging/compose.yml \
+              ps
+          fi
