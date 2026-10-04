@@ -35,6 +35,9 @@ CUDA 架构号对照:
 
 ## 快速开始
 
+For a Docker deployment with the existing backend and MCP stack, see
+[the server deployment guide](deploy/server/README.md).
+
 ### 1. 系统依赖
 
 ```bash
