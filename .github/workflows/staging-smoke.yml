@@ -74,6 +74,7 @@ jobs:
         run: |
           set -u
           probe() {
+            set +e
             local name="$1"
             local url="$2"
             local result
@@ -86,6 +87,7 @@ jobs:
                 "$url" 2>&1
             )"
             local rc=$?
+            set -e
             printf '%-24s rc=%s result=%s\n' "$name" "$rc" "$result"
           }
 
