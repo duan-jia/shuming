@@ -6,9 +6,6 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 STAGING_ROOT="${STAGING_ROOT:-/opt/fast-llm-reasoner/staging}"
 ENV_FILE="$STAGING_ROOT/.env"
 CONFIG_FILE="$STAGING_ROOT/config.json"
-MODEL_NAME="bge-small-zh-v1.5-q4_k_m.gguf"
-MODEL_PATH="$STAGING_ROOT/models/$MODEL_NAME"
-MODEL_SHA256="0c17cc6ed7ec697db6768c2db6dd22c4e816a12c68ed14ff4d764927338532f8"
 COMPOSE_FILE="$SCRIPT_DIR/compose.yml"
 
 umask 077
@@ -45,10 +42,11 @@ fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 export REPO_ROOT STAGING_ROOT HOST_UID HOST_GID MYSQL_ROOT_PASSWORD JWT_SECRET
+export BACKEND_IMAGE MCP_IMAGE
 export ADMIN_PASSWORD SERVICE_ACCOUNT_PASSWORD MCP_BEARER_TOKEN MCP_BEARER_TOKEN_SHA256
 
 for required in MYSQL_ROOT_PASSWORD JWT_SECRET ADMIN_PASSWORD SERVICE_ACCOUNT_PASSWORD \
-                MCP_BEARER_TOKEN MCP_BEARER_TOKEN_SHA256; do
+                MCP_BEARER_TOKEN MCP_BEARER_TOKEN_SHA256 BACKEND_IMAGE MCP_IMAGE; do
   [[ -n "${!required:-}" ]] || { echo "Missing $required in $ENV_FILE" >&2; exit 1; }
 done
 
@@ -59,14 +57,6 @@ if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
   printf '::add-mask::%s\n' "$SERVICE_ACCOUNT_PASSWORD"
   printf '::add-mask::%s\n' "$MCP_BEARER_TOKEN"
 fi
-
-if [[ ! -f "$MODEL_PATH" ]]; then
-  : "${EMBEDDING_MODEL_SOURCE:?EMBEDDING_MODEL_SOURCE is required on first deploy}"
-  install -m 600 "$EMBEDDING_MODEL_SOURCE" "$MODEL_PATH.tmp"
-  printf '%s  %s\n' "$MODEL_SHA256" "$MODEL_PATH.tmp" | sha256sum --check --status
-  mv "$MODEL_PATH.tmp" "$MODEL_PATH"
-fi
-printf '%s  %s\n' "$MODEL_SHA256" "$MODEL_PATH" | sha256sum --check --status
 
 sed \
   -e "s/__MYSQL_ROOT_PASSWORD__/$MYSQL_ROOT_PASSWORD/g" \
@@ -80,8 +70,13 @@ compose() {
 }
 
 compose config --quiet
-compose build --pull backend mcp
-compose up --detach --wait --wait-timeout 240 mysql backend mcp
+pull_images() { compose pull backend mcp mysql; }
+for attempt in 1 2 3; do
+  pull_images && break
+  [[ "$attempt" == 3 ]] && { echo 'Image pull failed after three attempts' >&2; exit 1; }
+  sleep $((attempt * 10))
+done
+compose up --detach --no-build --wait --wait-timeout 240 mysql backend mcp
 
 # Reapply the idempotent schema so an existing staging volume receives newly
 # added CREATE TABLE statements without requiring destructive resets.

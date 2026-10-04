@@ -1,5 +1,4 @@
 name: fast-llm-reasoner-staging
-
 services:
   mysql:
     image: mirror.ccs.tencentyun.com/library/mysql:8.4
@@ -16,29 +15,16 @@ services:
       retries: 30
       start_period: 20s
     networks: [staging]
-
   backend:
-    build:
-      context: ../..
-      dockerfile: deploy/staging/backend.Dockerfile
-    image: fast-llm-reasoner-backend:staging
+    image: ${BACKEND_IMAGE}
     restart: unless-stopped
     user: "${HOST_UID}:${HOST_GID}"
     depends_on:
       mysql:
         condition: service_healthy
-    command:
-      - --config
-      - /run/fastllm/config.json
-      - --port
-      - "9006"
-      - --embedding-model
-      - /models/bge-small-zh-v1.5-q4_k_m.gguf
-      - --rag-dir
-      - /data/rag
+    command: ["--config", "/run/fastllm/config.json", "--port", "9006", "--embedding-model", "/models/bge-small-zh-v1.5-q4_k_m.gguf", "--rag-dir", "/data/rag"]
     volumes:
       - ${STAGING_ROOT}/config.json:/run/fastllm/config.json:ro
-      - ${STAGING_ROOT}/models:/models:ro
       - ${STAGING_ROOT}/rag-data:/data/rag
     ports:
       - "127.0.0.1:9006:9006"
@@ -49,12 +35,8 @@ services:
       retries: 36
       start_period: 20s
     networks: [staging]
-
   mcp:
-    build:
-      context: ../..
-      dockerfile: deploy/staging/mcp.Dockerfile
-    image: fast-llm-reasoner-mcp:staging
+    image: ${MCP_IMAGE}
     restart: unless-stopped
     depends_on:
       backend:
@@ -70,20 +52,14 @@ services:
     ports:
       - "127.0.0.1:3100:3100"
     healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - fetch('http://127.0.0.1:3100/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 5s
       timeout: 5s
       retries: 24
       start_period: 10s
     networks: [staging]
-
 volumes:
   mysql-data:
-
 networks:
   staging:
     driver: bridge
