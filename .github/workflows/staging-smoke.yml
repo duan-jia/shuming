@@ -1,0 +1,55 @@
+name: Staging runner smoke
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/staging-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Tencent staging runner smoke
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, staging]
+    timeout-minutes: 10
+
+    steps:
+      - name: Show runner and host resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner: ${RUNNER_NAME}"
+          echo "OS: ${RUNNER_OS}"
+          echo "Architecture: ${RUNNER_ARCH}"
+          uname -a
+          nproc
+          free -h
+          df -h /
+
+      - name: Verify Docker and Compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -S /var/run/docker.sock
+          docker version
+          docker compose version
+          docker info --format 'Server version={{.ServerVersion}}; CPUs={{.NCPU}}; memory={{.MemTotal}}'
+
+      - name: Run disposable container
+        shell: bash
+        run: docker run --rm --pull=always hello-world:latest
+
+      - name: Remove smoke-test image
+        if: always()
+        shell: bash
+        run: docker image rm hello-world:latest || true
