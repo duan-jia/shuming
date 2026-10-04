@@ -21,36 +21,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare-model:
-    name: Prepare pinned embedding model
+  deploy-and-test:
+    name: Deploy and test staging MCP
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Download and verify embedding model
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p artifact
-          curl --fail --location --retry 3 \
-            --output artifact/bge-small-zh-v1.5-q4_k_m.gguf \
-            'https://huggingface.co/CompendiumLabs/bge-small-zh-v1.5-gguf/resolve/5bf683e6a1bd454bbb60ba051088c50731d63fcb/bge-small-zh-v1.5-q4_k_m.gguf?download=true'
-          echo '0c17cc6ed7ec697db6768c2db6dd22c4e816a12c68ed14ff4d764927338532f8  artifact/bge-small-zh-v1.5-q4_k_m.gguf' \
-            | sha256sum --check
-
-      - name: Upload verified model
-        uses: actions/upload-artifact@v4
-        with:
-          name: staging-embedding-model
-          path: artifact/bge-small-zh-v1.5-q4_k_m.gguf
-          if-no-files-found: error
-          retention-days: 1
-
-  deploy-and-test:
-    name: Deploy and test staging MCP
-    needs: prepare-model
     environment: staging
     runs-on: [self-hosted, Linux, X64, staging]
     timeout-minutes: 60
@@ -60,11 +35,34 @@ jobs:
         with:
           clean: true
 
-      - name: Download verified model
-        uses: actions/download-artifact@v4
-        with:
-          name: staging-embedding-model
-          path: .artifacts/embedding
+      - name: Download and verify embedding model
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/embedding
+          target='.artifacts/embedding/bge-small-zh-v1.5-q4_k_m.gguf'
+          expected='0c17cc6ed7ec697db6768c2db6dd22c4e816a12c68ed14ff4d764927338532f8'
+          urls=(
+            'https://huggingface.co/CompendiumLabs/bge-small-zh-v1.5-gguf/resolve/5bf683e6a1bd454bbb60ba051088c50731d63fcb/bge-small-zh-v1.5-q4_k_m.gguf?download=true'
+            'https://hf-mirror.com/CompendiumLabs/bge-small-zh-v1.5-gguf/resolve/5bf683e6a1bd454bbb60ba051088c50731d63fcb/bge-small-zh-v1.5-q4_k_m.gguf'
+          )
+
+          downloaded=false
+          for url in "${urls[@]}"; do
+            if curl --fail --location --retry 2 \
+              --connect-timeout 10 --max-time 180 \
+              --output "$target.tmp" "$url"; then
+              actual="$(sha256sum "$target.tmp" | awk '{print $1}')"
+              if [[ "$actual" == "$expected" ]]; then
+                mv "$target.tmp" "$target"
+                downloaded=true
+                break
+              fi
+              echo "Downloaded model checksum mismatch" >&2
+            fi
+          done
+          [[ "$downloaded" == true ]] || { echo 'Unable to fetch the verified embedding model' >&2; exit 1; }
+          printf '%s  %s\n' "$expected" "$target" | sha256sum --check
 
       - name: Deploy stack and run E2E
         env:
