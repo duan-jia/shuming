@@ -19,7 +19,7 @@ RUN set -eux; \
     ldd /src/build/bin/fast-llm-reasoner \
       | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^\//) { print $i; break } }' \
       | sort -u \
-      | xargs -r -I '{}' cp --parents -L '{}' /runtime-libs
+      | xargs -r -I '{}' cp -L '{}' /runtime-libs/
 
 FROM ${UBUNTU_IMAGE} AS runtime
 ARG DEBIAN_FRONTEND=noninteractive
@@ -28,10 +28,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /app fastllm \
     && mkdir -p /models
-COPY --from=build /runtime-libs/ /
+COPY --from=build /runtime-libs/ /opt/fast-llm-reasoner/lib/
 COPY --from=build /src/build/bin/fast-llm-reasoner /usr/local/bin/fast-llm-reasoner
 COPY .artifacts/embedding/bge-small-zh-v1.5-q4_k_m.gguf /models/bge-small-zh-v1.5-q4_k_m.gguf
 RUN chmod 0444 /models/bge-small-zh-v1.5-q4_k_m.gguf
+ENV LD_LIBRARY_PATH=/opt/fast-llm-reasoner/lib
 WORKDIR /app
 USER fastllm
 EXPOSE 9006
