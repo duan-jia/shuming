@@ -45,3 +45,6 @@ skills-lock.json
 
 # Agent change records
 .tmp/
+
+# Deployment build artifacts
+.artifacts/
