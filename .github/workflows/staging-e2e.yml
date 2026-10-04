@@ -6,20 +6,24 @@ on:
       - .github/workflows/staging-e2e.yml
       - .dockerignore
       - deploy/staging/**
+      - deploy/server/**
+      - web/**
       - CMakeLists.txt
       - engine/**
       - mcp-gateway/**
       - sql/**
+      - tests/test_staging_isolation.py
   workflow_dispatch:
 permissions:
   contents: read
   packages: write
 concurrency:
-  group: staging-e2e-${{ github.ref }}
-  cancel-in-progress: true
+  group: lab-server-release
+  cancel-in-progress: false
 env:
   BACKEND_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-backend:${{ github.sha }}
   MCP_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-mcp:${{ github.sha }}
+  WEB_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-web:${{ github.sha }}
 jobs:
   build-images:
     name: Build staging images
@@ -51,6 +55,10 @@ jobs:
         run: |
           docker build --file deploy/staging/mcp.Dockerfile --tag "$MCP_IMAGE" .
           docker push "$MCP_IMAGE"
+      - name: Build and push frontend image
+        run: |
+          docker build --file deploy/server/web.Dockerfile --tag "$WEB_IMAGE" .
+          docker push "$WEB_IMAGE"
       - name: Log out from GHCR
         if: always()
         run: docker logout ghcr.io || true
@@ -69,18 +77,29 @@ jobs:
         run: echo '${{ github.token }}' | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
       - name: Deploy stack and run E2E
         env:
-          STAGING_ROOT: /opt/fast-llm-reasoner/staging
+          STAGING_ROOT: /srv/fastllm-staging
         run: ./deploy/staging/deploy.sh
+      - name: Stop test containers without removing data
+        if: always()
+        env:
+          STAGING_ROOT: /srv/fastllm-staging
+        shell: bash
+        run: |
+          python3 deploy/staging/guard.py
+          if [[ -f "$STAGING_ROOT/.env" ]]; then
+            export REPO_ROOT="$GITHUB_WORKSPACE"
+            docker compose --env-file "$STAGING_ROOT/.env" -f deploy/staging/compose.json stop --timeout 20
+          fi
       - name: Show service status after failure
         if: failure()
         env:
-          STAGING_ROOT: /opt/fast-llm-reasoner/staging
+          STAGING_ROOT: /srv/fastllm-staging
         shell: bash
         run: |
           set +e
           if [[ -f "$STAGING_ROOT/.env" ]]; then
             export REPO_ROOT="$GITHUB_WORKSPACE"
-            docker compose --env-file "$STAGING_ROOT/.env" --file deploy/staging/compose.yml ps
+            docker compose --env-file "$STAGING_ROOT/.env" --file deploy/staging/compose.json ps
           fi
       - name: Log out from GHCR
         if: always()

@@ -77,9 +77,8 @@ sudo docker compose -f /srv/waku-simple/compose.json \
 ```
 
 The backend override pins the installed images. Choose new image versions
-explicitly when upgrading. The original staging workflow regenerates the model
-configuration and removes the MCP integration network; do not use it to update
-the live deployment until it preserves those settings.
+explicitly when upgrading. CI staging now uses a separate project, directory, network and database.
+See [isolated staging](../staging/README.md) for the release workflow.
 
 ## Waku and HTTPS
 
@@ -125,3 +124,43 @@ After deployment, check HTTPS, administrator login, anonymous API rejection,
 a short remote-model chat and retrieval from Waku. Keep credentials and
 retrieved knowledge on the server; report only pass/fail. Verification leaves
 a chat titled Deployment verification in the administrator's history.
+
+## Manual production release
+
+Production release accepts a full image SHA from a successful Staging E2E run.
+It pulls the three images, saves previous image IDs and Compose settings in
+backups/release-*.json, recreates backend, MCP and frontend, and waits for health.
+It restores the previous images if deployment fails. It preserves database,
+model configuration, PDF directories, Waku containers and MCP network settings.
+This rollback does not reverse SQL migrations; apply migrations separately.
+
+The installed root-owned /usr/local/sbin/lab-production-release wrapper invokes
+/usr/local/lib/lab-production-release/release.py. It accepts only the immutable
+image revision and uses /home/gha-runner/.docker for registry authentication.
+A narrowly scoped sudoers entry allows gha-runner to invoke that wrapper.
+Changes to this privileged helper require installation by the server operator.
+The Actions workflow never runs a checkout's Python code through sudo.
+
+Preview image selections without changing the server:
+
+```bash
+python3 deploy/server/release.py --revision FULL_40_CHARACTER_SHA
+```
+
+After a successful release, verify HTTPS, login, chat and Waku retrieval.
+The automated health checks confirm readiness, not answer quality or every
+application route. Existing manually issued certificates still need renewal.
+
+Install the privileged helper from the reviewed checkout as a server operator:
+
+```bash
+sudo install -d -o root -g root -m 755 /usr/local/lib/lab-production-release
+sudo install -o root -g root -m 644 deploy/server/release.py /usr/local/lib/lab-production-release/release.py
+sudo install -o root -g root -m 755 deploy/server/lab-production-release /usr/local/sbin/lab-production-release
+```
+
+The sudoers entry is `gha-runner ALL=(root) NOPASSWD: /usr/local/sbin/lab-production-release *`.
+Install it through visudo with mode 0440 after explicitly approving this
+privilege. The wrapper clears inherited environment variables, isolates Python
+imports and accepts exactly one argument. The helper rejects non-SHA arguments
+before it reads production files or runs Docker.

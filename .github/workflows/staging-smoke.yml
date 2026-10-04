@@ -1,18 +1,14 @@
 name: Staging runner smoke
 
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - .github/workflows/staging-smoke.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: staging-smoke-${{ github.ref }}
-  cancel-in-progress: true
+  group: lab-server-release
+  cancel-in-progress: false
 
 jobs:
   smoke:

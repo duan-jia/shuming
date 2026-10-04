@@ -3,10 +3,14 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-STAGING_ROOT="${STAGING_ROOT:-/opt/fast-llm-reasoner/staging}"
+cd "$REPO_ROOT"
+STAGING_ROOT="${STAGING_ROOT:-/srv/fastllm-staging}"
+export STAGING_ROOT
+# Refuse production paths before creating files or invoking Docker.
+python3 "$SCRIPT_DIR/guard.py"
 ENV_FILE="$STAGING_ROOT/.env"
 CONFIG_FILE="$STAGING_ROOT/config.json"
-COMPOSE_FILE="$SCRIPT_DIR/compose.yml"
+COMPOSE_FILE="$SCRIPT_DIR/compose.json"
 
 umask 077
 mkdir -p "$STAGING_ROOT/models" "$STAGING_ROOT/rag-data"
@@ -70,7 +74,15 @@ compose() {
 }
 
 compose config --quiet
-pull_images() { compose pull backend mcp mysql; }
+# Preserve the database and RAG volume while releasing RAM after each run.
+trap 'compose stop --timeout 20 >/dev/null' EXIT
+pull_images() {
+  if docker image inspect "$BACKEND_IMAGE" "$MCP_IMAGE" \
+       mirror.ccs.tencentyun.com/library/mysql:8.4 >/dev/null 2>&1; then
+    return 0
+  fi
+  compose pull backend mcp mysql
+}
 for attempt in 1 2 3; do
   pull_images && break
   [[ "$attempt" == 3 ]] && { echo 'Image pull failed after three attempts' >&2; exit 1; }
@@ -84,7 +96,7 @@ compose exec --no-TTY \
   --env MYSQL_PWD="$MYSQL_ROOT_PASSWORD" \
   mysql mysql --user=root <"$REPO_ROOT/sql/init.sql"
 
-backend_url='http://127.0.0.1:9006'
+backend_url='http://127.0.0.1:19006'
 admin_response="$(
   curl --fail-with-body --silent --show-error \
     --header 'Content-Type: application/json' \
@@ -124,12 +136,9 @@ doc_id="$(printf '%s' "$documents" | jq --raw-output \
 doc_status="$(printf '%s' "$documents" | jq --raw-output \
   '.documents[]? | select(.filename == "staging-e2e.md") | .status' | head -n1)"
 
-if [[ -n "$doc_id" && "$doc_status" != ready ]]; then
-  curl --fail-with-body --silent --show-error \
-    --request DELETE \
-    --header "Authorization: Bearer $admin_token" \
-    "$backend_url/api/documents/$doc_id" >/dev/null
-  doc_id=''
+if [[ -n "$doc_id" && "$doc_status" == failed ]]; then
+  echo 'The staging fixture failed. Inspect it without deleting stored data.' >&2
+  exit 1
 fi
 
 if [[ -z "$doc_id" ]]; then
