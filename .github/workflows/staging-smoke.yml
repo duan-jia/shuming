@@ -68,14 +68,29 @@ jobs:
           tar -C "$rootfs" -cf - . | docker import - "$image"
           docker run --rm "$image" /bin/echo 'staging container runtime is healthy'
 
-      - name: Probe Docker Hub connectivity
-        continue-on-error: true
-        timeout-minutes: 1
+      - name: Probe container registries
+        timeout-minutes: 2
         shell: bash
         run: |
-          curl --silent --show-error \
-            --connect-timeout 10 \
-            --max-time 20 \
-            --output /dev/null \
-            --write-out 'Docker Hub HTTP status: %{http_code}\n' \
-            https://registry-1.docker.io/v2/
+          set -u
+          probe() {
+            local name="$1"
+            local url="$2"
+            local result
+            result="$(
+              curl --silent --show-error \
+                --connect-timeout 5 \
+                --max-time 10 \
+                --output /dev/null \
+                --write-out '%{http_code}' \
+                "$url" 2>&1
+            )"
+            local rc=$?
+            printf '%-24s rc=%s result=%s\n' "$name" "$rc" "$result"
+          }
+
+          probe 'Docker Hub' 'https://registry-1.docker.io/v2/'
+          probe 'GitHub Container Registry' 'https://ghcr.io/v2/'
+          probe 'Tencent TCR' 'https://ccr.ccs.tencentyun.com/v2/'
+          probe 'Tencent Docker mirror' 'https://mirror.ccs.tencentyun.com/v2/'
+          exit 0
