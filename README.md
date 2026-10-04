@@ -185,6 +185,12 @@ remote_engine.{endpoint,model,api_key}    DeepSeek 作为 fallback
 | DELETE | `/api/documents/:id` | 删除文档 (admin, 软删除) |
 | POST | `/api/documents/search` | RAG 检索 (混合:向量+BM25) |
 
+## MCP 接入
+
+`mcp-gateway/` 提供面向内部 Agent 的远程 Streamable HTTP MCP 网关。首版工具
+`search_knowledge` 复用上述 RAG 检索接口，租户由经过认证的 service principal 绑定，
+而不是由工具参数传入。配置、运行和验证方法见 [`mcp-gateway/README.md`](mcp-gateway/README.md)。
+
 ## PDF 文档上传与 RAG
 
 文档链路只支持带可提取文本的 PDF：

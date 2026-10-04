@@ -1,0 +1,87 @@
+name: Staging E2E
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/staging-e2e.yml
+      - .dockerignore
+      - deploy/staging/**
+      - CMakeLists.txt
+      - engine/**
+      - mcp-gateway/**
+      - sql/**
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: staging-e2e-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  BACKEND_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-backend:${{ github.sha }}
+  MCP_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-mcp:${{ github.sha }}
+jobs:
+  build-images:
+    name: Build staging images
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Download and verify embedding model
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/embedding
+          target='.artifacts/embedding/bge-small-zh-v1.5-q4_k_m.gguf'
+          expected='0c17cc6ed7ec697db6768c2db6dd22c4e816a12c68ed14ff4d764927338532f8'
+          curl --fail --location --retry 3 --output "$target" \
+            'https://huggingface.co/CompendiumLabs/bge-small-zh-v1.5-gguf/resolve/5bf683e6a1bd454bbb60ba051088c50731d63fcb/bge-small-zh-v1.5-q4_k_m.gguf?download=true'
+          printf '%s  %s\n' "$expected" "$target" | sha256sum --check
+      - name: Log in to GHCR
+        run: echo '${{ github.token }}' | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+      - name: Build and push backend image
+        run: |
+          docker build --file deploy/staging/backend.Dockerfile --tag "$BACKEND_IMAGE" .
+          docker push "$BACKEND_IMAGE"
+      - name: Build and push MCP image
+        run: |
+          docker build --file deploy/staging/mcp.Dockerfile --tag "$MCP_IMAGE" .
+          docker push "$MCP_IMAGE"
+      - name: Log out from GHCR
+        if: always()
+        run: docker logout ghcr.io || true
+  deploy-and-test:
+    name: Deploy and test staging MCP
+    needs: build-images
+    environment: staging
+    runs-on: [self-hosted, Linux, X64, staging]
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          clean: true
+      - name: Log in to GHCR
+        run: echo '${{ github.token }}' | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+      - name: Deploy stack and run E2E
+        env:
+          STAGING_ROOT: /opt/fast-llm-reasoner/staging
+        run: ./deploy/staging/deploy.sh
+      - name: Show service status after failure
+        if: failure()
+        env:
+          STAGING_ROOT: /opt/fast-llm-reasoner/staging
+        shell: bash
+        run: |
+          set +e
+          if [[ -f "$STAGING_ROOT/.env" ]]; then
+            export REPO_ROOT="$GITHUB_WORKSPACE"
+            docker compose --env-file "$STAGING_ROOT/.env" --file deploy/staging/compose.yml ps
+          fi
+      - name: Log out from GHCR
+        if: always()
+        run: docker logout ghcr.io || true
