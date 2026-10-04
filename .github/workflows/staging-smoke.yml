@@ -1,0 +1,109 @@
+name: Staging runner smoke
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/staging-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Tencent staging runner smoke
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, staging]
+    timeout-minutes: 10
+
+    steps:
+      - name: Show runner and host resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner: ${RUNNER_NAME}"
+          echo "OS: ${RUNNER_OS}"
+          echo "Architecture: ${RUNNER_ARCH}"
+          uname -a
+          nproc
+          free -h
+          df -h /
+
+      - name: Verify Docker and Compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -S /var/run/docker.sock
+          docker version
+          docker compose version
+          docker info --format 'Server version={{.ServerVersion}}; CPUs={{.NCPU}}; memory={{.MemTotal}}'
+
+      - name: Run container without an external registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          image='staging-smoke:local'
+          rootfs="$(mktemp -d)"
+          cleanup() {
+            docker image rm --force "$image" >/dev/null 2>&1 || true
+            rm -rf "$rootfs"
+          }
+          trap cleanup EXIT
+
+          install -D /bin/echo "$rootfs/bin/echo"
+          while read -r library; do
+            install -D "$library" "$rootfs$library"
+          done < <(
+            ldd /bin/echo |
+              awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^\//) { print $i; break } }'
+          )
+
+          tar -C "$rootfs" -cf - . | docker import - "$image"
+          docker run --rm "$image" /bin/echo 'staging container runtime is healthy'
+
+      - name: Pull through Tencent Docker mirror
+        shell: bash
+        run: |
+          set -euo pipefail
+          image='mirror.ccs.tencentyun.com/library/hello-world:latest'
+          cleanup() {
+            docker image rm --force "$image" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run --rm --pull=always "$image"
+
+      - name: Probe container registries
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -u
+          probe() {
+            set +e
+            local name="$1"
+            local url="$2"
+            local result
+            result="$(
+              curl --silent --show-error \
+                --connect-timeout 5 \
+                --max-time 10 \
+                --output /dev/null \
+                --write-out '%{http_code}' \
+                "$url" 2>&1
+            )"
+            local rc=$?
+            set -e
+            printf '%-24s rc=%s result=%s\n' "$name" "$rc" "$result"
+          }
+
+          probe 'Docker Hub' 'https://registry-1.docker.io/v2/'
+          probe 'GitHub Container Registry' 'https://ghcr.io/v2/'
+          probe 'Tencent TCR' 'https://ccr.ccs.tencentyun.com/v2/'
+          probe 'Tencent Docker mirror' 'https://mirror.ccs.tencentyun.com/v2/'
+          exit 0

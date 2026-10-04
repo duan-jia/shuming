@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend CPU build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            cmake \
+            default-libmysqlclient-dev \
+            git \
+            gfortran \
+            libboost-all-dev \
+            libopenblas-dev \
+            libssl-dev
+
+      - name: Configure CPU Release build
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF
+
+      - name: Build focused test
+        run: cmake --build build --target knowledge-search-service-test --parallel 2
+
+      - name: Run focused backend test
+        run: ./build/bin/knowledge-search-service-test
+
+      - name: Build backend server
+        run: cmake --build build --target fast-llm-reasoner --parallel 2
+
+      - name: Build backend CLI
+        run: cmake --build build --target fast-llm-cli --parallel 2
+
+  mcp-gateway:
+    name: MCP gateway checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mcp-gateway
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mcp-gateway/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
