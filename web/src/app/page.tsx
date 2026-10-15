@@ -69,10 +69,11 @@ const documentStatus: Record<DocumentItem["status"], { label: string; className:
 };
 
 const API_BASE = "";
+const EMPTY_MESSAGES: Message[] = [];
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [sessionMessages, setSessionMessages] = useState<Record<string, Message[]>>({});
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState<Record<string, boolean>>({});
   const [token, setToken] = useState("");
   const [loggedIn, setLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState<"admin" | "user">("user");
@@ -81,6 +82,13 @@ export default function Home() {
   const [loginError, setLoginError] = useState("");
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<string>("");
+  const messages = sessionMessages[activeSession] || EMPTY_MESSAGES;
+  const loading = !!generating[activeSession];
+  const requests = useRef(new Map<string, AbortController>());
+  const historyVersions = useRef(new Map<string, number>());
+  const navigationVersion = useRef(0);
+  const historySequence = useRef(0);
+  const activeSessionRef = useRef(activeSession);
   const [activeView, setActiveView] = useState<"chat" | "documents">("chat");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(false);
@@ -97,6 +105,14 @@ export default function Home() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    const pending = requests.current;
+    return () => {
+      for (const controller of pending.values()) controller.abort();
+      pending.clear();
+    };
+  }, []);
 
   const fetchSessions = useCallback(async () => {
     if (!token) return;
@@ -157,6 +173,7 @@ export default function Home() {
   }, [activeView, documents, fetchDocuments]);
 
   const createSession = useCallback(async () => {
+    const navigation = ++navigationVersion.current;
     try {
       const res = await fetch(`${API_BASE}/api/sessions`, {
         method: "POST",
@@ -167,26 +184,32 @@ export default function Home() {
         body: JSON.stringify({ title: "新对话" }),
       });
       const data = await res.json();
-      if (data.id) {
+      if (data.id && navigation === navigationVersion.current) {
+        activeSessionRef.current = data.id;
         setActiveView("chat");
         setActiveSession(data.id);
-        setMessages([]);
+        setSessionMessages((prev) => ({ ...prev, [data.id]: [] }));
         fetchSessions();
       }
     } catch {}
   }, [token, fetchSessions]);
 
   const switchSession = useCallback(async (id: string) => {
+    ++navigationVersion.current;
+    activeSessionRef.current = id;
     setActiveView("chat");
     setActiveSession(id);
-    setMessages([]);
+    // In-flight replies are authoritative; do not replace them with DB history.
+    if (requests.current.has(id)) return;
+    const version = ++historySequence.current;
+    historyVersions.current.set(id, version);
 
     try {
       const res = await fetch(`${API_BASE}/api/sessions/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (data.messages) {
+      if (data.messages && historyVersions.current.get(id) === version && !requests.current.has(id)) {
         const loaded: Message[] = data.messages.map(
           (m: { id: number; role: string; content: string }) => ({
             id: String(m.id),
@@ -195,7 +218,7 @@ export default function Home() {
             isStreaming: false,
           })
         );
-        setMessages(loaded);
+        setSessionMessages((prev) => ({ ...prev, [id]: loaded }));
       }
     } catch {}
   }, [token]);
@@ -208,14 +231,24 @@ export default function Home() {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (activeSession === id) {
+        historyVersions.current.set(id, ++historySequence.current);
+        requests.current.get(id)?.abort();
+        requests.current.delete(id);
+        setGenerating((prev) => ({ ...prev, [id]: false }));
+        setSessionMessages((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        if (activeSessionRef.current === id) {
+          ++navigationVersion.current;
+          activeSessionRef.current = "";
           setActiveSession("");
-          setMessages([]);
         }
         fetchSessions();
       } catch {}
     },
-    [token, activeSession, fetchSessions]
+    [token, fetchSessions]
   );
 
   const login = useCallback(async () => {
@@ -358,7 +391,11 @@ export default function Home() {
   }, [token]);
 
   const sendMessage = useCallback(async () => {
-    if (!input.trim() || loading) return;
+    if (!input.trim() || requests.current.has(activeSession)) return;
+    const controller = new AbortController();
+    const navigation = navigationVersion.current;
+    requests.current.set(activeSession, controller);
+    setGenerating((prev) => ({ ...prev, [activeSession]: true }));
 
     let sid = activeSession;
     if (!sid) {
@@ -370,18 +407,36 @@ export default function Home() {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ title: input.slice(0, 40) }),
+          signal: controller.signal,
         });
         const data = await res.json();
+        if (requests.current.get("") !== controller) return;
+        if (!res.ok || !data.id) throw new Error("无法创建会话");
         if (data.id) {
           sid = data.id;
-          setActiveSession(sid);
+          requests.current.delete("");
+          requests.current.set(sid, controller);
+          setGenerating((prev) => ({ ...prev, "": false, [sid]: true }));
+          if (navigation === navigationVersion.current) {
+            activeSessionRef.current = sid;
+            setActiveSession(sid);
+          }
           fetchSessions();
         }
       } catch {
+        if (requests.current.get("") === controller) {
+          requests.current.delete("");
+          setGenerating((prev) => ({ ...prev, "": false }));
+        }
         return;
       }
     }
 
+    historyVersions.current.set(sid, ++historySequence.current);
+    const setMessages = (update: (messages: Message[]) => Message[]) => {
+      if (requests.current.get(sid) !== controller) return;
+      setSessionMessages((prev) => ({ ...prev, [sid]: update(prev[sid] || []) }));
+    };
     const userMsg: Message = {
       id: Date.now().toString(),
       role: "user",
@@ -398,8 +453,7 @@ export default function Home() {
       isStreaming: true,
     };
     setMessages((prev) => [...prev, assistantMsg]);
-    setInput("");
-    setLoading(true);
+    if (navigation === navigationVersion.current) setInput("");
 
     try {
       const res = await fetch(`${API_BASE}/api/chat/stream`, {
@@ -410,8 +464,10 @@ export default function Home() {
           "X-Request-Id": createRequestId(),
         },
         body: JSON.stringify({ message: userMsg.content, session_id: sid }),
+        signal: controller.signal,
       });
 
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const reader = res.body?.getReader();
       if (!reader) throw new Error("No reader");
 
@@ -419,69 +475,79 @@ export default function Home() {
       let buffer = "";
       let eventType = "message";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+      let finished = false;
+      try {
+        while (!finished) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
 
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
 
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            eventType = line.slice(7);
-          } else if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            if (data === "[DONE]") continue;
-            try {
-              const parsed = JSON.parse(data);
-              if (eventType === "error" || parsed.type === "error" || parsed.error) {
-                setMessages((prev) =>
-                  prev.map((message) =>
-                    message.id === msgId
-                      ? {
-                          ...message,
-                          content: parsed.error || "Error",
-                          isStreaming: false,
-                          isReasoning: false,
-                        }
-                      : message
-                  )
-                );
-              } else if (parsed.type === "answer") {
-                setMessages((prev) =>
-                  prev.map((message) =>
-                    message.id === msgId
-                      ? {
-                          ...message,
-                          content: message.content + parsed.content,
-                          isReasoning: false,
-                        }
-                      : message
-                  )
-                );
-              } else if (parsed.type === "reasoning") {
-                setMessages((prev) =>
-                  prev.map((message) =>
-                    message.id === msgId ? { ...message, isReasoning: true } : message
-                  )
-                );
-              } else if (parsed.type === "done") {
-                setMessages((prev) =>
-                  prev.map((message) =>
-                    message.id === msgId
-                      ? { ...message, isStreaming: false, isReasoning: false }
-                      : message
-                  )
-                );
-              }
-            } catch {}
-          } else if (line === "") {
-            eventType = "message";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              eventType = line.slice(7);
+            } else if (line.startsWith("data: ")) {
+              const data = line.slice(6);
+              if (data === "[DONE]") { finished = true; break; }
+              try {
+                const parsed = JSON.parse(data);
+                if (eventType === "error" || parsed.type === "error" || parsed.error) {
+                  finished = true;
+                  setMessages((prev) =>
+                    prev.map((message) =>
+                      message.id === msgId
+                        ? {
+                            ...message,
+                            content: parsed.error || "Error",
+                            isStreaming: false,
+                            isReasoning: false,
+                          }
+                        : message
+                    )
+                  );
+                } else if (parsed.type === "answer") {
+                  setMessages((prev) =>
+                    prev.map((message) =>
+                      message.id === msgId
+                        ? {
+                            ...message,
+                            content: message.content + parsed.content,
+                            isReasoning: false,
+                          }
+                        : message
+                    )
+                  );
+                } else if (parsed.type === "reasoning") {
+                  setMessages((prev) =>
+                    prev.map((message) =>
+                      message.id === msgId ? { ...message, isReasoning: true } : message
+                    )
+                  );
+                } else if (parsed.type === "done") {
+                  finished = true;
+                  setMessages((prev) =>
+                    prev.map((message) =>
+                      message.id === msgId
+                        ? { ...message, isStreaming: false, isReasoning: false }
+                        : message
+                    )
+                  );
+                }
+              } catch {}
+              if (finished) break;
+            } else if (line === "") {
+              eventType = "message";
+            }
           }
         }
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
       }
     } catch (error) {
+      if (controller.signal.aborted) return;
       const errorMessage =
         error instanceof Error && error.message
           ? `请求失败：${error.message}`
@@ -497,10 +563,16 @@ export default function Home() {
             : message
         )
       );
+    } finally {
+      setMessages((prev) => prev.map((message) =>
+        message.id === msgId ? { ...message, isStreaming: false, isReasoning: false } : message
+      ));
+      if (requests.current.get(sid) === controller) {
+        requests.current.delete(sid);
+        setGenerating((prev) => ({ ...prev, [sid]: false }));
+      }
     }
-
-    setLoading(false);
-  }, [input, loading, token, activeSession, fetchSessions]);
+  }, [input, token, activeSession, fetchSessions]);
 
   if (!loggedIn) {
     return (
@@ -627,6 +699,15 @@ export default function Home() {
           <button
             className="text-sm text-slate-400 transition hover:text-white"
             onClick={() => {
+              ++navigationVersion.current;
+              for (const controller of requests.current.values()) controller.abort();
+              requests.current.clear();
+              historyVersions.current.clear();
+              activeSessionRef.current = "";
+              setActiveSession("");
+              setSessionMessages({});
+              setGenerating({});
+              setInput("");
               setLoggedIn(false);
               setToken("");
               setUserRole("user");
