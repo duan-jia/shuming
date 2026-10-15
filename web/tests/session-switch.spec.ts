@@ -1,0 +1,201 @@
+// Run against `npm run dev` or `npm start` with Node >=22.18 and Chromium:
+// node --experimental-strip-types --test tests/session-switch.spec.ts
+// TEST_URL and CHROMIUM_PATH optionally override the defaults. No backend needed.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+test('background replies and session navigation stay isolated', { timeout: 90000 }, async () => {
+  const profile = await mkdtemp(join(tmpdir(), 'shuming-chat-'));
+  const browser = spawn(process.env.CHROMIUM_PATH || '/usr/bin/chromium', [
+    '--headless', '--no-sandbox', '--disable-dev-shm-usage', '--no-proxy-server',
+    '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank',
+  ]);
+  let socket: WebSocket | undefined;
+  try {
+    const endpoint = await new Promise<string>((resolve, reject) => {
+      let output = '';
+      const timeout = setTimeout(() => reject(new Error('Chromium startup timed out')), 15000);
+      browser.once('error', reject);
+      browser.stderr.on('data', (chunk) => {
+        output += chunk;
+        const match = output.match(/DevTools listening on (ws:\/\/[^\s]+)/);
+        if (match) { clearTimeout(timeout); resolve(match[1]); }
+      });
+    });
+    const origin = `http://${new URL(endpoint).host}`;
+    const target = await (await fetch(`${origin}/json/new?about:blank`, { method: 'PUT' })).json();
+    socket = new WebSocket(target.webSocketDebuggerUrl);
+    await new Promise<void>((resolve, reject) => {
+      socket!.addEventListener('open', () => resolve(), { once: true });
+      socket!.addEventListener('error', reject, { once: true });
+    });
+    let sequence = 0;
+    const pending = new Map<number, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }>();
+    const errors: string[] = [];
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.method === 'Runtime.exceptionThrown') errors.push(JSON.stringify(message.params));
+      const request = pending.get(message.id);
+      if (request) {
+        pending.delete(message.id);
+        if (message.error) request.reject(new Error(JSON.stringify(message.error)));
+        else request.resolve(message.result);
+      }
+    });
+    const command = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+      const id = ++sequence;
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        socket!.send(JSON.stringify({ id, method, params }));
+      });
+    };
+    const evaluate = async <T,>(expression: string): Promise<T> => {
+      const result = await command('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+      assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
+      return (result.result as { value: T }).value;
+    };
+    const wait = async (condition: string): Promise<void> => {
+      for (let i = 0; i < 100; i++) {
+        if (await evaluate<boolean>(condition)) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error(`Condition timed out: ${condition}; page=${await evaluate("document.body.innerText")}; errors=${JSON.stringify(errors)}`);
+    };
+    const click = async (label: string): Promise<void> => {
+      await evaluate(`Array.from(document.querySelectorAll('button,aside span')).find(e=>e.textContent.trim()===${JSON.stringify(label)}).click()`);
+    };
+    const send = async (text: string): Promise<void> => {
+      await evaluate(`(() => {
+        const input = document.querySelector('input[placeholder="输入问题"]');
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(text)});
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+      })()`);
+      await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==='发送'&&!b.disabled)`);
+      await click('发送');
+    };
+    await command('Page.enable');
+    await command('Runtime.enable');
+    await command('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    await command('Page.addScriptToEvaluateOnNewDocument', { source: `
+      (() => {
+        const original = window.fetch.bind(window);
+        const sessions = ['A','B','C'].map(id=>({id,title:'会话'+id}));
+        window.mock = { streams:{}, histories:{}, delayed:{}, status:200 };
+        const json = data => new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
+        window.mock.emit = (id,data) => window.mock.streams[id].enqueue(new TextEncoder().encode('data: '+JSON.stringify(data)+'\\n\\n'));
+        window.fetch = async (input, options={}) => {
+          const url = new URL(String(input), location.href);
+          if (url.pathname === '/api/auth/login') return json({token:'test-only',user:{role:'user'}});
+          if (url.pathname === '/api/sessions' && options.method === 'POST') {
+            const id = 'N'+sessions.length; sessions.push({id,title:'新会话'+id}); return json({id});
+          }
+          if (url.pathname === '/api/sessions') return json({sessions});
+          if (url.pathname === '/api/chat/stream') {
+            if (window.mock.status!==200) return new Response('failed',{status:window.mock.status});
+            const id = JSON.parse(options.body).session_id;
+            return new Response(new ReadableStream({start(controller){
+              window.mock.streams[id]=controller;
+              options.signal?.addEventListener('abort',()=>controller.error(new DOMException('aborted','AbortError')));
+            }}),{headers:{'Content-Type':'text/event-stream'}});
+          }
+          if (url.pathname.startsWith('/api/sessions/')) {
+            const id=url.pathname.split('/').pop();
+            if (options.method==='DELETE') return json({});
+            if (window.mock.delayed[id]) return new Promise(resolve=>window.mock.histories[id]=()=>resolve(json({messages:[{id:1,role:'assistant',content:'旧历史'+id}]})));
+            return json({messages:[]});
+          }
+          return original(input,options);
+        };
+      })();` });
+    await command('Page.navigate', { url: process.env.TEST_URL || 'http://localhost:3000' });
+    await wait(`document.querySelector('input[placeholder="请输入密码"]')!==null`);
+    await wait(`Object.keys(document.querySelector('input')).some(k=>k.startsWith('__reactProps'))`);
+    await click('登录');
+    await wait(`document.body.innerText.includes('会话A')`);
+    await click('会话A');
+    await send('问题A');
+    await wait(`!!window.mock.streams.A`);
+    await evaluate(`window.mock.emit('A',{type:'answer',content:'回答A第一段'})`);
+    await wait(`document.body.innerText.includes('回答A第一段')`);
+    await click('会话B');
+    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await send('问题B');
+    await wait(`!!window.mock.streams.B`);
+    await evaluate(`window.mock.emit('A',{type:'answer',content:'后台第二段'})`);
+    assert.equal(await evaluate(`document.body.innerText.includes('后台第二段')`), false);
+    await evaluate(`window.mock.emit('B',{type:'answer',content:'回答B'});window.mock.emit('B',{type:'done'})`);
+    // Deliberately keep the transport open after done: UI must still unlock.
+    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled&&document.body.innerText.includes('回答B')`);
+    await click('会话A');
+    await wait(`document.body.innerText.includes('回答A第一段后台第二段')&&document.querySelector('input[placeholder="输入问题"]').disabled`);
+    const screenshot = await command('Page.captureScreenshot', { format: 'png' });
+    await writeFile(process.env.SCREENSHOT_PATH || '/tmp/shuming-session-switch.png', Buffer.from(screenshot.data as string, 'base64'));
+    await evaluate(`window.mock.emit('A',{type:'done'})`);
+    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await send('再次提问A');
+    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await evaluate(`window.mock.emit('A',{type:'error',error:'测试生成失败'})`);
+    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled&&document.body.innerText.includes('测试生成失败')`);
+    // Delayed history must not overwrite a later generation or the active view.
+    await evaluate(`window.mock.delayed.C=true`);
+    await click('会话C');
+    await wait(`!!window.mock.histories.C`);
+    await click('会话B');
+    await evaluate(`window.mock.histories.C()`);
+    assert.equal(await evaluate(`document.body.innerText.includes('旧历史C')`), false);
+    await click('会话C');
+    await send('问题C');
+    await wait(`!!window.mock.streams.C`);
+    await evaluate(`window.mock.histories.C();window.mock.emit('C',{type:'answer',content:'新回答C'})`);
+    await wait(`document.body.innerText.includes('新回答C')`);
+    assert.equal(await evaluate(`document.body.innerText.includes('问题C')`), true);
+    // Finishing a background reply must not clear another session's busy flag.
+    await click('会话A');
+    await send('并行A');
+    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await evaluate(`window.mock.emit('C',{type:'done'})`);
+    assert.equal(await evaluate(`document.querySelector('input[placeholder="输入问题"]').disabled`), true);
+    await evaluate(`window.mock.emit('A',{type:'done'})`);
+    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await evaluate(`window.mock.status=503`);
+    await send('请求失败');
+    await wait(`document.body.innerText.includes('HTTP 503')&&!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await evaluate(`window.mock.status=200`);
+    // New-session navigation must not cancel the old stream.
+    await send('保留后台');
+    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await click('新建对话');
+    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await evaluate(`window.mock.emit('A',{type:'answer',content:'仍在后台'})`);
+    await click('会话A');
+    await wait(`document.body.innerText.includes('仍在后台')`);
+    await evaluate(`window.mock.streams.A.close()`);
+    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await send('DONE标记');
+    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await evaluate(`window.mock.streams.A.enqueue(new TextEncoder().encode('data: [DONE]\\n\\n'))`);
+    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await send('删除生成会话');
+    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await evaluate(`Array.from(document.querySelectorAll('aside span')).find(e=>e.textContent==='会话A').parentElement.querySelector('button').click()`);
+    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await send('自动创建并生成');
+    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await click('退出');
+    await click('登录');
+    await wait(`document.body.innerText.includes('会话A')`);
+    assert.equal(await evaluate(`document.body.innerText.includes('仍在后台')`), false);
+    assert.deepEqual(errors, []);
+  } finally {
+    socket?.close();
+    browser.kill();
+    await new Promise<void>((resolve) => {
+      if (browser.exitCode !== null) resolve(); else browser.once('exit', () => resolve());
+    });
+    await rm(profile, { recursive: true, force: true });
+  }
+});
