@@ -1,49 +1,84 @@
-# fast-llm-reasoner
+# shuming · 枢明
 
-实验室内部文档检索问答系统，基于本地 LLM + RAG（向量+关键词混合检索），支持多课题组数据隔离、SSE 流式对话。
+实验室内部的知识检索与问答系统，包含 Web 前端、C++ 后端、模型推理、RAG，以及供 Agent 使用的 MCP 接口。
 
-本系统为实验室内部使用场景设计，旨在为课题组提供私有的文档检索和智能问答能力。支持多课题组（租户）之间的数据隔离，同时提供公共知识库供全实验室共享。单机部署，无需额外的容器编排或微服务组件。
+系统面向课题组私有资料与实验室公共知识，支持多租户隔离和 SSE 流式问答。当前保持单仓库、共享检索核心的结构；个人与团队的知识/记忆库是远期方向，不代表这些能力已经实现。
 
-## 技术栈
+> 仓库已从 `fast-llm-reasoner` 改名为 `shuming`。本次只更新文档与品牌名称，CMake target、可执行文件、npm 包名、数据库及部署资源名继续保留旧名称，以避免破坏兼容性。
+
+## 当前能力
+
+- **知识检索**：BGE 本地嵌入、FAISS 向量检索与 BM25 关键词检索。
+- **问答与会话**：本地 llama.cpp 或远程生成服务，支持 SSE 流式输出、会话管理。
+- **知识管理**：文档导入、处理状态、删除，以及课题组/公共文档可见性。
+- **访问控制**：JWT、RBAC、租户隔离、限流与密码哈希。
+- **Agent 接入**：MCP `search_knowledge` 工具，通过服务账号绑定租户。
+- **论文处理**：文本型 PDF 抽取、远程模型生成论文卡片、入库检索；暂不支持扫描 PDF/OCR。
+
+## 当前架构
+
+```text
+用户 → Next.js 前端 → C++ 后端 → 本地 / 远程生成模型
+                          ↓
+                   KnowledgeSearchService
+                          ↓
+                 RAG：BGE + FAISS + BM25
+                          ↕
+                    MySQL / 本地索引
+                          ↑
+Agent → MCP Gateway → 后端知识检索 API
+```
+
+问答、REST 检索和 MCP 共用后端知识检索能力；MCP Gateway 是协议与认证适配层，不维护第二套知识库。未来可以按“问答应用 / 知识库服务”明确边界，当前不进行服务拆分。详细说明见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+
+## 技术栈与运行模式
 
 | 层次 | 技术 |
 |---|---|
-| 后端 | C++17, muduo (HTTP/SSE), CMake |
-| LLM 推理 | llama.cpp + GGML CUDA |
-| 主模型 | Qwen2.5-3B-Instruct Q4_K_M (~2.0GB) |
-| 嵌入模型 | bge-small-zh-v1.5 Q4_K_M (~15MB, 512-dim) |
-| 向量检索 | FAISS IndexFlatIP (进程内, 无额外服务) |
-| 关键词检索 | BM25 (CJK unigram+bigram) |
-| 存储 | MySQL 8.x (主存储) |
-| 安全 | JWT + RBAC + 租户隔离 + 限流 + PBKDF2 密码哈希 |
-| 前端 | Next.js (React/TypeScript) |
+| 前端 | Next.js / React / TypeScript |
+| 后端 | C++17 / muduo / HTTP / SSE / CMake |
+| 生成模型 | llama.cpp（本地 GGUF）或 remote_engine（远程 API） |
+| 嵌入模型 | bge-small-zh-v1.5 GGUF，512 维 |
+| 检索 | FAISS IndexFlatIP + BM25（CJK unigram/bigram） |
+| 存储 | MySQL 8.x + 本地检索索引 |
+| MCP | TypeScript / MCP SDK / Streamable HTTP |
+| 部署与检查 | Docker Compose / GitHub Actions |
 
-## 硬件要求
-
-- **最低**: 无 GPU, CPU 推理 (慢)
-- **推荐**: NVIDIA GPU, VRAM ≥ 6GB, CUDA ≥ 11.7
-- **开发用**: 任意机器 (不编译 LLM 推理部分)
-
-CUDA 架构号对照:
-
-| GPU | CUDA 架构 | CMake 参数 |
+| 模式 | 需要的模型与服务 | GPU |
 |---|---|---|
-| RTX 2060 | SM 75 | `-DCMAKE_CUDA_ARCHITECTURES=75` |
-| RTX 3060 | SM 86 | `-DCMAKE_CUDA_ARCHITECTURES=86` |
-| RTX 4090 | SM 89 | `-DCMAKE_CUDA_ARCHITECTURES=89` |
-| 无 GPU | — | `-DGGML_CUDA=OFF` |
+| 仅知识检索 / MCP | MySQL + 本地嵌入模型 | 不要求 |
+| 远程模型问答 | 上述组件 + 可用的远程生成 API | 不要求 |
+| 本地模型问答 | 上述组件 + 本地主模型 | 可 CPU 运行；GPU 可加速 |
+
+实际内存与性能取决于模型、文档规模和并发量。Staging 仅验证知识检索/MCP，不包含前端和本地主模型，不能据此认定完整问答部署已验收。
+
+## 文档导航
+
+- [本地快速开始](#快速开始)
+- [MCP 配置与使用](mcp-gateway/README.md)
+- [Staging 部署](deploy/staging/README.md)
+- [架构说明](ARCHITECTURE.md)
+- [开发约定](AGENTS.md)
+- [配置说明](#配置说明) · [API 参考](#api-参考)
+
 
 ## 快速开始
 
-### 1. 系统依赖
+### 1. 获取源码与安装依赖
 
 ```bash
+git clone https://github.com/duan-jia/shuming.git
+cd shuming
+
 # Ubuntu/Debian
 sudo apt install -y build-essential cmake git \
-  libssl-dev libmysqlclient-dev \
+  libssl-dev default-libmysqlclient-dev libboost-all-dev \
   libopenblas-dev gfortran \
   mysql-server \
-  nodejs npm
+  python3 python3-pip python3-venv
+
+# Node.js 24 与 npm 请单独安装；MCP CI 使用 Node.js 24。
+# 验证：node --version && npm --version
 
 # CUDA Toolkit (有 GPU 时需要, 无 GPU 跳过)
 sudo apt install -y nvidia-cuda-toolkit
@@ -51,7 +86,11 @@ sudo apt install -y nvidia-cuda-toolkit
 
 ### 2. 下载模型文件
 
-将 GGUF 模型放入 `models/` 目录 (2GB, 不进 git):
+将 GGUF 模型放入 `models/`（不进 Git）。检索需要嵌入模型；只有本地生成回答才需要约 2GB 的主模型。
+
+```bash
+mkdir -p models
+```
 
 ```bash
 # 主模型 (Qwen2.5-3B Q4_K_M)
@@ -59,7 +98,7 @@ sudo apt install -y nvidia-cuda-toolkit
 # 文件名: qwen2.5-3b-instruct-q4_k_m.gguf (约2.0GB)
 
 # 嵌入模型 (BGE-small-zh Q4_K_M)
-# 下载: https://huggingface.co/ChristianAzinn/bge-small-zh-v1.5-gguf
+# 下载: https://huggingface.co/CompendiumLabs/bge-small-zh-v1.5-gguf
 # 文件名: bge-small-zh-v1.5-q4_k_m.gguf (约15MB)
 ```
 
@@ -67,14 +106,17 @@ sudo apt install -y nvidia-cuda-toolkit
 
 ```bash
 cp config.example.json config.json
-vim config.json   # 修改 MySQL 密码、JWT secret、admin 默认密码
+vim config.json   # 设置 MySQL、JWT secret、管理员密码；远程问答还需配置 remote_engine
 ```
+
+不要使用模板中的默认密码或 JWT secret 对外提供服务。数据库默认名仍为 `llm_platform`。
 
 ### 4. 初始化数据库
 
 ```bash
 sudo systemctl start mysql
-mysql -u root < sql/init.sql
+sudo mysql < sql/init.sql
+# 如数据库使用密码认证，可改用 mysql -u root -p < sql/init.sql
 ```
 
 ### 5. 编译
@@ -87,17 +129,18 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 # 无 GPU (CPU only)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF
 
-cmake --build build --target fast-llm-reasoner -j$(nproc)
+cmake --build build --target fast-llm-reasoner --parallel 2
 ```
 
 ### 6. 运行
 
 ```bash
-# 仅嵌入模型 (RAG 可用, 聊天不可用)
+# 远程问答 + 本地 Embedding：先配置 remote_engine
+# 未配置可用的远程生成服务时，此模式仅用于检索
 ./build/bin/fast-llm-reasoner --port 9006 \
   --embedding-model models/bge-small-zh-v1.5-q4_k_m.gguf
 
-# 完整启动 (LLM + RAG)
+# 本地问答 + RAG（需要本地主模型）
 ./build/bin/fast-llm-reasoner --port 9006 \
   --model models/qwen2.5-3b-instruct-q4_k_m.gguf \
   --embedding-model models/bge-small-zh-v1.5-q4_k_m.gguf
@@ -106,9 +149,13 @@ cmake --build build --target fast-llm-reasoner -j$(nproc)
 ./build/bin/fast-llm-reasoner --config /path/to/other-config.json
 
 # 前端开发
-cd web && npm install && npm run dev
+cd web && npm ci && npm run dev
 # 访问 http://localhost:3000
 ```
+
+前端通用 API 代理在 [`web/next.config.ts`](web/next.config.ts) 中固定指向 `127.0.0.1:9006`，
+因此上述示例显式使用 `--port 9006`；配置文件默认端口为 8080。跨主机部署需要同步调整代理，
+`BACKEND_API_BASE` 仅配置上传路由，不能代替通用 API 代理配置。
 
 ### 7. 首次登录
 
@@ -121,20 +168,152 @@ cd web && npm install && npm run dev
 
 **生产环境请立即修改密码。**
 
-## 跨机器开发工作流
+## MCP 接入
+
+`mcp-gateway/` 提供面向内部 Agent 的远程 Streamable HTTP MCP 网关。首版工具
+`search_knowledge` 复用上述 RAG 检索接口，租户由经过认证的 service principal 绑定，
+而不是由工具参数传入。配置、运行和验证方法见 [`mcp-gateway/README.md`](mcp-gateway/README.md)。
+
+## PDF 文档上传与 RAG
+
+文档链路只支持带可提取文本的 PDF：
+
+```text
+data/pdfs/<name>.pdf
+        ↓ scripts/pdf_to_markdown.py
+data/processed/<name>.md + <name>.json
+        ↓ POST /api/documents
+data/rag/ (FAISS + BM25)
+```
+
+聊天页面的“上传 PDF”会保存源文件、调用远程大模型生成紧凑论文卡片，再把 Markdown
+作为当前 tenant 的 `group` 文档提交给 RAG。Markdown 包含 Problem and Context、Core Idea
+and Approach、Key Takeaways、Scope and Limitations；JSON 保存相同内容及来源哈希、模型和
+生成信息。论文卡片规则集中在 `scripts/paper_card.py`，扫描版 PDF 暂不支持。
+
+文档处理使用 Python 与 `pypdf`。建议通过虚拟环境安装（Ubuntu 24.04 不宜直接向系统 Python 安装）：
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install pypdf
+```
+
+命令行可以先检查文本抽取，或生成实际结果：
+
+```bash
+python3 scripts/pdf_to_markdown.py --file data/pdfs/example.pdf --dry-run
+python3 scripts/pdf_to_markdown.py --file data/pdfs/example.pdf
+```
+
+脚本默认读取 `config.json` 的 `remote_engine.endpoint`、`model` 和 `api_key`。可用
+`REMOTE_ENGINE_ENDPOINT`、`REMOTE_ENGINE_MODEL`、`REMOTE_ENGINE_API_KEY` 覆盖；API key
+也兼容 `DEEPSEEK_API_KEY`。
+
+Next.js 上传服务支持以下部署变量：
+
+```bash
+PROJECT_ROOT=/path/to/shuming
+PDF_PROCESSOR_PYTHON=/path/to/python3
+PDF_SOURCE_DIR=/path/to/data/pdfs
+PDF_PROCESSED_DIR=/path/to/data/processed
+BACKEND_API_BASE=http://127.0.0.1:9006
+```
+
+在线检索仍会使用配置的 query rewrite；失败时自动回退到原始 query。
+
+## 部署与开发流程
+
+本地开发可以运行 MySQL、后端和前端；模型、数据与配置均不提交到 Git。CPU 构建使用 `-DGGML_CUDA=OFF`；GPU 构建按实际硬件设置 CUDA 架构，示例中的 75 对应 RTX 2060，86 对应 RTX 3060，89 对应 RTX 4090。
+
+Staging 使用 [Docker Compose](deploy/staging/compose.yml) 部署 MySQL、后端和 MCP。GitHub-hosted runner 构建镜像并嵌入已校验的 BGE 模型，服务器拉取镜像后运行真实服务端到端测试。具体见 [部署说明](deploy/staging/README.md) 与 [工作流](.github/workflows/staging-e2e.yml)。
+
+- Staging 不部署 Web 前端与本地主模型，也不是完整生产部署方案。
+- MySQL 位于 Compose 内部网络，后端与 MCP 仅绑定宿主机回环地址。
+- 对外访问需额外配置 HTTPS、认证、网络访问控制和备份。
+- 镜像、Compose 项目与服务器目录仍保留 `fast-llm-reasoner` 技术名称；不要仅为改名而重建数据卷。
+
+日常变更通过开发分支与 PR 集成，检查通过后 squash merge；不直接推送 `master`。仓库改名后，已有本地副本可执行：
+
+```bash
+git remote set-url origin https://github.com/duan-jia/shuming.git
+```
+
+## 测试与验证
+
+后端（已配置 CPU/GPU 构建目录）：
+
+```bash
+cmake --build build --target knowledge-search-service-test fast-llm-reasoner fast-llm-cli --parallel 2
+./build/bin/knowledge-search-service-test
+```
+
+MCP 网关：
+
+```bash
+cd mcp-gateway
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm audit --omit=dev --audit-level=high
+```
+
+前端（单独在仓库根目录开始）：
+
+```bash
+cd web
+npm ci
+npm run lint
+npm run build
+```
+
+论文卡片单元测试与检索质量评测：
+
+```bash
+python3 -m unittest discover -s tests -p 'test_paper_card.py'
+# 需要可用的 CLI、模型和评测数据；不是无依赖单元测试
+python3 tests/rag_eval.py --gt tests/eval_queries.json
+```
+
+[CI](.github/workflows/ci.yml) 检查后端 CPU 构建/单元测试与 MCP 类型、测试、构建、安全审计。Staging E2E 另外验证真实 MySQL/后端/MCP 的服务账号认证、租户绑定与检索；它不等价于检索质量评测，也不覆盖完整 Web 问答链路。
+
+
+## 项目结构
 
 ```
-┌──────────────┐    git push    ┌──────────┐    git pull    ┌──────────────┐
-│  开发机       │ ────────────▶ │  GitHub  │ ────────────▶ │  WSL2 本地机  │
-│  只写代码     │               │          │               │  编译 + 运行   │
-│  前端 dev     │ ◀──────────── │          │ ◀──────────── │  (有 GPU)     │
-└──────────────┘    git pull    └──────────┘    git push    └──────────────┘
+shuming/
+├── CMakeLists.txt              # 顶层 CMake (FetchContent 拉取依赖)
+├── config.example.json         # 配置模板 (进 git)
+├── config.json                 # 实际配置 (gitignore)
+├── sql/init.sql                # 数据库初始化 (9 张表)
+├── models/                     # GGUF 模型文件 (gitignore)
+├── data/
+│   ├── pdfs/                  # 上传的 PDF 源文件
+│   ├── processed/             # 大模型生成的 Markdown 与 JSON
+│   └── rag/                   # FAISS + BM25 索引文件
+├── engine/
+│   ├── CMakeLists.txt
+│   ├── include/                # 头文件
+│   │   ├── server/             # HTTP 服务器, SSE
+│   │   ├── persistence/        # MySQL 池, Token 配额
+│   │   ├── auth/               # JWT
+│   │   ├── security/           # RBAC, 限流, 审计, 密码哈希
+│   │   ├── inference/          # llama.cpp 封装, KV Cache, 调度器
+│   │   ├── rag/                # 分块, 嵌入, FAISS, BM25, 文档存储
+│   │   └── service/            # ConfigManager
+│   └── src/                    # 实现文件
+│       └── main.cpp            # 入口 (路由注册)
+├── web/                        # Next.js 前端
+│   ├── next.config.ts          # API 代理配置
+│   └── src/app/                # 页面
+├── mcp-gateway/                # TypeScript Streamable HTTP MCP 网关
+├── deploy/staging/             # Docker、部署脚本与真实服务 E2E
+├── .github/workflows/          # CI 与 Staging 工作流
+├── ARCHITECTURE.md             # 架构说明
+├── scripts/                    # PDF 处理与工具脚本 (Python)
+└── tests/                      # 测试
 ```
-
-- **开发机**: 拉代码, `cd web && npm run dev` 开发前端, 改 C++ 后 push
-- **部署机 (WSL2)**: `git pull`, `cmake --build build`, 启动服务器
-- 模型文件不在 git 里, 两边各自下载/拷贝放到 `models/`
-- 配置各自一份 `config.json` (不进 git), 改 MySQL 密码等
 
 ## 配置说明
 
@@ -151,12 +330,12 @@ rag.query_rewrite.{enabled,model,...}     将用户查询重写为英文检索 q
 rate_limiter.rules[]                      聊天接口进程内固定窗口限流
 scheduler.num_workers                     推理线程数
 http_threads                              HTTP 线程数
-remote_engine.{endpoint,model,api_key}    DeepSeek 作为 fallback
+remote_engine.{endpoint,model,api_key}    远程生成服务（本地模型未加载时也可使用）
 ```
 
 命令行参数优先级: `--port/--model/... > config.json > 代码默认值`
 
-## API 端点 (17个)
+## API 参考
 
 ### 认证
 | 方法 | 路径 | 说明 |
@@ -185,58 +364,6 @@ remote_engine.{endpoint,model,api_key}    DeepSeek 作为 fallback
 | DELETE | `/api/documents/:id` | 删除文档 (admin, 软删除) |
 | POST | `/api/documents/search` | RAG 检索 (混合:向量+BM25) |
 
-## MCP 接入
-
-`mcp-gateway/` 提供面向内部 Agent 的远程 Streamable HTTP MCP 网关。首版工具
-`search_knowledge` 复用上述 RAG 检索接口，租户由经过认证的 service principal 绑定，
-而不是由工具参数传入。配置、运行和验证方法见 [`mcp-gateway/README.md`](mcp-gateway/README.md)。
-
-## PDF 文档上传与 RAG
-
-文档链路只支持带可提取文本的 PDF：
-
-```text
-data/pdfs/<name>.pdf
-        ↓ scripts/pdf_to_markdown.py
-data/processed/<name>.md + <name>.json
-        ↓ POST /api/documents
-data/rag/ (FAISS + BM25)
-```
-
-聊天页面的“上传 PDF”会保存源文件、调用远程大模型生成紧凑论文卡片，再把 Markdown
-作为当前 tenant 的 `group` 文档提交给 RAG。Markdown 包含 Problem and Context、Core Idea
-and Approach、Key Takeaways、Scope and Limitations；JSON 保存相同内容及来源哈希、模型和
-生成信息。论文卡片规则集中在 `scripts/paper_card.py`，扫描版 PDF 暂不支持。
-
-安装唯一的文档处理依赖：
-
-```bash
-python3 -m pip install pypdf
-```
-
-命令行可以先检查文本抽取，或生成实际结果：
-
-```bash
-python3 scripts/pdf_to_markdown.py --file data/pdfs/example.pdf --dry-run
-python3 scripts/pdf_to_markdown.py --file data/pdfs/example.pdf
-```
-
-脚本默认读取 `config.json` 的 `remote_engine.endpoint`、`model` 和 `api_key`。可用
-`REMOTE_ENGINE_ENDPOINT`、`REMOTE_ENGINE_MODEL`、`REMOTE_ENGINE_API_KEY` 覆盖；API key
-也兼容 `DEEPSEEK_API_KEY`。
-
-Next.js 上传服务支持以下部署变量：
-
-```bash
-PROJECT_ROOT=/path/to/fast-llm-reasoner
-PDF_PROCESSOR_PYTHON=/path/to/python3
-PDF_SOURCE_DIR=/path/to/data/pdfs
-PDF_PROCESSED_DIR=/path/to/data/processed
-BACKEND_API_BASE=http://127.0.0.1:9006
-```
-
-在线检索仍会使用配置的 query rewrite；失败时自动回退到原始 query。
-
 ### 租户管理 (admin only)
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -255,38 +382,6 @@ BACKEND_API_BASE=http://127.0.0.1:9006
 |---|---|---|
 | GET | `/api/health` | 服务状态 (MySQL/模型) |
 
-## 项目结构
-
-```
-fast-llm-reasoner/
-├── CMakeLists.txt              # 顶层 CMake (FetchContent 拉取依赖)
-├── config.example.json         # 配置模板 (进 git)
-├── config.json                 # 实际配置 (gitignore)
-├── sql/init.sql                # 数据库初始化 (9 张表)
-├── models/                     # GGUF 模型文件 (gitignore)
-├── data/
-│   ├── pdfs/                  # 上传的 PDF 源文件
-│   ├── processed/             # 大模型生成的 Markdown 与 JSON
-│   └── rag/                   # FAISS + BM25 索引文件
-├── engine/
-│   ├── CMakeLists.txt
-│   ├── include/                # 头文件
-│   │   ├── server/             # HTTP 服务器, SSE
-│   │   ├── persistence/        # MySQL 池, Token 配额
-│   │   ├── auth/               # JWT
-│   │   ├── security/           # RBAC, 限流, 审计, 密码哈希
-│   │   ├── inference/          # llama.cpp 封装, KV Cache, 调度器
-│   │   ├── rag/                # 分块, 嵌入, FAISS, BM25, 文档存储
-│   │   └── service/            # ConfigManager
-│   └── src/                    # 实现文件
-│       └── main.cpp            # 入口 (路由注册)
-├── web/                        # Next.js 前端
-│   ├── next.config.ts          # API 代理配置
-│   └── src/app/                # 页面
-├── scripts/                    # 评估脚本 (Python)
-└── tests/                      # 测试
-```
-
 ## 数据库设计 (9 张表)
 
 ```
@@ -302,5 +397,5 @@ token_usage_records — 请求级 Token 使用记录 (request_id, session_id, pr
 ```
 
 - 文档状态: documents.status = 'processing' | 'ready' | 'failed' | 'deleted'
-- 多租户隔离: 所有表含 tenant_id, 文档搜索过滤 tenant_id + visibility
+- 文档检索按经过认证的 tenant_id 与 visibility 过滤；会话消息通过所属会话关联租户。
 - chunk_id (MySQL auto_increment) 同时作为 FAISS entry_id, 无需额外映射
