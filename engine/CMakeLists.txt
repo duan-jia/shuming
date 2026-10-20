@@ -128,4 +128,16 @@ if(FASTLLM_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
     add_test(NAME knowledge-search-service-test COMMAND knowledge-search-service-test)
+
+    # Uses an isolated MySQL server supplied through MYSQL_TEST_* variables.
+    add_executable(mysql-pool-test
+        tests/mysql_pool_test.cpp
+        src/persistence/mysql_pool.cpp
+    )
+    target_include_directories(mysql-pool-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(mysql-pool-test PRIVATE spdlog::spdlog mysqlclient pthread)
+    add_test(NAME mysql-pool-test COMMAND mysql-pool-test)
+    set_tests_properties(mysql-pool-test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
 endif()

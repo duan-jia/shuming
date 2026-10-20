@@ -18,6 +18,19 @@ jobs:
     name: Backend CPU build and test
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: mysql-test-only
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --host=127.0.0.1 --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -39,10 +52,15 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF
 
       - name: Build focused test
-        run: cmake --build build --target knowledge-search-service-test --parallel 2
+        run: cmake --build build --target knowledge-search-service-test mysql-pool-test --parallel 2
 
-      - name: Run focused backend test
-        run: ./build/bin/knowledge-search-service-test
+      - name: Run focused backend tests
+        env:
+          MYSQL_TEST_HOST: 127.0.0.1
+          MYSQL_TEST_PASSWORD: mysql-test-only
+        run: |
+          ./build/bin/knowledge-search-service-test
+          ./build/bin/mysql-pool-test
 
       - name: Build backend server
         run: cmake --build build --target fast-llm-reasoner --parallel 2
