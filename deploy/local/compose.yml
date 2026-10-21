@@ -1,0 +1,70 @@
+name: shuming-local
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Run prepare.py first}
+      MYSQL_DATABASE: llm_platform
+      MYSQL_USER: shuming
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run prepare.py first}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ../../sql/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h 127.0.0.1 -u root --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+  backend:
+    build:
+      context: ../../.tmp/local-runtime
+      dockerfile: ../../deploy/local/backend.Dockerfile
+    restart: unless-stopped
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: [--config, /app/config.json, --port, '9006', --embedding-model, /models/bge-small-zh-v1.5-q4_k_m.gguf, --rag-dir, /app/data/rag]
+    volumes:
+      - ../../.tmp/local-deploy/config.json:/app/config.json:ro
+      - ../../.tmp/local-deploy/data:/app/data
+      - ../../models:/models:ro
+    ports:
+      - '127.0.0.1:${BACKEND_PORT:-9006}:9006'
+    healthcheck:
+      test: [CMD, bash, -ec, 'exec 3<>/dev/tcp/127.0.0.1/9006; printf "GET /api/health HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; [[ "$$status" == *" 200 "* ]]; cat <&3 >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  web:
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    build:
+      context: ../..
+      dockerfile: deploy/local/web.Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-deb.debian.org}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_API_BASE: http://backend:9006
+      PROJECT_ROOT: /app
+      PDF_PROCESSOR_PYTHON: python3
+    volumes:
+      - ../../.tmp/local-deploy/config.json:/app/config.json:ro
+      - ../../.tmp/local-deploy/data:/app/data
+    ports:
+      - '127.0.0.1:${WEB_PORT:-3001}:3000'
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+volumes:
+  mysql-data:

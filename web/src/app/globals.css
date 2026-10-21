@@ -1,26 +1,78 @@
 @import "tailwindcss";
+@import "./fonts.css";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+  --background: #0c0c0c;
+  --foreground: #ededed;
+  --surface: #141414;
+  --sidebar: #101010;
+  --line: #ffffff10;
+  --accent: #a3a3a3;
+  --font-interface: "Manrope", "Noto Sans SC", sans-serif;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: Arial, Helvetica, sans-serif;
+  --color-surface: var(--surface);
+  --color-sidebar: var(--sidebar);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-interface);
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
+  margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-interface);
+  font-size: 14px;
+  font-synthesis-weight: none;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: #ffffff30; color: #fff; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+button, input { transition: background-color 180ms, border-color 180ms, color 180ms; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+* { scrollbar-width: thin; scrollbar-color: #3a3a3a transparent; }
+
+.wordmark { font-family: "Manrope", sans-serif; font-weight: 600; letter-spacing: -0.055em; line-height: 1.15; }
+.login-page { min-height: 100dvh; display: grid; place-items: center; padding: 32px 24px; background: var(--background); }
+.login-panel { width: 100%; max-width: 320px; margin-top: -7vh; }
+.login-wordmark { margin: 0 0 44px; text-align: center; font-size: 40px; color: #ededed; }
+.login-label { display: block; margin-top: 22px; color: #a3a3a3; font-size: 13px; font-weight: 400; }
+.login-input { display: block; width: 100%; margin-top: 10px; padding: 13px 15px; background: #141414; color: #ededed; border: 1px solid #ffffff14; border-radius: 10px; outline: none; font-size: 14px; line-height: 1.6; }
+.login-input:focus { border-color: #ffffff50; }
+.primary-button { padding: 12px 20px; border: 1px solid transparent; border-radius: 10px; background: #e5e5e5; color: #121212; font-size: 14px; font-weight: 500; }
+.primary-button:hover { background: #fff; }
+.support-credit { display: flex; align-items: center; gap: 9px; color: #737373; font-size: 12px; font-weight: 400; line-height: 1.5; }
+.support-brand { display: inline-flex; align-items: center; gap: 5px; color: #a3a3a3; font-weight: 500; letter-spacing: -0.025em; }
+.support-logo { flex-shrink: 0; filter: invert(1); mix-blend-mode: screen; opacity: 0.8; }
+.login-support { justify-content: center; margin-top: 28px; }
+.sidebar-support { margin-top: 20px; font-size: 11px; gap: 7px; }
+.sidebar-support .support-logo { width: 16px; height: 16px; }
+.sidebar-wordmark { padding: 6px 4px; font-size: 23px; }
+.chat-welcome { min-height: 100%; display: grid; place-items: center; padding-bottom: 8vh; text-align: center; }
+.chat-welcome .wordmark { color: #a3a3a3; font-size: 36px; }
+.composer { padding: 7px; background: #141414; border: 1px solid #ffffff14; border-radius: 12px; }
+.composer:focus-within { border-color: #ffffff30; }
+.prose { overflow-wrap: anywhere; line-height: 1.85; }
+.prose > * + * { margin-top: 0.85em; }
+.prose :is(h1, h2, h3, h4) { font-weight: 600; line-height: 1.5; }
+.prose :is(ul, ol) { padding-left: 1.5em; }
+.prose ul { list-style: disc; }
+.prose ol { list-style: decimal; }
+.prose a { color: #79b9ff; text-decoration: underline; text-underline-offset: 3px; }
+.prose pre { max-width: 100%; overflow-x: auto; background: #121212; padding: 16px; border: 1px solid var(--line); border-radius: 8px; }
+.prose :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: #ffffff0d; }
+.prose blockquote { border-left: 2px solid #555; padding-left: 16px; color: #aaa; }
+.prose table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.prose :is(th, td) { padding: 8px 12px; border: 1px solid #ffffff26; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }

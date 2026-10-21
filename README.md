@@ -1,6 +1,6 @@
 # shuming · 枢明
 
-实验室内部的知识检索与问答系统，包含 Web 前端、C++ 后端、模型推理、RAG，以及供 Agent 使用的 MCP 接口。
+shuming（枢明）是实验室的后端知识库，提供文档管理、RAG 检索、模型推理与 MCP 接口。面向 EMOS 使用的聊天前端名为 **EMOS**，通过 API 访问 shuming。
 
 系统面向课题组私有资料与实验室公共知识，支持多租户隔离和 SSE 流式问答。当前保持单仓库、共享检索核心的结构；个人与团队的知识/记忆库是远期方向，不代表这些能力已经实现。
 
@@ -54,6 +54,7 @@ Agent → MCP Gateway → 后端知识检索 API
 
 ## 文档导航
 
+- [本地 Docker 测试](deploy/local/README.md)
 - [本地快速开始](#快速开始)
 - [MCP 配置与使用](mcp-gateway/README.md)
 - [Staging 部署](deploy/staging/README.md)
@@ -153,9 +154,9 @@ cd web && npm ci && npm run dev
 # 访问 http://localhost:3000
 ```
 
-前端通用 API 代理在 [`web/next.config.ts`](web/next.config.ts) 中固定指向 `127.0.0.1:9006`，
-因此上述示例显式使用 `--port 9006`；配置文件默认端口为 8080。跨主机部署需要同步调整代理，
-`BACKEND_API_BASE` 仅配置上传路由，不能代替通用 API 代理配置。
+前端 API 代理默认指向 `127.0.0.1:9006`，因此上述示例显式使用 `--port 9006`；
+配置文件默认端口为 8080。跨主机或 Docker 部署时，在构建前设置 `BACKEND_API_BASE`，
+并在运行时设置相同值，以同时配置通用 API 代理和服务端文档路由。
 
 ### 7. 首次登录
 

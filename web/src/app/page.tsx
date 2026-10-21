@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -39,6 +40,18 @@ interface DocumentItem {
   updated_at: string;
 }
 
+function SupportCredit({ className = "" }: { className?: string }) {
+  return (
+    <p className={`support-credit ${className}`}>
+      <span>Supported by</span>
+      <span className="support-brand">
+        <Image src="/shuming-icon.png" alt="" width={18} height={18} className="support-logo" />
+        <span>shuming</span>
+      </span>
+    </p>
+  );
+}
+
 function formatBytes(bytes: number) {
   if (!bytes) return "—";
   if (bytes < 1024) return `${bytes} B`;
@@ -62,10 +75,10 @@ function createRequestId() {
 }
 
 const documentStatus: Record<DocumentItem["status"], { label: string; className: string }> = {
-  processing: { label: "处理中", className: "bg-blue-50 text-blue-700" },
-  pending: { label: "待审核", className: "bg-amber-50 text-amber-700" },
-  ready: { label: "可用", className: "bg-emerald-50 text-emerald-700" },
-  failed: { label: "失败", className: "bg-rose-50 text-rose-700" },
+  processing: { label: "处理中", className: "bg-blue-400/10 text-blue-300" },
+  pending: { label: "待审核", className: "bg-amber-400/10 text-amber-300" },
+  ready: { label: "可用", className: "bg-emerald-400/10 text-emerald-300" },
+  failed: { label: "失败", className: "bg-rose-400/10 text-rose-300" },
 };
 
 const API_BASE = "";
@@ -89,6 +102,7 @@ export default function Home() {
   const navigationVersion = useRef(0);
   const historySequence = useRef(0);
   const activeSessionRef = useRef(activeSession);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeView, setActiveView] = useState<"chat" | "documents">("chat");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(false);
@@ -576,76 +590,48 @@ export default function Home() {
 
   if (!loggedIn) {
     return (
-      <main className="min-h-screen bg-[#f7f8fa] text-slate-950">
-        <div className="mx-auto flex min-h-screen max-w-md items-center px-6 py-10">
-          <section className="w-full">
-            <div className="mb-10 text-center">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-sm font-semibold tracking-[0.2em] text-white">
-                E
-              </div>
-              <h1 className="mt-5 text-3xl font-semibold tracking-tight">EMOS</h1>
-              <p className="mt-2 text-sm text-slate-500">内部资料问答</p>
-            </div>
-
-            <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-[0_16px_50px_rgba(15,23,42,0.08)] sm:p-8">
-              <h2 className="text-xl font-semibold text-slate-950">登录</h2>
-              {loginError && (
-                <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                  {loginError}
-                </div>
-              )}
-              <label className="mt-6 block text-sm font-medium text-slate-700">
-                用户名
-                <input
-                  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-                  placeholder="请输入用户名"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && login()}
-                />
-              </label>
-              <label className="mt-4 block text-sm font-medium text-slate-700">
-                密码
-                <input
-                  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-                  type="password"
-                  placeholder="请输入密码"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && login()}
-                />
-              </label>
-              <button
-                className="mt-6 w-full rounded-lg bg-slate-950 px-4 py-2.5 font-medium text-white transition hover:bg-slate-800"
-                onClick={login}
-              >
-                登录
-              </button>
-            </section>
-          </section>
-        </div>
+      <main className="login-page">
+        <section className="login-panel" aria-label="登录 EMOS">
+          <h1 className="wordmark login-wordmark">EMOS</h1>
+          <form onSubmit={(event) => { event.preventDefault(); void login(); }}>
+            {loginError && <div role="alert" className="mb-5 rounded-lg bg-amber-400/10 px-3 py-2 text-sm text-amber-300">{loginError}</div>}
+            <label className="login-label">
+              用户名
+              <input className="login-input" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+            </label>
+            <label className="login-label">
+              密码
+              <input className="login-input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            </label>
+            <button className="primary-button mt-8 w-full" type="submit">登录</button>
+          </form>
+          <SupportCredit className="login-support" />
+        </section>
       </main>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-[#f5f7fb] text-slate-950">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-slate-950 text-white sm:w-72">
-        <div className="border-b border-white/10 p-5">
-          <div className="text-2xl font-semibold tracking-tight">EMOS</div>
+    <div className="flex h-dvh overflow-hidden bg-background text-foreground">
+      {sidebarOpen && <button aria-label="关闭导航" className="fixed inset-0 z-20 bg-black/60 backdrop-blur-sm md:hidden" onClick={() => setSidebarOpen(false)} />}
+      <aside className={`sidebar fixed inset-y-0 left-0 z-30 flex min-h-0 w-64 shrink-0 flex-col border-r border-line bg-sidebar text-foreground transition-transform md:static md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <button className="absolute right-3 top-3 rounded-lg p-2 text-neutral-400 md:hidden" aria-label="关闭导航" onClick={() => setSidebarOpen(false)}>×</button>
+        <div className="shrink-0 border-b border-line p-5">
+          <div className="wordmark sidebar-wordmark">EMOS</div>
           <button
-            className="mt-5 w-full rounded-lg bg-white px-3 py-2.5 text-sm font-medium text-slate-950 transition hover:bg-slate-200"
-            onClick={createSession}
+            className="mt-7 w-full rounded-lg border border-line px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-white/5"
+            onClick={() => { void createSession(); setSidebarOpen(false); }}
           >
             新建对话
           </button>
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button
               className={`rounded-lg px-3 py-2 text-sm transition ${
-                activeView === "chat" ? "bg-white/15 text-white" : "text-slate-400 hover:bg-white/10 hover:text-white"
+                activeView === "chat" ? "bg-white/10 text-foreground" : "text-neutral-500 hover:bg-white/5 hover:text-foreground"
               }`}
               onClick={() => {
                 setActiveView("chat");
+                setSidebarOpen(false);
                 setUploadNotice(null);
               }}
             >
@@ -653,10 +639,11 @@ export default function Home() {
             </button>
             <button
               className={`rounded-lg px-3 py-2 text-sm transition ${
-                activeView === "documents" ? "bg-white/15 text-white" : "text-slate-400 hover:bg-white/10 hover:text-white"
+                activeView === "documents" ? "bg-white/10 text-foreground" : "text-neutral-500 hover:bg-white/5 hover:text-foreground"
               }`}
               onClick={() => {
                 setActiveView("documents");
+                setSidebarOpen(false);
                 setUploadNotice(null);
                 void fetchDocuments(true);
               }}
@@ -665,39 +652,32 @@ export default function Home() {
             </button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-3">
           {activeView === "chat" ? (
             <>
               {sessions.map((s) => (
                 <div
                   key={s.id}
-                  className={`group flex cursor-pointer items-center rounded-md px-3 py-2 hover:bg-white/10 ${
-                    activeSession === s.id ? "bg-white/15" : ""
+                  className={`group flex cursor-pointer items-center rounded-md px-3 py-2 hover:bg-white/5 ${
+                    activeSession === s.id ? "bg-white/10" : ""
                   }`}
-                  onClick={() => switchSession(s.id)}
+                  onClick={() => { void switchSession(s.id); setSidebarOpen(false); }}
                 >
                   <span className="flex-1 truncate text-sm">{s.title}</span>
                   <button
-                    className="hidden text-xs text-slate-400 hover:text-red-300 group-hover:block"
+                    aria-label={`删除会话 ${s.title}`} className="text-xs text-neutral-500 hover:text-red-300 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
                     onClick={(e) => deleteSession(s.id, e)}
                   >
                     x
                   </button>
                 </div>
               ))}
-              {sessions.length === 0 && (
-                <div className="mt-4 text-center text-xs text-slate-500">暂无会话</div>
-              )}
             </>
-          ) : (
-            <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs leading-5 text-slate-400">
-              查看本课题组和公共知识库中的文档，并管理自己上传的资料。
-            </div>
-          )}
+          ) : null}
         </div>
-        <div className="border-t border-white/10 p-4">
+        <div className="shrink-0 border-t border-line p-4">
           <button
-            className="text-sm text-slate-400 transition hover:text-white"
+            className="text-sm text-neutral-500 transition hover:text-foreground"
             onClick={() => {
               ++navigationVersion.current;
               for (const controller of requests.current.values()) controller.abort();
@@ -715,16 +695,17 @@ export default function Home() {
           >
             退出
           </button>
+          <SupportCredit className="sidebar-support" />
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
-          <div>
-            <h1 className="text-lg font-semibold">{activeView === "chat" ? "对话" : "文档管理"}</h1>
-            {activeView === "documents" && (
-              <p className="mt-0.5 text-xs text-slate-500">PDF 原文与 RAG Markdown 索引统一管理</p>
-            )}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex shrink-0 items-center justify-between bg-background px-5 py-4">
+          <div className="flex items-center gap-3">
+            <button className="rounded-lg border border-line px-2.5 py-1.5 text-neutral-300 md:hidden" aria-label="打开导航" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}>☰</button>
+            <div>
+            <h1 className="text-sm font-medium">{activeView === "chat" ? "对话" : "文档管理"}</h1>
+            </div>
           </div>
           {activeView === "documents" && (
             <div>
@@ -736,7 +717,7 @@ export default function Home() {
                 onChange={uploadPdf}
               />
               <button
-                className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                 type="button"
                 onClick={() => pdfInputRef.current?.click()}
                 disabled={uploading}
@@ -747,13 +728,13 @@ export default function Home() {
           )}
         </header>
 
-        <div className={`mx-auto w-full flex-1 overflow-y-auto px-5 py-5 ${activeView === "chat" ? "max-w-4xl" : "max-w-7xl"}`}>
+        <div className={`mx-auto min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain px-5 py-5 ${activeView === "chat" ? "max-w-4xl" : "max-w-7xl"}`}>
           {uploadNotice && (
             <div
               className={`mb-5 rounded-lg border px-4 py-3 text-sm ${
                 uploadNotice.type === "success"
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border-amber-200 bg-amber-50 text-amber-700"
+                  ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+                  : "border-amber-400/20 bg-amber-400/10 text-amber-300"
               }`}
               role="status"
             >
@@ -763,24 +744,23 @@ export default function Home() {
           {activeView === "chat" ? (
             <>
               {messages.length === 0 && (
-                <div className="mt-16 rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-                  <h2 className="text-2xl font-semibold">暂无消息</h2>
-                  <p className="mt-3 text-slate-500">输入问题开始对话。</p>
+                <div className="chat-welcome">
+                  <h2 className="wordmark">EMOS</h2>
                 </div>
               )}
               {messages.map((msg) => (
                 <div key={msg.id} className={`mb-5 flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                   <div
-                    className={`max-w-[82%] rounded-xl px-4 py-3 shadow-sm ${
+                    className={`max-w-[82%] rounded-xl px-4 py-3 ${
                       msg.role === "user"
-                        ? "bg-slate-950 text-white"
-                        : "border border-slate-200 bg-white text-slate-900"
+                        ? "bg-foreground text-background"
+                        : "border border-line bg-surface text-foreground"
                     }`}
                   >
                     {msg.role === "assistant" ? (
                       <div className="prose prose-sm max-w-none prose-slate">
                         {msg.isReasoning && !msg.content ? (
-                          <span className="text-slate-500">正在思考…</span>
+                          <span className="text-neutral-400">正在思考…</span>
                         ) : (
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {msg.content}
@@ -791,7 +771,7 @@ export default function Home() {
                       <span>{msg.content}</span>
                     )}
                     {msg.isStreaming && (
-                      <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-slate-400" />
+                      <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-neutral-400" />
                     )}
                   </div>
                 </div>
@@ -801,9 +781,9 @@ export default function Home() {
           ) : (
             <section>
               <div className="mb-4 flex items-center justify-between">
-                <p className="text-sm text-slate-500">共 {documents.length} 条可见文档</p>
+                <p className="text-sm text-neutral-400">共 {documents.length} 条可见文档</p>
                 <button
-                  className="text-sm font-medium text-slate-600 transition hover:text-slate-950 disabled:opacity-50"
+                  className="text-sm font-medium text-neutral-400 transition hover:text-foreground disabled:opacity-50"
                   onClick={() => void fetchDocuments(true)}
                   disabled={documentsLoading}
                 >
@@ -812,25 +792,22 @@ export default function Home() {
               </div>
 
               {documentsError && (
-                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                <div className="mb-4 rounded-lg border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-300">
                   {documentsError}
                 </div>
               )}
 
               {documentsLoading && documents.length === 0 ? (
-                <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
+                <div className="py-20 text-center text-sm text-neutral-500">
                   正在加载文档…
                 </div>
               ) : documents.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
-                  <h2 className="text-lg font-semibold">暂无可见文档</h2>
-                  <p className="mt-2 text-sm text-slate-500">上传 PDF 后，系统会生成 Markdown 并加入 RAG。</p>
-                </div>
+                <div className="py-20 text-center text-sm text-neutral-500">暂无文档</div>
               ) : (
                 <>
-                  <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:block">
+                  <div className="hidden overflow-hidden rounded-xl border border-line bg-surface md:block">
                     <table className="w-full table-fixed text-left text-sm">
-                      <thead className="border-b border-slate-200 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-500">
+                      <thead className="border-b border-line bg-white/5 text-xs font-medium uppercase tracking-wide text-neutral-400">
                         <tr>
                           <th className="w-[34%] px-4 py-3">文件</th>
                           <th className="w-[12%] px-4 py-3">状态</th>
@@ -840,22 +817,22 @@ export default function Home() {
                           <th className="w-[12%] px-4 py-3 text-right">操作</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
+                      <tbody className="divide-y divide-line">
                         {documents.map((doc) => (
-                          <tr key={doc.id} className="align-top hover:bg-slate-50/70">
+                          <tr key={doc.id} className="align-top hover:bg-white/5">
                             <td className="px-4 py-4">
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
-                                  <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">PDF</span>
+                                  <span className="rounded bg-rose-400/10 px-1.5 py-0.5 text-[10px] font-semibold text-rose-300">PDF</span>
                                   <span className="truncate font-medium" title={doc.source_filename || "无源 PDF"}>
                                     {doc.source_filename || "历史记录无源 PDF"}
                                   </span>
-                                  <span className="shrink-0 text-xs text-slate-400">{formatBytes(doc.source_size_bytes)}</span>
+                                  <span className="shrink-0 text-xs text-neutral-500">{formatBytes(doc.source_size_bytes)}</span>
                                 </div>
-                                <div className="mt-2 flex items-center gap-2 text-slate-600">
-                                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">MD</span>
+                                <div className="mt-2 flex items-center gap-2 text-neutral-400">
+                                  <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400">MD</span>
                                   <span className="truncate" title={doc.filename}>{doc.filename}</span>
-                                  <span className="shrink-0 text-xs text-slate-400">{formatBytes(doc.markdown_size_bytes)}</span>
+                                  <span className="shrink-0 text-xs text-neutral-500">{formatBytes(doc.markdown_size_bytes)}</span>
                                 </div>
                               </div>
                             </td>
@@ -863,41 +840,41 @@ export default function Home() {
                               <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${documentStatus[doc.status].className}`}>
                                 {documentStatus[doc.status].label}
                               </span>
-                              <div className="mt-2 text-xs text-slate-400">{doc.chunk_count} 个分块</div>
+                              <div className="mt-2 text-xs text-neutral-500">{doc.chunk_count} 个分块</div>
                               {doc.status === "pending" && doc.review_reason && (
-                                <div className="mt-2 text-xs leading-5 text-amber-700" title={doc.review_reason}>
+                                <div className="mt-2 text-xs leading-5 text-amber-300" title={doc.review_reason}>
                                   {doc.review_reason}
                                 </div>
                               )}
                             </td>
-                            <td className="px-4 py-4 text-slate-600">{doc.visibility === "public" ? "公共" : "本课题组"}</td>
-                            <td className="truncate px-4 py-4 text-slate-600" title={doc.uploader_username || "未知"}>
+                            <td className="px-4 py-4 text-neutral-400">{doc.visibility === "public" ? "公共" : "本课题组"}</td>
+                            <td className="truncate px-4 py-4 text-neutral-400" title={doc.uploader_username || "未知"}>
                               {doc.uploader_username || "未知"}
                             </td>
-                            <td className="px-4 py-4 text-xs leading-5 text-slate-500">{formatDate(doc.created_at)}</td>
+                            <td className="px-4 py-4 text-xs leading-5 text-neutral-400">{formatDate(doc.created_at)}</td>
                             <td className="px-4 py-4">
                               <div className="flex flex-col items-end gap-2">
                                 {doc.status === "pending" && userRole === "admin" && (
                                   <button
-                                    className="text-xs font-medium text-emerald-700 hover:text-emerald-900"
+                                    className="text-xs font-medium text-emerald-300 hover:text-emerald-900"
                                     onClick={() => void approveDocument(doc)}
                                   >
                                     审核通过
                                   </button>
                                 )}
                                 <button
-                                  className="text-xs font-medium text-slate-700 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-300"
+                                  className="text-xs font-medium text-neutral-300 hover:text-foreground disabled:cursor-not-allowed disabled:text-neutral-600"
                                   disabled={!doc.has_pdf}
                                   onClick={() => void downloadDocument(doc, "pdf")}
                                 >
                                   下载 PDF
                                 </button>
-                                <button className="text-xs font-medium text-slate-700 hover:text-slate-950" onClick={() => void downloadDocument(doc, "md")}>
+                                <button className="text-xs font-medium text-neutral-300 hover:text-foreground" onClick={() => void downloadDocument(doc, "md")}>
                                   下载 MD
                                 </button>
                                 {doc.can_delete && (
                                   <button
-                                    className="text-xs font-medium text-rose-600 hover:text-rose-800 disabled:opacity-50"
+                                    className="text-xs font-medium text-rose-300 hover:text-rose-200 disabled:opacity-50"
                                     disabled={deletingDocument === doc.id}
                                     onClick={() => void deleteDocument(doc)}
                                   >
@@ -914,33 +891,33 @@ export default function Home() {
 
                   <div className="space-y-3 md:hidden">
                     {documents.map((doc) => (
-                      <article key={doc.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <article key={doc.id} className="rounded-xl border border-line bg-surface p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="truncate font-medium">{doc.source_filename || doc.filename}</div>
-                            <div className="mt-1 truncate text-xs text-slate-500">{doc.filename}</div>
+                            <div className="mt-1 truncate text-xs text-neutral-400">{doc.filename}</div>
                           </div>
                           <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${documentStatus[doc.status].className}`}>
                             {documentStatus[doc.status].label}
                           </span>
                         </div>
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-neutral-400">
                           <span>{doc.visibility === "public" ? "公共" : "本课题组"}</span>
                           <span>{doc.chunk_count} 个分块</span>
                           <span>{doc.uploader_username || "未知上传者"}</span>
                           <span>{formatDate(doc.created_at)}</span>
                         </div>
                         {doc.status === "pending" && doc.review_reason && (
-                          <div className="mt-3 text-xs leading-5 text-amber-700">{doc.review_reason}</div>
+                          <div className="mt-3 text-xs leading-5 text-amber-300">{doc.review_reason}</div>
                         )}
-                        <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                        <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-3">
                           {doc.status === "pending" && userRole === "admin" && (
-                            <button className="rounded-md border border-emerald-200 px-2.5 py-1.5 text-xs text-emerald-700" onClick={() => void approveDocument(doc)}>审核通过</button>
+                            <button className="rounded-md border border-emerald-400/20 px-2.5 py-1.5 text-xs text-emerald-300" onClick={() => void approveDocument(doc)}>审核通过</button>
                           )}
-                          <button className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs disabled:text-slate-300" disabled={!doc.has_pdf} onClick={() => void downloadDocument(doc, "pdf")}>下载 PDF</button>
-                          <button className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs" onClick={() => void downloadDocument(doc, "md")}>下载 MD</button>
+                          <button className="rounded-md border border-line px-2.5 py-1.5 text-xs disabled:text-neutral-600" disabled={!doc.has_pdf} onClick={() => void downloadDocument(doc, "pdf")}>下载 PDF</button>
+                          <button className="rounded-md border border-line px-2.5 py-1.5 text-xs" onClick={() => void downloadDocument(doc, "md")}>下载 MD</button>
                           {doc.can_delete && (
-                            <button className="rounded-md border border-rose-200 px-2.5 py-1.5 text-xs text-rose-600 disabled:opacity-50" disabled={deletingDocument === doc.id} onClick={() => void deleteDocument(doc)}>
+                            <button className="rounded-md border border-rose-400/20 px-2.5 py-1.5 text-xs text-rose-300 disabled:opacity-50" disabled={deletingDocument === doc.id} onClick={() => void deleteDocument(doc)}>
                               {deletingDocument === doc.id ? "删除中" : "删除"}
                             </button>
                           )}
@@ -955,18 +932,18 @@ export default function Home() {
         </div>
 
         {activeView === "chat" && (
-          <div className="border-t border-slate-200 bg-white p-4">
-            <div className="mx-auto flex max-w-4xl gap-2">
+          <div className="shrink-0 px-4 pb-6 pt-3">
+            <div className="composer mx-auto flex max-w-4xl gap-2">
               <input
-                className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-                placeholder="输入问题"
+                aria-label="输入问题" className="min-w-0 flex-1 bg-transparent px-3 py-2.5 outline-none"
+                placeholder="向 EMOS 提问…"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
                 disabled={loading}
               />
               <button
-                className="rounded-lg bg-slate-950 px-5 py-2.5 font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+                className="rounded-lg bg-foreground px-5 py-2.5 font-medium text-background transition hover:bg-white disabled:opacity-50"
                 onClick={sendMessage}
                 disabled={loading || !input.trim()}
               >

@@ -45,3 +45,6 @@ skills-lock.json
 
 # Agent change records
 .tmp/
+
+# Local Docker credentials
+deploy/local/.env
