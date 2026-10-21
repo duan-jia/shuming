@@ -30,8 +30,3 @@ Git history currently uses short imperative or scoped messages, for example `doc
 
 Never commit `config.json`, `.env*`, GGUF model files, generated RAG indexes, or secrets. Start from `config.example.json`, use local credentials, and rotate default admin passwords before production use.
 
-## Agent-Specific Instructions
-
-- Avoid overengineering and unnecessary verification. Keep implementation and checks proportional to the requested change.
-- Before modifying any file, ask the user for confirmation and explain: (1) the purpose of the change, (2) the implementation approach, and (3) the exact files and locations to be modified.
-- After confirmation, save the explanation in `./.tmp/` with a filename beginning with `YYYYMMDD-HHMMSS`.
