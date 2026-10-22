@@ -124,3 +124,36 @@ jobs:
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
+
+  deployment:
+    name: Deployment isolation checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run deployment tests
+        run: python3 -m unittest discover -s tests -p 'test_*deploy*.py'
+      - name: Test staging guard
+        run: python3 -m unittest discover -s tests -p test_staging_isolation.py
+      - name: Test production release
+        run: python3 -m unittest discover -s tests -p test_production_release.py
+      - name: Check shell syntax
+        run: bash -n deploy/staging/deploy.sh deploy/staging/pull-images.sh
+
+  frontend:
+    name: Frontend build and lint
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'

@@ -48,3 +48,6 @@ skills-lock.json
 
 # Local Docker credentials
 deploy/local/.env
+
+# Deployment build artifacts
+.artifacts/

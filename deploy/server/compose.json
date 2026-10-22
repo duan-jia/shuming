@@ -1,0 +1,41 @@
+{
+  "name": "fast-llm-reasoner-web",
+  "services": {
+    "web": {
+      "image": "fast-llm-reasoner-web:local",
+      "restart": "unless-stopped",
+      "init": true,
+      "environment": {
+        "BACKEND_API_BASE": "http://backend:9006",
+        "PROJECT_ROOT": "/app",
+        "PDF_SOURCE_DIR": "/data/pdfs",
+        "PDF_PROCESSED_DIR": "/data/processed"
+      },
+      "env_file": ["${SERVER_ROOT}/web-model.env"],
+      "volumes": [
+        "${SERVER_ROOT}/pdfs:/data/pdfs",
+        "${SERVER_ROOT}/processed:/data/processed"
+      ],
+      "ports": ["127.0.0.1:3000:3000"],
+      "mem_limit": "512m",
+      "cpus": 1,
+      "security_opt": ["no-new-privileges:true"],
+      "cap_drop": ["ALL"],
+      "healthcheck": {
+        "test": ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"],
+        "interval": "15s",
+        "timeout": "5s",
+        "retries": 5,
+        "start_period": "30s"
+      },
+      "networks": ["backend", "web"]
+    }
+  },
+  "networks": {
+    "backend": {
+      "external": true,
+      "name": "${BACKEND_NETWORK:-fast-llm-reasoner-staging_staging}"
+    },
+    "web": {"name": "lab-web"}
+  }
+}

@@ -67,6 +67,8 @@ Agent → C++ /mcp/web → DeepSeek Search API（可选）
 
 ## 快速开始
 
+Docker 服务器部署见[服务器部署指南](deploy/server/README.md)。
+
 ### 1. 获取源码与安装依赖
 
 ```bash

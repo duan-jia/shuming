@@ -6,20 +6,25 @@ on:
       - .github/workflows/staging-e2e.yml
       - .dockerignore
       - deploy/staging/**
+      - deploy/server/**
+      - web/**
       - CMakeLists.txt
       - engine/**
       - mcp-gateway/**
       - sql/**
+      - tests/test_staging_isolation.py
   workflow_dispatch:
 permissions:
   contents: read
   packages: write
+  actions: read
 concurrency:
-  group: staging-e2e-${{ github.ref }}
-  cancel-in-progress: true
+  group: lab-server-release
+  cancel-in-progress: false
 env:
   BACKEND_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-backend:${{ github.sha }}
   MCP_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-mcp:${{ github.sha }}
+  WEB_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-web:${{ github.sha }}
 jobs:
   build-images:
     name: Build staging images
@@ -51,6 +56,33 @@ jobs:
         run: |
           docker build --file deploy/staging/mcp.Dockerfile --tag "$MCP_IMAGE" .
           docker push "$MCP_IMAGE"
+      - name: Build and push frontend image
+        run: |
+          docker build --file deploy/server/web.Dockerfile --tag "$WEB_IMAGE" .
+          docker push "$WEB_IMAGE"
+      - name: Package offline staging bundle
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/staging-bundle
+          git archive --format=tar HEAD | gzip -1 > .artifacts/staging-bundle/source.tar.gz
+          docker pull mysql:8.4
+          docker tag mysql:8.4 mirror.ccs.tencentyun.com/library/mysql:8.4
+          docker save "$BACKEND_IMAGE" "$MCP_IMAGE" mirror.ccs.tencentyun.com/library/mysql:8.4 \
+            | gzip -1 > .artifacts/staging-bundle/images.tar.gz
+          cd .artifacts/staging-bundle
+          printf '%s\n' "$GITHUB_SHA" > REVISION
+          sha256sum source.tar.gz images.tar.gz REVISION > SHA256SUMS
+      - name: Upload staging bundle
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-bundle
+          path: .artifacts/staging-bundle/
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
       - name: Log out from GHCR
         if: always()
         run: docker logout ghcr.io || true
@@ -59,29 +91,107 @@ jobs:
     needs: build-images
     environment: staging
     runs-on: [self-hosted, Linux, X64, staging]
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      STAGING_ROOT: /srv/fastllm-staging
+      STAGING_OFFLINE: '1'
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/.staging-${{ github.run_id }}-${{ github.run_attempt }}/source
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          clean: true
-      - name: Log in to GHCR
-        run: echo '${{ github.token }}' | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+      - name: Download staging bundle
+        id: download
+        continue-on-error: true
+        timeout-minutes: 10
+        working-directory: ${{ github.workspace }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BUNDLE_DIR: ${{ github.workspace }}/.staging-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, json, os, pathlib, urllib.request
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, message, headers, newurl):
+                  return None
+          repo, revision = os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_SHA']
+          url = f'https://api.github.com/repos/{repo}/contents/deploy/staging/download-bundle.py?ref={revision}'
+          request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + os.environ['GITHUB_TOKEN'], 'User-Agent': 'shuming-staging'})
+          with urllib.request.build_opener(NoRedirect).open(request, timeout=30) as response:
+              content = base64.b64decode(json.load(response)['content'])
+          target = pathlib.Path(os.environ['BUNDLE_DIR'])
+          target.mkdir(parents=True, exist_ok=True)
+          (target / 'download-bundle.py').write_bytes(content)
+          PY
+          python3 "$BUNDLE_DIR/download-bundle.py"
+      - name: Use separately transferred bundle if download failed
+        if: steps.download.outcome == 'failure'
+        timeout-minutes: 2
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, pathlib, shutil
+          run = os.environ['GITHUB_RUN_ID']
+          attempt = os.environ['GITHUB_RUN_ATTEMPT']
+          bundle = pathlib.Path('/srv/fastllm-staging/bundles') / (run + '.zip')
+          target = pathlib.Path(os.environ['GITHUB_WORKSPACE']) / f'.staging-{run}-{attempt}'
+          target.mkdir(exist_ok=True)
+          if not bundle.is_file():
+              raise SystemExit(f'Artifact download failed. Transfer this run\'s staging-bundle ZIP to {bundle}, then retry the deployment job.')
+          shutil.copyfile(bundle, target / 'bundle.zip')
+          PY
+      - name: Verify and import staging bundle
+        id: import
+        timeout-minutes: 8
+        working-directory: ${{ github.workspace }}/.staging-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, shutil, zipfile
+          with zipfile.ZipFile('bundle.zip') as archive:
+              names = {'SHA256SUMS', 'REVISION', 'source.tar.gz', 'images.tar.gz'}
+              if set(archive.namelist()) != names:
+                  raise SystemExit('Unexpected deployment bundle contents')
+              for name in names:
+                  with archive.open(name) as source, pathlib.Path(name).open('wb') as out:
+                      shutil.copyfileobj(source, out)
+          PY
+          sha256sum --check SHA256SUMS
+          test "$(cat REVISION)" = "$GITHUB_SHA"
+          mkdir source
+          tar --extract --gzip --file source.tar.gz --directory source --no-same-owner
+          python3 source/deploy/staging/guard.py
+          gzip -dc images.tar.gz | docker load
       - name: Deploy stack and run E2E
-        env:
-          STAGING_ROOT: /opt/fast-llm-reasoner/staging
+        timeout-minutes: 10
         run: ./deploy/staging/deploy.sh
+      - name: Stop test containers without removing data
+        if: always() && steps.import.outcome == 'success'
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          python3 deploy/staging/guard.py
+          if [[ -f "$STAGING_ROOT/.env" ]]; then
+            export REPO_ROOT="$PWD"
+            docker compose --env-file "$STAGING_ROOT/.env" -f deploy/staging/compose.json stop --timeout 20
+          fi
       - name: Show service status after failure
-        if: failure()
-        env:
-          STAGING_ROOT: /opt/fast-llm-reasoner/staging
+        if: failure() && steps.import.outcome == 'success'
         shell: bash
         run: |
           set +e
           if [[ -f "$STAGING_ROOT/.env" ]]; then
-            export REPO_ROOT="$GITHUB_WORKSPACE"
-            docker compose --env-file "$STAGING_ROOT/.env" --file deploy/staging/compose.yml ps
+            export REPO_ROOT="$PWD"
+            docker compose --env-file "$STAGING_ROOT/.env" --file deploy/staging/compose.json ps
           fi
-      - name: Log out from GHCR
+      - name: Remove downloaded staging bundle
         if: always()
-        run: docker logout ghcr.io || true
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          rm -rf -- "$GITHUB_WORKSPACE/.staging-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          rm -f -- "/srv/fastllm-staging/bundles/$GITHUB_RUN_ID.zip"
