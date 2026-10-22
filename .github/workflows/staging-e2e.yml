@@ -6,6 +6,7 @@ on:
       - .github/workflows/staging-e2e.yml
       - .dockerignore
       - deploy/staging/**
+      - deploy/proxy/**
       - deploy/server/**
       - web/**
       - CMakeLists.txt
@@ -110,6 +111,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The optional mihomo container publishes only this host-loopback port.
+          # Empty subscriptions leave the original direct/offline path available.
+          if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/7890' 2>/dev/null; then
+            export http_proxy=http://127.0.0.1:7890
+            export https_proxy=http://127.0.0.1:7890
+            export no_proxy=localhost,127.0.0.1
+            echo 'Using the local mihomo proxy for staging bundle downloads.'
+          fi
           python3 - <<'PY'
           import base64, json, os, pathlib, urllib.request
           class NoRedirect(urllib.request.HTTPRedirectHandler):
