@@ -7,7 +7,11 @@ checksummed bundle containing the tracked source and backend/MCP/MySQL images.
 The server downloads that bundle, verifies its checksums and imports images
 locally; it does not clone from github.com or pull from GHCR during CI staging.
 Artifact-service connectivity is still required. Downloads and imports have
-explicit timeouts, and temporary bundles are removed after each run. Fork PRs run CI without
+explicit timeouts, and temporary bundles are removed after each run.
+The downloader uses parallel byte ranges with bounded retries and checks the
+artifact's SHA-256 digest. GitHub API credentials are never forwarded to the
+storage redirect URL. It needs only the workflow token's read access to Actions.
+Fork PRs run CI without
 executing code on that server. The frontend receives build and lint checks;
 staging does not yet test browser chat or PDF processing.
 

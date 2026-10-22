@@ -17,6 +17,7 @@ on:
 permissions:
   contents: read
   packages: write
+  actions: read
 concurrency:
   group: lab-server-release
   cancel-in-progress: false
@@ -102,10 +103,28 @@ jobs:
         id: download
         continue-on-error: true
         timeout-minutes: 10
-        uses: actions/download-artifact@v4
-        with:
-          name: staging-bundle
-          path: ${{ github.workspace }}/.staging-${{ github.run_id }}-${{ github.run_attempt }}
+        working-directory: ${{ github.workspace }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BUNDLE_DIR: ${{ github.workspace }}/.staging-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, json, os, pathlib, urllib.request
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, message, headers, newurl):
+                  return None
+          repo, revision = os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_SHA']
+          url = f'https://api.github.com/repos/{repo}/contents/deploy/staging/download-bundle.py?ref={revision}'
+          request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + os.environ['GITHUB_TOKEN'], 'User-Agent': 'shuming-staging'})
+          with urllib.request.build_opener(NoRedirect).open(request, timeout=30) as response:
+              content = base64.b64decode(json.load(response)['content'])
+          target = pathlib.Path(os.environ['BUNDLE_DIR'])
+          target.mkdir(parents=True, exist_ok=True)
+          (target / 'download-bundle.py').write_bytes(content)
+          PY
+          python3 "$BUNDLE_DIR/download-bundle.py"
       - name: Use separately transferred bundle if download failed
         if: steps.download.outcome == 'failure'
         timeout-minutes: 2
@@ -114,7 +133,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import os, pathlib, shutil, zipfile
+          import os, pathlib, shutil
           run = os.environ['GITHUB_RUN_ID']
           attempt = os.environ['GITHUB_RUN_ATTEMPT']
           bundle = pathlib.Path('/srv/fastllm-staging/bundles') / (run + '.zip')
@@ -122,13 +141,7 @@ jobs:
           target.mkdir(exist_ok=True)
           if not bundle.is_file():
               raise SystemExit(f'Artifact download failed. Transfer this run\'s staging-bundle ZIP to {bundle}, then retry the deployment job.')
-          with zipfile.ZipFile(bundle) as archive:
-              names = {'SHA256SUMS', 'REVISION', 'source.tar.gz', 'images.tar.gz'}
-              if set(archive.namelist()) != names:
-                  raise SystemExit('Unexpected deployment bundle contents')
-              for name in names:
-                  with archive.open(name) as source, (target / name).open('wb') as out:
-                      shutil.copyfileobj(source, out)
+          shutil.copyfile(bundle, target / 'bundle.zip')
           PY
       - name: Verify and import staging bundle
         id: import
@@ -137,6 +150,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, shutil, zipfile
+          with zipfile.ZipFile('bundle.zip') as archive:
+              names = {'SHA256SUMS', 'REVISION', 'source.tar.gz', 'images.tar.gz'}
+              if set(archive.namelist()) != names:
+                  raise SystemExit('Unexpected deployment bundle contents')
+              for name in names:
+                  with archive.open(name) as source, pathlib.Path(name).open('wb') as out:
+                      shutil.copyfileobj(source, out)
+          PY
           sha256sum --check SHA256SUMS
           test "$(cat REVISION)" = "$GITHUB_SHA"
           mkdir source
