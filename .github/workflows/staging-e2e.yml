@@ -6,20 +6,24 @@ on:
       - .github/workflows/staging-e2e.yml
       - .dockerignore
       - deploy/staging/**
+      - deploy/server/**
+      - web/**
       - CMakeLists.txt
       - engine/**
       - mcp-gateway/**
       - sql/**
+      - tests/test_staging_isolation.py
   workflow_dispatch:
 permissions:
   contents: read
   packages: write
 concurrency:
-  group: staging-e2e-${{ github.ref }}
-  cancel-in-progress: true
+  group: lab-server-release
+  cancel-in-progress: false
 env:
   BACKEND_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-backend:${{ github.sha }}
   MCP_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-mcp:${{ github.sha }}
+  WEB_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-web:${{ github.sha }}
 jobs:
   build-images:
     name: Build staging images
@@ -51,6 +55,32 @@ jobs:
         run: |
           docker build --file deploy/staging/mcp.Dockerfile --tag "$MCP_IMAGE" .
           docker push "$MCP_IMAGE"
+      - name: Build and push frontend image
+        run: |
+          docker build --file deploy/server/web.Dockerfile --tag "$WEB_IMAGE" .
+          docker push "$WEB_IMAGE"
+      - name: Package offline staging bundle
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/staging-bundle
+          git archive --format=tar HEAD | gzip -1 > .artifacts/staging-bundle/source.tar.gz
+          docker pull mysql:8.4
+          docker tag mysql:8.4 mirror.ccs.tencentyun.com/library/mysql:8.4
+          docker save "$BACKEND_IMAGE" "$MCP_IMAGE" mirror.ccs.tencentyun.com/library/mysql:8.4 \
+            | gzip -1 > .artifacts/staging-bundle/images.tar.gz
+          cd .artifacts/staging-bundle
+          sha256sum source.tar.gz images.tar.gz > SHA256SUMS
+      - name: Upload staging bundle
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-bundle
+          path: .artifacts/staging-bundle/
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
       - name: Log out from GHCR
         if: always()
         run: docker logout ghcr.io || true
@@ -59,29 +89,56 @@ jobs:
     needs: build-images
     environment: staging
     runs-on: [self-hosted, Linux, X64, staging]
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      STAGING_ROOT: /srv/fastllm-staging
+      STAGING_OFFLINE: '1'
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/.staging-${{ github.run_id }}-${{ github.run_attempt }}/source
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - name: Download staging bundle
+        timeout-minutes: 10
+        uses: actions/download-artifact@v4
         with:
-          clean: true
-      - name: Log in to GHCR
-        run: echo '${{ github.token }}' | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+          name: staging-bundle
+          path: ${{ github.workspace }}/.staging-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify and import staging bundle
+        id: import
+        timeout-minutes: 8
+        working-directory: ${{ github.workspace }}/.staging-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum --check SHA256SUMS
+          mkdir source
+          tar --extract --gzip --file source.tar.gz --directory source --no-same-owner
+          python3 source/deploy/staging/guard.py
+          gzip -dc images.tar.gz | docker load
       - name: Deploy stack and run E2E
-        env:
-          STAGING_ROOT: /opt/fast-llm-reasoner/staging
+        timeout-minutes: 10
         run: ./deploy/staging/deploy.sh
+      - name: Stop test containers without removing data
+        if: always() && steps.import.outcome == 'success'
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          python3 deploy/staging/guard.py
+          if [[ -f "$STAGING_ROOT/.env" ]]; then
+            export REPO_ROOT="$PWD"
+            docker compose --env-file "$STAGING_ROOT/.env" -f deploy/staging/compose.json stop --timeout 20
+          fi
       - name: Show service status after failure
-        if: failure()
-        env:
-          STAGING_ROOT: /opt/fast-llm-reasoner/staging
+        if: failure() && steps.import.outcome == 'success'
         shell: bash
         run: |
           set +e
           if [[ -f "$STAGING_ROOT/.env" ]]; then
-            export REPO_ROOT="$GITHUB_WORKSPACE"
-            docker compose --env-file "$STAGING_ROOT/.env" --file deploy/staging/compose.yml ps
+            export REPO_ROOT="$PWD"
+            docker compose --env-file "$STAGING_ROOT/.env" --file deploy/staging/compose.json ps
           fi
-      - name: Log out from GHCR
+      - name: Remove downloaded staging bundle
         if: always()
-        run: docker logout ghcr.io || true
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: rm -rf -- "$GITHUB_WORKSPACE/.staging-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
