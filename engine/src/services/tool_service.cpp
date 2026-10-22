@@ -38,8 +38,8 @@ nlohmann::json ToolService::list(ToolSet set, bool allow_web) const {
 }
 
 nlohmann::json ToolService::execute(const std::string& name, const nlohmann::json& args,
-                                   const CallerContext& caller) {
-    if (name == "search_web") return web_.execute(args);
+                                   const CallerContext& caller, std::function<bool()> should_stop) {
+    if (name == "search_web") return web_.execute(args, should_stop);
     if (name != "search_knowledge") throw std::invalid_argument("Unknown tool");
     if (!args.is_object() || !args.contains("query") || !args["query"].is_string()) {
         throw std::invalid_argument("query must be a string");
@@ -61,6 +61,7 @@ nlohmann::json ToolService::execute(const std::string& name, const nlohmann::jso
     if (args.contains("mode") && (!args["mode"].is_string() || (args["mode"] != "chunks" && args["mode"] != "parents"))) {
         throw std::invalid_argument("mode must be chunks or parents");
     }
+    if (should_stop && should_stop()) throw std::runtime_error("Request cancelled");
     SearchKnowledgeRequest request;
     request.query = query;
     request.top_k = args.value("top_k", 5);

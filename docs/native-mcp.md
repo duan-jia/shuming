@@ -79,8 +79,10 @@ MCP-Protocol-Version: 2025-11-25
 }
 ```
 
-推荐通过 `DEEPSEEK_SEARCH_API_KEY` 环境变量提供专用密钥，优先于配置中的
-`web_search.api_key`；不会自动使用生成模型的 API key。开启但未配置密钥时，调用返回
+问答、搜索和 PDF 处理可以共用 `DEEPSEEK_API_KEY`。搜索优先使用非空的
+`DEEPSEEK_SEARCH_API_KEY`，其次为 `web_search.api_key`，未单独配置时复用
+`DEEPSEEK_API_KEY` 或 `remote_engine.api_key`。空环境变量不会覆盖已有配置。
+开启但未配置密钥时，调用返回
 MCP 工具执行错误。默认关闭时不会在工具发现中展示 `search_web`。
 
 搜索使用 DeepSeek 独立的 Search API，不需要再次调用聊天模型。支持：
@@ -129,9 +131,9 @@ DeepSeek 出站连接由 cpp-httplib 管理，不自动进入 muduo 的 epoll。
 
 ## 与聊天、旧网关的关系
 
-`ToolService` 是可供进程内 Agent Runtime 和 MCP 共用的工具边界。当前聊天仍保留
-已有单次 RAG → 生成流程；本次实现两个 MCP 工具服务入口，不包含自主 Agent Loop。
-后续 Runtime 可以直接调用 ToolService，无需对本进程再发 MCP/HTTP 请求。
+`ToolService` 是进程内 Agent Runtime 和 MCP 共用的工具边界。远程模型聊天默认运行
+自主工具调用循环，直接调用 ToolService，无需对本进程再发 MCP/HTTP 请求。本地模型
+暂保留原有生成流程。循环、预算、取消与流式事件见 [Agent Runtime](agent-runtime.md)。
 
 `mcp-gateway/` 暂保留为旧客户端的兼容路径，现有 staging 部署不会被自动替换。
 迁移调用方到原生入口并验证凭据后，可停止单独的 TS 网关。没有数据库迁移要求。

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <cstdlib>
 #include <fstream>
 #include <nlohmann/json.hpp>
 
@@ -25,6 +26,13 @@ public:
 
     std::string get_str(const std::string& path, const std::string& default_val = "") const {
         return value_at(path, default_val).get<std::string>();
+    }
+
+    // Empty environment entries (for example an unfilled Compose .env) do not
+    // mask an existing local config value.
+    std::string get_env_str(const std::string& path, const char* variable) const {
+        const char* value = std::getenv(variable);
+        return value && *value ? std::string(value) : get_str(path, "");
     }
 
     int get_int(const std::string& path, int default_val = 0) const {

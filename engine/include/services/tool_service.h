@@ -14,7 +14,7 @@ public:
     ToolService(KnowledgeSearchService& knowledge, WebSearchService& web);
     nlohmann::json list(ToolSet set, bool allow_web) const;
     nlohmann::json execute(const std::string& name, const nlohmann::json& arguments,
-                           const CallerContext& caller);
+                           const CallerContext& caller, std::function<bool()> should_stop = nullptr);
     static nlohmann::json knowledge_result(const SearchKnowledgeResult& result);
 
 private:

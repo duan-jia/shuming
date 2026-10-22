@@ -83,15 +83,16 @@ int main(int argc, char* argv[]) {
     }
 
     AuthService auth(ctx);
-    ChatService chat(ctx);
     DocumentService documents(ctx);
     AdminService admin(ctx);
 
     WebSearchOptions web_options;
     web_options.enabled = config.get_bool("web_search.enabled", false);
     web_options.endpoint = config.get_str("web_search.endpoint", "https://api.deepseek.com/v1/tools/search");
-    web_options.api_key = config.get_str("web_search.api_key", "");
-    if (const char* key = std::getenv("DEEPSEEK_SEARCH_API_KEY")) web_options.api_key = key;
+    web_options.api_key = config.get_env_str("web_search.api_key", "DEEPSEEK_SEARCH_API_KEY");
+    if (web_options.api_key.empty()) {
+        web_options.api_key = config.get_env_str("remote_engine.api_key", "DEEPSEEK_API_KEY");
+    }
     web_options.ca_bundle = config.get_str("web_search.ca_bundle", "/etc/ssl/certs/ca-certificates.crt");
     web_options.timeout_seconds = config.get_int("web_search.timeout_seconds", 15);
     web_options.max_concurrency = config.get_int("web_search.max_concurrency", 2);
@@ -108,6 +109,15 @@ int main(int argc, char* argv[]) {
     ctx.rate_limiter->add_rule("search_knowledge", config.get_int("mcp.knowledge_requests_per_minute", 60), 60);
     ctx.rate_limiter->add_rule("search_web", config.get_int("mcp.web_requests_per_minute", 20), 60);
     McpService mcp(tools, require_auth, *ctx.rate_limiter, mcp_options);
+    AgentOptions agent_options;
+    agent_options.enabled = config.get_bool("agent.enabled", true);
+    agent_options.max_turns = config.get_int("agent.max_turns", 6);
+    agent_options.max_output_tokens = config.get_int("agent.max_output_tokens", 0);
+    agent_options.max_total_tokens = config.get_int("agent.max_total_tokens", 24000);
+    agent_options.timeout_seconds = config.get_int("agent.timeout_seconds", 90);
+    agent_options.max_tool_calls_per_turn = config.get_int("agent.max_tool_calls_per_turn", 4);
+    agent_options.max_tool_result_bytes = config.get_int("agent.max_tool_result_bytes", 24000);
+    ChatService chat(ctx, tools, agent_options, mcp_options.allow_user_web_search);
 
     muduo::net::EventLoop loop;
     muduo::net::InetAddress addr(options.port);
@@ -133,6 +143,7 @@ int main(int argc, char* argv[]) {
     spdlog::info("Starting fast-llm-reasoner on port {}", options.port);
     server.start();
     loop.loop();
+    ctx.scheduler->stop();
 
     return 0;
 }

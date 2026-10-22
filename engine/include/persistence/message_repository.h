@@ -15,7 +15,7 @@ public:
     bool insert_chat_pair(const std::string& session_id,
                           const std::string& user_content,
                           const std::string& assistant_content,
-                          int prompt_tokens, int completion_tokens);
+                          int prompt_tokens, int completion_tokens, const std::string& reasoning = "");
 
 private:
     MysqlPool& mysql_;
@@ -23,7 +23,7 @@ private:
     static std::string escape_sql(MYSQL* mysql, const std::string& input);
     static bool insert_message(MysqlConnection& conn, const std::string& session_id,
                                const std::string& role, const std::string& content,
-                               int tokens_in, int tokens_out);
+                               int tokens_in, int tokens_out, const std::string& reasoning = "");
 };
 
 }

@@ -17,11 +17,24 @@ docker compose -f deploy/local/compose.yml up -d --build
 
 本地配置和文件数据在 `.tmp/local-deploy/`，MySQL 在 `shuming-local_mysql-data` 卷中，均独立于现有部署。配置与 `.env` 权限为 `0600`，不提交 Git。前端包含 Python 与 pypdf，可执行论文处理脚本。
 
-默认可测试登录、会话、Markdown 文档入库和真实 BGE 检索。生成问答与 PDF 论文卡片还需要在 `.tmp/local-deploy/config.json` 的 `remote_engine` 中填写可用的 endpoint、model、api_key，然后执行：
+默认可测试登录、会话、Markdown 文档入库和真实 BGE 检索。DeepSeek 问答、网页搜索
+和 PDF 处理共用一把 Key，在 `deploy/local/.env` 中填写一次：
+
+```dotenv
+DEEPSEEK_API_KEY=你的实际Key
+```
+
+`.tmp/local-deploy/config.json` 的 `remote_engine.endpoint` / `model` 仍需设置为可用值；
+网页搜索需 `web_search.enabled=true`。搜索可通过 `DEEPSEEK_SEARCH_API_KEY` 单独覆盖，
+否则复用问答 Key。不要将真实 Key 提交 Git。
+
+修改 .env 后需要重建容器环境，单纯 restart 不会加载新环境变量：
 
 ```bash
-docker compose -f deploy/local/compose.yml restart backend web
+docker compose -f deploy/local/compose.yml up -d --no-deps --force-recreate backend web
 ```
+
+若当前镜像还没有新代码，需要先按下方步骤构建后端和前端，再执行上述命令。
 
 查询改写默认关闭；需要时配置 `rag.query_rewrite`，确认所填模型可用。
 

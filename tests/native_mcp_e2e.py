@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 COMMAND = []
 SDK_COMMAND = []
+SERVER_EXTRA_ARGS = []
 
 
 class Provider(BaseHTTPRequestHandler):
@@ -68,7 +69,7 @@ class NativeMcpTest(unittest.TestCase):
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             cls.port = sock.getsockname()[1]
-        cls.process = subprocess.Popen(COMMAND + [str(cls.port), f'http://127.0.0.1:{cls.provider.server_port}/v1/tools/search'],
+        cls.process = subprocess.Popen(COMMAND + [str(cls.port), f'http://127.0.0.1:{cls.provider.server_port}/v1/tools/search'] + SERVER_EXTRA_ARGS,
                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         cls.addClassCleanup(cls.cleanup_process)
         cls.addClassCleanup(cls.provider.shutdown)

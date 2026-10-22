@@ -11,6 +11,8 @@ interface Message {
   content: string;
   isStreaming: boolean;
   isReasoning?: boolean;
+  toolStatus?: string;
+  notice?: string;
 }
 
 interface Session {
@@ -98,6 +100,7 @@ export default function Home() {
   const messages = sessionMessages[activeSession] || EMPTY_MESSAGES;
   const loading = !!generating[activeSession];
   const requests = useRef(new Map<string, AbortController>());
+  const requestIds = useRef(new Map<string, string>());
   const historyVersions = useRef(new Map<string, number>());
   const navigationVersion = useRef(0);
   const historySequence = useRef(0);
@@ -469,13 +472,15 @@ export default function Home() {
     setMessages((prev) => [...prev, assistantMsg]);
     if (navigation === navigationVersion.current) setInput("");
 
+    const requestId = createRequestId();
+    requestIds.current.set(sid, requestId);
     try {
       const res = await fetch(`${API_BASE}/api/chat/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
-          "X-Request-Id": createRequestId(),
+          "X-Request-Id": requestId,
         },
         body: JSON.stringify({ message: userMsg.content, session_id: sid }),
         signal: controller.signal,
@@ -514,7 +519,9 @@ export default function Home() {
                       message.id === msgId
                         ? {
                             ...message,
-                            content: parsed.error || "Error",
+                            content: message.content,
+                            notice: parsed.stop_reason === "cancelled" ? "已停止生成" : parsed.stop_reason === "output_limit" ? "本轮推理达到长度上限，请缩短问题或联系管理员调整输出上限。" : parsed.error || "生成失败",
+                            toolStatus: undefined,
                             isStreaming: false,
                             isReasoning: false,
                           }
@@ -528,11 +535,17 @@ export default function Home() {
                         ? {
                             ...message,
                             content: message.content + parsed.content,
+                            toolStatus: undefined,
                             isReasoning: false,
                           }
                         : message
                     )
                   );
+                } else if (parsed.type === "tool_start" || parsed.type === "tool_end") {
+                  const name = parsed.name === "search_knowledge" ? "知识库检索" : parsed.name === "search_web" ? "网页搜索" : "工具调用";
+                  setMessages((prev) => prev.map((message) => message.id === msgId
+                    ? { ...message, isReasoning: false, toolStatus: parsed.type === "tool_start" ? `正在${name}…` : parsed.is_error ? `${name}未完成，正在继续处理…` : `${name}完成，正在整理…` }
+                    : message));
                 } else if (parsed.type === "reasoning") {
                   setMessages((prev) =>
                     prev.map((message) =>
@@ -544,7 +557,7 @@ export default function Home() {
                   setMessages((prev) =>
                     prev.map((message) =>
                       message.id === msgId
-                        ? { ...message, isStreaming: false, isReasoning: false }
+                        ? { ...message, isStreaming: false, isReasoning: false, toolStatus: undefined, notice: parsed.truncated ? "回答已达到长度上限，可发送“继续”接着生成。" : message.notice }
                         : message
                     )
                   );
@@ -556,12 +569,16 @@ export default function Home() {
             }
           }
         }
+        if (!finished) throw new Error("连接中断，请重试");
       } finally {
         await reader.cancel().catch(() => {});
         reader.releaseLock();
       }
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        setMessages((prev) => prev.map((message) => message.id === msgId ? { ...message, notice: "已停止生成" } : message));
+        return;
+      }
       const errorMessage =
         error instanceof Error && error.message
           ? `请求失败：${error.message}`
@@ -571,7 +588,7 @@ export default function Home() {
           message.id === msgId
             ? {
                 ...message,
-                content: errorMessage,
+                notice: errorMessage,
                 isStreaming: false,
               }
             : message
@@ -579,14 +596,29 @@ export default function Home() {
       );
     } finally {
       setMessages((prev) => prev.map((message) =>
-        message.id === msgId ? { ...message, isStreaming: false, isReasoning: false } : message
+        message.id === msgId ? { ...message, isStreaming: false, isReasoning: false, toolStatus: undefined } : message
       ));
       if (requests.current.get(sid) === controller) {
         requests.current.delete(sid);
+        requestIds.current.delete(sid);
         setGenerating((prev) => ({ ...prev, [sid]: false }));
       }
     }
   }, [input, token, activeSession, fetchSessions]);
+
+  const stopGeneration = useCallback(async () => {
+    const controller = requests.current.get(activeSession);
+    const requestId = requestIds.current.get(activeSession);
+    if (!controller) return;
+    controller.abort();
+    if (requestId) {
+      await fetch(`${API_BASE}/api/chat/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ session_id: activeSession, request_id: requestId }),
+      }).catch(() => {});
+    }
+  }, [activeSession, token]);
 
   if (!loggedIn) {
     return (
@@ -770,6 +802,8 @@ export default function Home() {
                     ) : (
                       <span>{msg.content}</span>
                     )}
+                    {msg.isStreaming && msg.toolStatus && <p role="status" className="mt-2 text-xs text-neutral-400">{msg.toolStatus}</p>}
+                    {msg.notice && <p role="status" className="mt-2 text-sm text-neutral-400">{msg.notice}</p>}
                     {msg.isStreaming && (
                       <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-neutral-400" />
                     )}
@@ -944,10 +978,10 @@ export default function Home() {
               />
               <button
                 className="rounded-lg bg-foreground px-5 py-2.5 font-medium text-background transition hover:bg-white disabled:opacity-50"
-                onClick={sendMessage}
-                disabled={loading || !input.trim()}
+                onClick={loading ? stopGeneration : sendMessage}
+                disabled={!loading && !input.trim()}
               >
-                {loading ? "生成中" : "发送"}
+                {loading ? "停止生成" : "发送"}
               </button>
             </div>
           </div>

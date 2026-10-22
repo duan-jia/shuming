@@ -78,6 +78,14 @@ jobs:
           --server-command build/bin/native-mcp-test-server
           --sdk-command 'node tests/native_mcp_sdk.mjs' -v
 
+      - name: Verify agent loop streaming and control
+        env:
+          MCP_SDK_ROOT: ${{ github.workspace }}/mcp-gateway/node_modules/@modelcontextprotocol/client
+        run: >-
+          python3 tests/agent_runtime_e2e.py
+          --server-command build/bin/native-mcp-test-server
+          --sdk-command 'node tests/native_mcp_sdk.mjs' -v
+
       - name: Build backend server
         run: cmake --build build --target fast-llm-reasoner --parallel 2
 

@@ -1,4 +1,5 @@
 #include "services/web_search_service.h"
+#include "server/request_watchdog.h"
 
 #include <algorithm>
 #include <chrono>
@@ -61,7 +62,7 @@ void WebSearchService::validate(const nlohmann::json& args) {
     }
 }
 
-nlohmann::json WebSearchService::execute(const nlohmann::json& args) {
+nlohmann::json WebSearchService::execute(const nlohmann::json& args, std::function<bool()> should_stop) {
     validate(args);
     if (!options_.enabled || options_.api_key.empty()) throw std::runtime_error("Web search is not configured");
     const int previous = active_.fetch_add(1);
@@ -102,7 +103,12 @@ nlohmann::json WebSearchService::execute(const nlohmann::json& args) {
         received.append(data, length);
         return true;
     };
-    auto response = client.send(request);
+    if (should_stop && should_stop()) throw std::runtime_error("Request cancelled");
+    httplib::Result response;
+    {
+        RequestWatchdog watchdog([&] { return (should_stop && should_stop()) || std::chrono::steady_clock::now() >= deadline; }, [&] { client.stop(); });
+        response = client.send(request);
+    }
     if (too_large) throw std::runtime_error("Web search response exceeds size limit");
     if (!response) throw std::runtime_error("Web search timed out or upstream is unreachable");
     if (response->status != 200) {

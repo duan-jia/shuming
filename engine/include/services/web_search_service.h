@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <string>
 #include <nlohmann/json.hpp>
 
@@ -20,7 +21,7 @@ class WebSearchService {
 public:
     explicit WebSearchService(WebSearchOptions options);
     bool is_enabled() const;
-    nlohmann::json execute(const nlohmann::json& arguments);
+    nlohmann::json execute(const nlohmann::json& arguments, std::function<bool()> should_stop = nullptr);
     static void validate(const nlohmann::json& arguments);
     static nlohmann::json input_schema();
 

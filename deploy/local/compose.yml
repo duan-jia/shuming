@@ -27,6 +27,7 @@ services:
       mysql:
         condition: service_healthy
     environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_SEARCH_API_KEY: ${DEEPSEEK_SEARCH_API_KEY:-}
     command: [--config, /app/config.json, --port, '9006', --embedding-model, /models/bge-small-zh-v1.5-q4_k_m.gguf, --rag-dir, /app/data/rag]
     volumes:
@@ -55,6 +56,7 @@ services:
       backend:
         condition: service_healthy
     environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       BACKEND_API_BASE: http://backend:9006
       PROJECT_ROOT: /app
       PDF_PROCESSOR_PYTHON: python3

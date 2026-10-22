@@ -9,7 +9,7 @@ shuming（枢明）是实验室的后端知识库，提供文档管理、RAG 检
 ## 当前能力
 
 - **知识检索**：BGE 本地嵌入、FAISS 向量检索与 BM25 关键词检索。
-- **问答与会话**：本地 llama.cpp 或远程生成服务，支持 SSE 流式输出、会话管理。
+- **问答与会话**：远程模型 Agent Loop 自主调用知识库/网页工具，支持 SSE 状态、取消和预算；本地 llama.cpp 保留原有生成路径。
 - **知识管理**：文档导入、处理状态、删除，以及课题组/公共文档可见性。
 - **访问控制**：JWT、RBAC、租户隔离、限流与密码哈希。
 - **Agent 接入**：C++ 原生 MCP 提供 `search_knowledge` 与可选 `search_web`，复用后端身份与租户权限。
@@ -42,7 +42,7 @@ Agent → C++ /mcp/web → DeepSeek Search API（可选）
 | 嵌入模型 | bge-small-zh-v1.5 GGUF，512 维 |
 | 检索 | FAISS IndexFlatIP + BM25（CJK unigram/bigram） |
 | 存储 | MySQL 8.x + 本地检索索引 |
-| MCP | TypeScript / MCP SDK / Streamable HTTP |
+| MCP | C++ JSON-RPC / Streamable HTTP；TypeScript 兼容网关 |
 | 部署与检查 | Docker Compose / GitHub Actions |
 
 | 模式 | 需要的模型与服务 | GPU |
@@ -57,6 +57,7 @@ Agent → C++ /mcp/web → DeepSeek Search API（可选）
 
 - [本地 Docker 测试](deploy/local/README.md)
 - [本地快速开始](#快速开始)
+- [Agent Runtime](docs/agent-runtime.md)
 - [原生 MCP 配置与使用](docs/native-mcp.md) · [旧 TS 网关](mcp-gateway/README.md)
 - [Staging 部署](deploy/staging/README.md)
 - [架构说明](ARCHITECTURE.md)

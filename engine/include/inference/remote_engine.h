@@ -13,6 +13,8 @@ public:
 
     bool is_loaded() const override { return true; }
     std::string model_name() const override { return model_; }
+    bool supports_tools() const override { return true; }
+    int estimate_input_tokens(const std::string& prompt, const InferParams& params) override;
 
     void stream_complete(const std::string& prompt, const InferParams& params,
                          std::function<void(const std::string&)> on_token,

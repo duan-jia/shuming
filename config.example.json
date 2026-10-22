@@ -47,7 +47,11 @@
   },
   "rate_limiter": {
     "rules": [
-      { "action": "chat", "max_requests": 20, "window_seconds": 60 }
+      {
+        "action": "chat",
+        "max_requests": 20,
+        "window_seconds": 60
+      }
     ]
   },
   "scheduler": {
@@ -75,5 +79,14 @@
     "queue_limit": 64,
     "knowledge_requests_per_minute": 60,
     "web_requests_per_minute": 20
+  },
+  "agent": {
+    "enabled": true,
+    "max_turns": 6,
+    "max_total_tokens": 24000,
+    "timeout_seconds": 90,
+    "max_tool_calls_per_turn": 4,
+    "max_tool_result_bytes": 24000,
+    "max_output_tokens": 0
   }
 }

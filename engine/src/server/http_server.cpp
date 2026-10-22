@@ -8,6 +8,11 @@
 
 namespace {
 
+struct ConnectionState {
+    std::shared_ptr<fastllm::HttpParser> parser = std::make_shared<fastllm::HttpParser>();
+    std::weak_ptr<fastllm::SseConnection> sse;
+};
+
 std::string g_static_dir;
 
 std::string read_file(const std::string& path) {
@@ -61,8 +66,10 @@ void HttpServer::start() {
 void HttpServer::on_connection(const muduo::net::TcpConnectionPtr& conn) {
     if (conn->connected()) {
         spdlog::debug("Connection from {}", conn->peerAddress().toIpPort());
-        conn->setContext(std::make_shared<HttpParser>());
+        conn->setContext(std::make_shared<ConnectionState>());
     } else {
+        auto* state = boost::any_cast<std::shared_ptr<ConnectionState>>(conn->getMutableContext());
+        if (state && *state) if (auto sse = (*state)->sse.lock()) sse->close();
         spdlog::debug("Connection closed: {}", conn->peerAddress().toIpPort());
     }
 }
@@ -71,18 +78,18 @@ void HttpServer::on_message(const muduo::net::TcpConnectionPtr& conn,
                              muduo::net::Buffer* buf,
                              muduo::Timestamp) {
     boost::any* ctx = conn->getMutableContext();
-    auto* parser_ptr = boost::any_cast<std::shared_ptr<HttpParser>>(ctx);
-    if (!parser_ptr || !*parser_ptr) return;
-    auto& parser = *parser_ptr;
+    auto* state = boost::any_cast<std::shared_ptr<ConnectionState>>(ctx);
+    if (!state || !*state) return;
+    auto& parser = (*state)->parser;
 
-    auto state = parser->feed(buf->peek(), buf->readableBytes());
+    auto parse_state = parser->feed(buf->peek(), buf->readableBytes());
     size_t to_consume = std::min(parser->consumed(), buf->readableBytes());
     buf->retrieve(to_consume);
 
-    if (state == HttpParser::COMPLETE) {
+    if (parse_state == HttpParser::COMPLETE) {
         handle_request(conn, parser->request());
         parser->reset();
-    } else if (state == HttpParser::ERROR) {
+    } else if (parse_state == HttpParser::ERROR) {
         HttpResponse resp;
         resp.json_error(400, "Bad Request");
         conn->send(resp.serialize());
@@ -188,6 +195,8 @@ void HttpServer::handle_sse_request(const muduo::net::TcpConnectionPtr& conn,
     conn->send(header);
 
     auto sse = sse_mgr_.create(conn);
+    auto* state = boost::any_cast<std::shared_ptr<ConnectionState>>(conn->getMutableContext());
+    if (state && *state) (*state)->sse = sse;
     auto sse_ctx = std::make_shared<SseContext>();
     sse_ctx->send_event = [sse](const std::string& event_type, const std::string& data) {
         sse->send_event(event_type, data);

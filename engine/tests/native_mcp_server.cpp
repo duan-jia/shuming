@@ -5,6 +5,8 @@
 #include <thread>
 #include <muduo/net/EventLoop.h>
 #include "auth/jwt_handler.h"
+#include "agent/agent_runtime.h"
+#include "inference/remote_engine.h"
 #include "mcp/mcp_service.h"
 #include "server/http_server.h"
 
@@ -37,7 +39,7 @@ public:
 };
 
 int main(int argc, char** argv) {
-    if (argc != 3) return 2;
+    if (argc != 3 && argc != 4) return 2;
     JwtHandler jwt("native-mcp-fixture-only");
     FixtureKnowledge backend;
     KnowledgeSearchService knowledge(backend);
@@ -62,6 +64,9 @@ int main(int argc, char** argv) {
     McpOptions mcp_options;
     mcp_options.allowed_origins = {"https://allowed.example"};
     McpService mcp(tools, auth, limiter, mcp_options);
+    WorkerPool agent_workers(2, 4);
+    std::unique_ptr<RemoteEngine> model;
+    if (argc == 4) model = std::make_unique<RemoteEngine>(argv[3], "fixture-model", "fixture-model-key");
     muduo::net::EventLoop loop;
     HttpServer server(&loop, muduo::net::InetAddress(std::atoi(argv[1]), true), "native-mcp-fixture", 1, 2, 2);
     for (const auto& endpoint : std::vector<std::pair<std::string, ToolSet>>{
@@ -70,6 +75,39 @@ int main(int argc, char** argv) {
             mcp.handle(req, resp, set);
         });
     }
+    if (model) server.router().sse("/api/chat/stream", [&](const HttpRequest& req, RouteParams, std::shared_ptr<SseContext> sse) {
+        HttpResponse response;
+        UserInfo user{};
+        if (!auth(req, response, user)) { sse->send_event("error", "{\"error\":\"Unauthorized\"}"); sse->close(); return; }
+        const auto body = nlohmann::json::parse(req.body);
+        if (!agent_workers.submit([&, body, sse, user] {
+            AgentOptions limits;
+            limits.max_turns = body.value("max_turns", 6);
+            limits.max_total_tokens = body.value("max_total_tokens", 24000);
+            limits.timeout_seconds = body.value("timeout_seconds", 5);
+            InferParams params;
+            params.max_tokens = body.value("max_tokens", limits.max_output_tokens);
+            params.should_stop = [sse] { return !sse->is_active(); };
+            CallerContext caller;
+            caller.tenant_id = user.tenant_id;
+            caller.principal_id = user.id;
+            auto event = [sse](const nlohmann::json& value) { sse->send_event("message", value.dump()); };
+            AgentRuntime runtime(*model, tools, limiter, caller, limits, true, user.role == Role::ADMIN, event,
+                [body] { return body.value("remaining_quota", 24000LL); });
+            sse->send_event("message", "{\"type\":\"start\"}");
+            runtime.stream_complete(body.value("message", "test"), params,
+                [event](const std::string& text) { event({{"type", "answer"}, {"content", text}}); },
+                [event](const std::string& text) { event({{"type", "reasoning"}, {"content", text}}); },
+                [sse](const InferResult& result) {
+                    nlohmann::json output = {{"type", result.error.empty() ? "done" : "error"},
+                        {"usage", {{"prompt_tokens", result.prompt_tokens}, {"completion_tokens", result.completion_tokens}, {"estimated", result.usage_estimated}}},
+                        {"stop_reason", result.stop_reason}, {"finish_reason", result.finish_reason}, {"truncated", result.finish_reason == "length"}};
+                    if (!result.error.empty()) output["error"] = result.error;
+                    sse->send_event(result.error.empty() ? "message" : "error", output.dump());
+                    sse->close();
+                });
+        })) { sse->send_event("error", "{\"error\":\"busy\"}"); sse->close(); }
+    });
     server.router().get("/healthz", [](const HttpRequest&, RouteParams, HttpResponse& resp) { resp.json("{}"); });
     std::cout << "ADMIN_TOKEN=" << jwt.generate_token(1, 7, "fixture", "admin") << '\n';
     std::cout << "USER_TOKEN=" << jwt.generate_token(2, 8, "fixture-user", "user") << std::endl;

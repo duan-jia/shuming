@@ -43,7 +43,7 @@ def main():
         config['rag']['storage_dir'] = '/app/data/rag'
         config['rag']['query_rewrite']['enabled'] = False
         config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n')
-        env_path.write_text(f'MYSQL_ROOT_PASSWORD={root_password}\nMYSQL_PASSWORD={mysql_password}\nHOST_UID={os.getuid()}\nHOST_GID={os.getgid()}\nWEB_PORT=3001\nBACKEND_PORT=9006\n')
+        env_path.write_text(f'MYSQL_ROOT_PASSWORD={root_password}\nMYSQL_PASSWORD={mysql_password}\nHOST_UID={os.getuid()}\nHOST_GID={os.getgid()}\nWEB_PORT=3001\nBACKEND_PORT=9006\n# Shared DeepSeek key for chat, search and PDF processing.\nDEEPSEEK_API_KEY=\n')
         print('Created local credentials. Admin password is in .tmp/local-deploy/config.json.')
     elif not env_path.exists() or not config_path.exists():
         raise SystemExit('Local .env and config.json must both exist. Restore the missing file before continuing.')
