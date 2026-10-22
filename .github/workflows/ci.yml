@@ -49,7 +49,7 @@ jobs:
             libssl-dev
 
       - name: Configure CPU Release build
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_NATIVE=OFF
 
       - name: Build focused test
         run: cmake --build build --target knowledge-search-service-test mysql-pool-test native-mcp-test-server --parallel 2

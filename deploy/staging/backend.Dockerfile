@@ -9,9 +9,12 @@ RUN apt-get update \
 WORKDIR /src
 COPY CMakeLists.txt ./
 COPY engine ./engine
+# The image runs on a different CPU from the GitHub-hosted builder.
+# Keep the embedding backend at its explicit AVX2 baseline, without native AMX.
 RUN cmake -S . -B build \
         -DCMAKE_BUILD_TYPE=Release \
         -DGGML_CUDA=OFF \
+        -DGGML_NATIVE=OFF \
         -DFASTLLM_BUILD_TESTS=OFF \
     && cmake --build build --target fast-llm-reasoner --parallel 2
 RUN set -eux; \
