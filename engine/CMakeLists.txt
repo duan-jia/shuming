@@ -3,6 +3,10 @@ find_package(OpenSSL REQUIRED)
 
 add_executable(fast-llm-reasoner
     src/main.cpp
+    src/mcp/mcp_service.cpp
+    src/server/worker_pool.cpp
+    src/services/tool_service.cpp
+    src/services/web_search_service.cpp
     src/server/http_server.cpp
     src/server/http_protocol.cpp
     src/server/router.cpp
@@ -140,4 +144,26 @@ if(FASTLLM_BUILD_TESTS)
     target_link_libraries(mysql-pool-test PRIVATE spdlog::spdlog mysqlclient pthread)
     add_test(NAME mysql-pool-test COMMAND mysql-pool-test)
     set_tests_properties(mysql-pool-test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+endif()
+
+if(FASTLLM_BUILD_TESTS)
+    add_executable(native-mcp-test-server
+        tests/native_mcp_server.cpp
+        src/mcp/mcp_service.cpp
+        src/services/tool_service.cpp
+        src/services/web_search_service.cpp
+        src/services/knowledge_search_service.cpp
+        src/auth/jwt_handler.cpp
+        src/security/rate_limiter.cpp
+        src/server/http_server.cpp
+        src/server/http_protocol.cpp
+        src/server/router.cpp
+        src/server/sse_connection.cpp
+        src/server/worker_pool.cpp
+    )
+    target_include_directories(native-mcp-test-server PRIVATE include ${muduo_SOURCE_DIR})
+    target_link_libraries(native-mcp-test-server PRIVATE
+        nlohmann_json::nlohmann_json spdlog::spdlog jwt-cpp::jwt-cpp
+        httplib::httplib muduo_net muduo_base OpenSSL::SSL OpenSSL::Crypto pthread)
+    target_compile_definitions(native-mcp-test-server PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
 endif()

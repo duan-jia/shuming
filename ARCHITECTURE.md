@@ -152,3 +152,17 @@ RAG 只导入压缩后的 Markdown；标题、关键词、Summary、Key Takeaway
 - 更强的论文结构化解析。
 - 图 RAG 或实体关系索引。
 - 多实例部署下的共享索引和分布式限流。
+
+## 10. 原生 MCP 工具入口
+
+C++ HTTP listener 同时提供 `/mcp/knowledge`、`/mcp/web` 和统一 `/mcp`，不需要独立
+TypeScript 转发进程。McpService 处理 Streamable HTTP/JSON-RPC，ToolService 统一工具
+定义、参数校验和执行；知识库调用 KnowledgeSearchService，网页搜索调用独立
+WebSearchService（DeepSeek Search API）。REST 检索与 MCP 共用证据序列化。
+
+认证复用后端 JWT。MCP 请求由有界工作线程池执行，响应回到连接所属的 muduo
+EventLoop，避免远程搜索占用网络事件线程；出站 HTTP 使用 cpp-httplib，和入站
+muduo I/O 分开。普通用户网页搜索权限、工具限流、上游并发和 Origin 白名单均可配置。
+
+该结构为进程内 Agent Runtime 提供工具边界；当前聊天仍为单次 RAG 生成，尚未实现
+自主工具调用循环。旧网关保留兼容。详见 [原生 MCP](docs/native-mcp.md)。

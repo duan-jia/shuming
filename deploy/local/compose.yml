@@ -26,6 +26,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    environment:
+      DEEPSEEK_SEARCH_API_KEY: ${DEEPSEEK_SEARCH_API_KEY:-}
     command: [--config, /app/config.json, --port, '9006', --embedding-model, /models/bge-small-zh-v1.5-q4_k_m.gguf, --rag-dir, /app/data/rag]
     volumes:
       - ../../.tmp/local-deploy/config.json:/app/config.json:ro

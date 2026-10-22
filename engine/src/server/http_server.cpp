@@ -38,8 +38,8 @@ void HttpServer::set_static_dir(const std::string& dir) { g_static_dir = dir; }
 HttpServer::HttpServer(muduo::net::EventLoop* loop,
                        const muduo::net::InetAddress& addr,
                        const std::string& name,
-                       int num_threads)
-    : server_(loop, addr, name) {
+                       int num_threads, int worker_threads, int worker_queue_limit)
+    : server_(loop, addr, name), workers_(worker_threads, worker_queue_limit) {
     server_.setConnectionCallback(
         [this](const muduo::net::TcpConnectionPtr& conn) {
             on_connection(conn);
@@ -95,13 +95,45 @@ void HttpServer::handle_request(const muduo::net::TcpConnectionPtr& conn,
     spdlog::info("{} {} from {}", req.method_string(), req.path,
                  conn->peerAddress().toIpPort());
 
-    auto accept = req.header("Accept", "");
-    auto content_type = req.header("Content-Type", "");
-    bool want_sse = (accept.find("text/event-stream") != std::string::npos) ||
-                    (content_type.find("text/event-stream") != std::string::npos) ||
-                    (req.path.find("/stream") != std::string::npos);
+    if (router_.requires_worker(req)) {
+        // Pause this connection while its request is in flight. Keep all socket
+        // operations and any buffered next request on the owning EventLoop.
+        conn->stopRead();
+        const bool accepted = workers_.submit([this, conn, req] {
+            HttpResponse response;
+            response.close_connection = req.header("Connection") == "close"
+                || (req.version == HttpVersion::HTTP10 && req.header("Connection") != "keep-alive");
+            try { router_.dispatch(req, response); }
+            catch (const std::exception& error) {
+                spdlog::error("Worker request failed: {}", error.what());
+                response.json_error(500, "Internal server error");
+            }
+            auto serialized = response.serialize();
+            const bool close = response.close_connection;
+            conn->getLoop()->queueInLoop([this, conn, serialized, close] {
+                if (!conn->connected()) return;
+                conn->send(serialized);
+                if (close) { conn->shutdown(); return; }
+                conn->startRead();
+                if (conn->inputBuffer()->readableBytes() > 0) {
+                    on_message(conn, conn->inputBuffer(), muduo::Timestamp::now());
+                }
+            });
+        });
+        if (!accepted) {
+            HttpResponse response;
+            response.json_error(503, "Tool worker queue is full; retry later");
+            response.set_header("Retry-After", "1");
+            response.close_connection = true;
+            conn->send(response.serialize());
+            conn->shutdown();
+        }
+        return;
+    }
 
-    if (want_sse) {
+    // MCP clients advertise text/event-stream even when the response is JSON.
+    // Only explicitly registered chat routes use the chat SSE dispatcher.
+    if (router_.requires_sse(req)) {
         handle_sse_request(conn, req);
         return;
     }

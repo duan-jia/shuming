@@ -52,7 +52,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF
 
       - name: Build focused test
-        run: cmake --build build --target knowledge-search-service-test mysql-pool-test --parallel 2
+        run: cmake --build build --target knowledge-search-service-test mysql-pool-test native-mcp-test-server --parallel 2
 
       - name: Run focused backend tests
         env:
@@ -61,6 +61,22 @@ jobs:
         run: |
           ./build/bin/knowledge-search-service-test
           ./build/bin/mysql-pool-test
+
+      - name: Set up Node.js for MCP interoperability
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install locked MCP client SDK
+        run: npm ci --prefix mcp-gateway --ignore-scripts --no-audit --no-fund
+
+      - name: Verify native MCP over HTTP with official client SDK
+        env:
+          MCP_SDK_ROOT: ${{ github.workspace }}/mcp-gateway/node_modules/@modelcontextprotocol/client
+        run: >-
+          python3 tests/native_mcp_e2e.py
+          --server-command build/bin/native-mcp-test-server
+          --sdk-command 'node tests/native_mcp_sdk.mjs' -v
 
       - name: Build backend server
         run: cmake --build build --target fast-llm-reasoner --parallel 2

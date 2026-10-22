@@ -12,7 +12,7 @@ shuming（枢明）是实验室的后端知识库，提供文档管理、RAG 检
 - **问答与会话**：本地 llama.cpp 或远程生成服务，支持 SSE 流式输出、会话管理。
 - **知识管理**：文档导入、处理状态、删除，以及课题组/公共文档可见性。
 - **访问控制**：JWT、RBAC、租户隔离、限流与密码哈希。
-- **Agent 接入**：MCP `search_knowledge` 工具，通过服务账号绑定租户。
+- **Agent 接入**：C++ 原生 MCP 提供 `search_knowledge` 与可选 `search_web`，复用后端身份与租户权限。
 - **论文处理**：文本型 PDF 抽取、远程模型生成论文卡片、入库检索；暂不支持扫描 PDF/OCR。
 
 ## 当前架构
@@ -26,10 +26,11 @@ shuming（枢明）是实验室的后端知识库，提供文档管理、RAG 检
                           ↕
                     MySQL / 本地索引
                           ↑
-Agent → MCP Gateway → 后端知识检索 API
+Agent → C++ /mcp/knowledge → KnowledgeSearchService
+Agent → C++ /mcp/web → DeepSeek Search API（可选）
 ```
 
-问答、REST 检索和 MCP 共用后端知识检索能力；MCP Gateway 是协议与认证适配层，不维护第二套知识库。未来可以按“问答应用 / 知识库服务”明确边界，当前不进行服务拆分。详细说明见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+问答、REST 检索和原生 MCP 共用后端知识检索能力；两个 MCP 入口运行在同一 C++ 进程中，工具业务层独立。原 TypeScript 网关保留供旧部署兼容。详细说明见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ## 技术栈与运行模式
 
@@ -56,7 +57,7 @@ Agent → MCP Gateway → 后端知识检索 API
 
 - [本地 Docker 测试](deploy/local/README.md)
 - [本地快速开始](#快速开始)
-- [MCP 配置与使用](mcp-gateway/README.md)
+- [原生 MCP 配置与使用](docs/native-mcp.md) · [旧 TS 网关](mcp-gateway/README.md)
 - [Staging 部署](deploy/staging/README.md)
 - [架构说明](ARCHITECTURE.md)
 - [开发约定](AGENTS.md)
@@ -171,9 +172,12 @@ cd web && npm ci && npm run dev
 
 ## MCP 接入
 
-`mcp-gateway/` 提供面向内部 Agent 的远程 Streamable HTTP MCP 网关。首版工具
-`search_knowledge` 复用上述 RAG 检索接口，租户由经过认证的 service principal 绑定，
-而不是由工具参数传入。配置、运行和验证方法见 [`mcp-gateway/README.md`](mcp-gateway/README.md)。
+C++ 后端直接提供 Streamable HTTP MCP：`/mcp/knowledge` 暴露 `search_knowledge`，
+`/mcp/web` 暴露可选的 `search_web`，`/mcp` 提供全部已获授权工具。共用现有 JWT，
+知识库租户取自认证身份，检索直接调用共享服务；网页搜索通过 DeepSeek Search API。
+配置与验证见 [原生 MCP](docs/native-mcp.md)。
+
+`mcp-gateway/` 作为旧 TS 转发网关保留，现有部署可继续使用；新入口无需启动它。
 
 ## PDF 文档上传与 RAG
 

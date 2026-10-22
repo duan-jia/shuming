@@ -59,5 +59,21 @@
     "model": "deepseek-chat",
     "context_window_tokens": 32768,
     "api_key": ""
+  },
+  "web_search": {
+    "enabled": false,
+    "endpoint": "https://api.deepseek.com/v1/tools/search",
+    "api_key": "",
+    "timeout_seconds": 15,
+    "max_concurrency": 2,
+    "ca_bundle": "/etc/ssl/certs/ca-certificates.crt"
+  },
+  "mcp": {
+    "allowed_origins": [],
+    "allow_user_web_search": false,
+    "worker_threads": 4,
+    "queue_limit": 64,
+    "knowledge_requests_per_minute": 60,
+    "web_requests_per_minute": 20
   }
 }
