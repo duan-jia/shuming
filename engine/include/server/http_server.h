@@ -8,6 +8,7 @@
 
 #include "server/http_protocol.h"
 #include "server/router.h"
+#include "server/worker_pool.h"
 #include "server/sse_connection.h"
 
 namespace fastllm {
@@ -17,7 +18,7 @@ public:
     HttpServer(muduo::net::EventLoop* loop,
                const muduo::net::InetAddress& addr,
                const std::string& name,
-               int num_threads = 1);
+               int num_threads = 1, int worker_threads = 4, int worker_queue_limit = 64);
 
     Router& router() { return router_; }
     SseConnectionManager& sse_manager() { return sse_mgr_; }
@@ -40,6 +41,7 @@ private:
     muduo::net::TcpServer server_;
     Router router_;
     SseConnectionManager sse_mgr_;
+    WorkerPool workers_;
 };
 
 }

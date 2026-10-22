@@ -1,0 +1,4 @@
+Tool: built-in image_gen (edit), followed by sharp resizing and ICO packaging.
+Reference: shuming-logo-v1.png
+Output: web/public/shuming-icon.png and web/src/app/favicon.ico
+Prompt: Edit the provided shuming logo into a browser favicon / application icon. Preserve exactly the existing three folded page black symbol and its S-shaped negative space. Remove the shuming wordmark completely. Center and enlarge only the existing symbol to fill about 82 percent of a square canvas, leaving balanced small margins. Solid white opaque background, solid near-black flat mark, no shadows, gradients, extra objects, text or borders. This is the same identity as the source, simply a text-free icon for small-size browser usage.

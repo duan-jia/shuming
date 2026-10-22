@@ -20,7 +20,9 @@ engine/src/main.cpp 应用入口与路由注册
 
 ```text
 routes      HTTP API 入口，解析请求并调用 service
-services    业务编排层，处理认证、对话、文档、管理等业务流程
+services    业务编排与共享工具层，处理认证、对话、文档、检索等业务流程
+agent       模型与工具调用循环、预算和停止控制
+mcp         对外 Streamable HTTP / JSON-RPC 工具适配
 persistence MySQL 访问层，封装 Repository 与事务
 rag         文档分块、查询重写、向量索引、BM25、权限过滤与召回
 inference   本地模型、远程模型、批处理调度与推理抽象
@@ -59,22 +61,26 @@ tenant/group：仅同一 tenant 用户可见
 典型对话请求由 `/api/chat/stream` 进入：
 
 ```text
-前端 SSE 请求
+前端 SSE 请求 → JWT / 限流 / session 所有权 / 历史与额度检查
 ↓
-chat_routes 鉴权并解析参数
+有界推理队列（同一 session 同时仅一个请求）
 ↓
-ChatService 加载 session、历史 messages、检查 token 限额
+远程模型：Agent Runtime → 模型返回文本或 tool_calls
+                           ↓ tools/call
+                     进程内 ToolService
+                     ├─ KnowledgeSearchService
+                     └─ WebSearchService
+                           ↓ 工具结果加入当前上下文
+                         再次调用模型
 ↓
-如果启用 RAG，则调用 DocumentStore 混合检索
+流式返回工具状态、reasoning / answer、done 或 error
 ↓
-构造 prompt
-↓
-ModelManager 选择本地 LLM 或远程 fallback
-↓
-SSE 流式返回 assistant token
-↓
-同步写入 messages、token_usage_records、user_token_usage_daily
+汇总所有模型轮次用量，结算并保存已生成的 user/assistant 对话
 ```
+
+`agent.enabled=false` 或使用不支持工具的本地模型时，继续原有单次生成路径。
+取消通过 `/api/chat/cancel` 或 SSE 断线触发；网络请求支持中断，RAG 在同步计算边界
+检查取消，不能保证立即打断本地嵌入计算。
 
 当前系统规模约 500 人，优先使用 MySQL 同步落库即可。这样事务边界清晰，排障简单，也避免 Redis 扣费与异步入库带来的补偿复杂度。
 
@@ -152,3 +158,18 @@ RAG 只导入压缩后的 Markdown；标题、关键词、Summary、Key Takeaway
 - 更强的论文结构化解析。
 - 图 RAG 或实体关系索引。
 - 多实例部署下的共享索引和分布式限流。
+
+## 10. 原生 MCP 工具入口
+
+C++ HTTP listener 同时提供 `/mcp/knowledge`、`/mcp/web` 和统一 `/mcp`，不需要独立
+TypeScript 转发进程。McpService 处理 Streamable HTTP/JSON-RPC，ToolService 统一工具
+定义、参数校验和执行；知识库调用 KnowledgeSearchService，网页搜索调用独立
+WebSearchService（DeepSeek Search API）。REST 检索与 MCP 共用证据序列化。
+
+认证复用后端 JWT。MCP 请求由有界工作线程池执行，响应回到连接所属的 muduo
+EventLoop，避免远程搜索占用网络事件线程；出站 HTTP 使用 cpp-httplib，和入站
+muduo I/O 分开。普通用户网页搜索权限、工具限流、上游并发和 Origin 白名单均可配置。
+
+进程内 Agent Runtime 复用工具边界。远程模型聊天默认运行“模型 → 工具 → 模型”循环，
+本地模型保留原有生成流程。旧网关保留兼容。详见 [原生 MCP](docs/native-mcp.md) 和
+[Agent Runtime](docs/agent-runtime.md)。

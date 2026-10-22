@@ -18,6 +18,19 @@ jobs:
     name: Backend CPU build and test
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: mysql-test-only
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --host=127.0.0.1 --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -39,10 +52,39 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF
 
       - name: Build focused test
-        run: cmake --build build --target knowledge-search-service-test --parallel 2
+        run: cmake --build build --target knowledge-search-service-test mysql-pool-test native-mcp-test-server --parallel 2
 
-      - name: Run focused backend test
-        run: ./build/bin/knowledge-search-service-test
+      - name: Run focused backend tests
+        env:
+          MYSQL_TEST_HOST: 127.0.0.1
+          MYSQL_TEST_PASSWORD: mysql-test-only
+        run: |
+          ./build/bin/knowledge-search-service-test
+          ./build/bin/mysql-pool-test
+
+      - name: Set up Node.js for MCP interoperability
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install locked MCP client SDK
+        run: npm ci --prefix mcp-gateway --ignore-scripts --no-audit --no-fund
+
+      - name: Verify native MCP over HTTP with official client SDK
+        env:
+          MCP_SDK_ROOT: ${{ github.workspace }}/mcp-gateway/node_modules/@modelcontextprotocol/client
+        run: >-
+          python3 tests/native_mcp_e2e.py
+          --server-command build/bin/native-mcp-test-server
+          --sdk-command 'node tests/native_mcp_sdk.mjs' -v
+
+      - name: Verify agent loop streaming and control
+        env:
+          MCP_SDK_ROOT: ${{ github.workspace }}/mcp-gateway/node_modules/@modelcontextprotocol/client
+        run: >-
+          python3 tests/agent_runtime_e2e.py
+          --server-command build/bin/native-mcp-test-server
+          --sdk-command 'node tests/native_mcp_sdk.mjs' -v
 
       - name: Build backend server
         run: cmake --build build --target fast-llm-reasoner --parallel 2

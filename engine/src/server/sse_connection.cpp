@@ -1,6 +1,7 @@
 #include "server/sse_connection.h"
 
 #include <spdlog/spdlog.h>
+#include <muduo/net/EventLoop.h>
 
 namespace fastllm {
 
@@ -25,28 +26,26 @@ void SseConnection::send_event(const std::string& data) {
 }
 
 void SseConnection::send_done() {
-    if (!active_) return;
+    if (!active_.exchange(false)) return;
     do_send("data: [DONE]\n\n");
-    active_ = false;
-    if (conn_ && conn_->connected()) {
-        conn_->shutdown();
-    }
+    if (conn_) conn_->getLoop()->queueInLoop([conn = conn_] {
+        if (conn->connected()) conn->shutdown();
+    });
     if (close_cb_) close_cb_(id_);
 }
 
 void SseConnection::close() {
-    if (!active_) return;
-    active_ = false;
-    if (conn_ && conn_->connected()) {
-        conn_->shutdown();
-    }
+    if (!active_.exchange(false)) return;
+    if (conn_) conn_->getLoop()->queueInLoop([conn = conn_] {
+        if (conn->connected()) conn->shutdown();
+    });
     if (close_cb_) close_cb_(id_);
 }
 
 void SseConnection::do_send(const std::string& msg) {
-    if (conn_ && conn_->connected()) {
-        conn_->send(msg);
-    }
+    if (conn_) conn_->getLoop()->queueInLoop([conn = conn_, msg] {
+        if (conn->connected()) conn->send(msg);
+    });
 }
 
 SseConnection::Ptr SseConnectionManager::create(const muduo::net::TcpConnectionPtr& conn) {

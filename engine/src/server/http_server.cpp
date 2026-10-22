@@ -8,6 +8,11 @@
 
 namespace {
 
+struct ConnectionState {
+    std::shared_ptr<fastllm::HttpParser> parser = std::make_shared<fastllm::HttpParser>();
+    std::weak_ptr<fastllm::SseConnection> sse;
+};
+
 std::string g_static_dir;
 
 std::string read_file(const std::string& path) {
@@ -38,8 +43,8 @@ void HttpServer::set_static_dir(const std::string& dir) { g_static_dir = dir; }
 HttpServer::HttpServer(muduo::net::EventLoop* loop,
                        const muduo::net::InetAddress& addr,
                        const std::string& name,
-                       int num_threads)
-    : server_(loop, addr, name) {
+                       int num_threads, int worker_threads, int worker_queue_limit)
+    : server_(loop, addr, name), workers_(worker_threads, worker_queue_limit) {
     server_.setConnectionCallback(
         [this](const muduo::net::TcpConnectionPtr& conn) {
             on_connection(conn);
@@ -61,8 +66,10 @@ void HttpServer::start() {
 void HttpServer::on_connection(const muduo::net::TcpConnectionPtr& conn) {
     if (conn->connected()) {
         spdlog::debug("Connection from {}", conn->peerAddress().toIpPort());
-        conn->setContext(std::make_shared<HttpParser>());
+        conn->setContext(std::make_shared<ConnectionState>());
     } else {
+        auto* state = boost::any_cast<std::shared_ptr<ConnectionState>>(conn->getMutableContext());
+        if (state && *state) if (auto sse = (*state)->sse.lock()) sse->close();
         spdlog::debug("Connection closed: {}", conn->peerAddress().toIpPort());
     }
 }
@@ -71,18 +78,18 @@ void HttpServer::on_message(const muduo::net::TcpConnectionPtr& conn,
                              muduo::net::Buffer* buf,
                              muduo::Timestamp) {
     boost::any* ctx = conn->getMutableContext();
-    auto* parser_ptr = boost::any_cast<std::shared_ptr<HttpParser>>(ctx);
-    if (!parser_ptr || !*parser_ptr) return;
-    auto& parser = *parser_ptr;
+    auto* state = boost::any_cast<std::shared_ptr<ConnectionState>>(ctx);
+    if (!state || !*state) return;
+    auto& parser = (*state)->parser;
 
-    auto state = parser->feed(buf->peek(), buf->readableBytes());
+    auto parse_state = parser->feed(buf->peek(), buf->readableBytes());
     size_t to_consume = std::min(parser->consumed(), buf->readableBytes());
     buf->retrieve(to_consume);
 
-    if (state == HttpParser::COMPLETE) {
+    if (parse_state == HttpParser::COMPLETE) {
         handle_request(conn, parser->request());
         parser->reset();
-    } else if (state == HttpParser::ERROR) {
+    } else if (parse_state == HttpParser::ERROR) {
         HttpResponse resp;
         resp.json_error(400, "Bad Request");
         conn->send(resp.serialize());
@@ -95,13 +102,45 @@ void HttpServer::handle_request(const muduo::net::TcpConnectionPtr& conn,
     spdlog::info("{} {} from {}", req.method_string(), req.path,
                  conn->peerAddress().toIpPort());
 
-    auto accept = req.header("Accept", "");
-    auto content_type = req.header("Content-Type", "");
-    bool want_sse = (accept.find("text/event-stream") != std::string::npos) ||
-                    (content_type.find("text/event-stream") != std::string::npos) ||
-                    (req.path.find("/stream") != std::string::npos);
+    if (router_.requires_worker(req)) {
+        // Pause this connection while its request is in flight. Keep all socket
+        // operations and any buffered next request on the owning EventLoop.
+        conn->stopRead();
+        const bool accepted = workers_.submit([this, conn, req] {
+            HttpResponse response;
+            response.close_connection = req.header("Connection") == "close"
+                || (req.version == HttpVersion::HTTP10 && req.header("Connection") != "keep-alive");
+            try { router_.dispatch(req, response); }
+            catch (const std::exception& error) {
+                spdlog::error("Worker request failed: {}", error.what());
+                response.json_error(500, "Internal server error");
+            }
+            auto serialized = response.serialize();
+            const bool close = response.close_connection;
+            conn->getLoop()->queueInLoop([this, conn, serialized, close] {
+                if (!conn->connected()) return;
+                conn->send(serialized);
+                if (close) { conn->shutdown(); return; }
+                conn->startRead();
+                if (conn->inputBuffer()->readableBytes() > 0) {
+                    on_message(conn, conn->inputBuffer(), muduo::Timestamp::now());
+                }
+            });
+        });
+        if (!accepted) {
+            HttpResponse response;
+            response.json_error(503, "Tool worker queue is full; retry later");
+            response.set_header("Retry-After", "1");
+            response.close_connection = true;
+            conn->send(response.serialize());
+            conn->shutdown();
+        }
+        return;
+    }
 
-    if (want_sse) {
+    // MCP clients advertise text/event-stream even when the response is JSON.
+    // Only explicitly registered chat routes use the chat SSE dispatcher.
+    if (router_.requires_sse(req)) {
         handle_sse_request(conn, req);
         return;
     }
@@ -156,6 +195,8 @@ void HttpServer::handle_sse_request(const muduo::net::TcpConnectionPtr& conn,
     conn->send(header);
 
     auto sse = sse_mgr_.create(conn);
+    auto* state = boost::any_cast<std::shared_ptr<ConnectionState>>(conn->getMutableContext());
+    if (state && *state) (*state)->sse = sse;
     auto sse_ctx = std::make_shared<SseContext>();
     sse_ctx->send_event = [sse](const std::string& event_type, const std::string& data) {
         sse->send_event(event_type, data);

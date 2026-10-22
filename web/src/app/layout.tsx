@@ -3,7 +3,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "EMOS",
-  description: "Lab-private LLM and RAG assistant",
+  description: "EMOS 智能助手",
+  icons: {
+    icon: "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E",
+  },
 };
 
 export default function RootLayout({

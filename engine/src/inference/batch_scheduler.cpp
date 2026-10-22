@@ -35,13 +35,15 @@ void BatchScheduler::stop() {
     spdlog::info("BatchScheduler stopped");
 }
 
-void BatchScheduler::submit(std::shared_ptr<InferRequest> req) {
+bool BatchScheduler::submit(std::shared_ptr<InferRequest> req) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (!running_ || pending_.size() >= queue_limit_) return false;
         pending_.push(req);
     }
     cv_.notify_one();
     spdlog::debug("Request submitted: session={}", req->session_id);
+    return true;
 }
 
 size_t BatchScheduler::pending_count() const {
@@ -50,6 +52,7 @@ size_t BatchScheduler::pending_count() const {
 }
 
 size_t BatchScheduler::active_batch_size() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     return active_batch_.size();
 }
 
@@ -105,6 +108,8 @@ void BatchScheduler::process_request(std::shared_ptr<InferRequest> req) {
 
     InferParams params;
     params.session_id = req->session_id;
+    params.should_stop = req->should_stop;
+    params.deadline = req->deadline;
     params.system_prompt = req->system_prompt;
     params.history = req->history;
     params.max_tokens = req->max_tokens;
@@ -112,11 +117,16 @@ void BatchScheduler::process_request(std::shared_ptr<InferRequest> req) {
     params.top_p = req->top_p;
     params.top_k = req->top_k;
 
-    req->engine->stream_complete(req->prompt, params,
-        req->on_token,
-        req->on_reasoning,
-        req->on_done
-    );
+    try {
+        req->engine->stream_complete(req->prompt, params,
+            req->on_token, req->on_reasoning, req->on_done);
+    } catch (const std::exception& error) {
+        spdlog::error("Inference worker failed: {}", error.what());
+        InferResult result;
+        result.error = "Inference request failed";
+        result.stop_reason = "model_error";
+        if (req->on_done) req->on_done(result);
+    }
 }
 
 }

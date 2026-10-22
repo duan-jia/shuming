@@ -24,7 +24,28 @@ void Router::sse(const std::string& pattern, SseHandler handler) {
     routes_.push_back({"POST", pattern, regex, names, true, nullptr, std::move(handler)});
 }
 
+void Router::worker_endpoint(const std::string& path, Handler handler) {
+    worker_endpoints_.emplace(path, std::move(handler));
+}
+
+bool Router::requires_worker(const HttpRequest& req) const {
+    return worker_endpoints_.find(req.path) != worker_endpoints_.end();
+}
+
+bool Router::requires_sse(const HttpRequest& req) const {
+    for (const auto& route : routes_) {
+        if (route.is_sse && route.method == req.method_string()
+            && std::regex_match(req.path, route.compiled)) return true;
+    }
+    return false;
+}
+
 bool Router::dispatch(const HttpRequest& req, HttpResponse& resp) {
+    auto endpoint = worker_endpoints_.find(req.path);
+    if (endpoint != worker_endpoints_.end()) {
+        endpoint->second(req, {}, resp);
+        return true;
+    }
     std::string method = req.method_string();
 
     for (auto& route : routes_) {

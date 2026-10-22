@@ -3,6 +3,9 @@
 #include <cctype>
 #include <cstdio>
 #include <random>
+#include <atomic>
+#include <mutex>
+#include <unordered_map>
 
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
@@ -23,7 +26,41 @@ bool has_non_whitespace(const std::string& value) {
 
 }
 
-ChatService::ChatService(AppContext& ctx) : ctx_(ctx) {}
+struct ChatRequestState {
+    std::atomic<bool> cancelled{false};
+    std::string request_id;
+    int user_id = 0;
+    int tenant_id = 0;
+};
+
+struct ChatService::ActiveRequests {
+    std::mutex mutex;
+    std::unordered_map<std::string, std::shared_ptr<ChatRequestState>> sessions;
+};
+
+ChatService::ChatService(AppContext& ctx, ToolService& tools, AgentOptions options, bool allow_user_web_search)
+    : active_(std::make_shared<ActiveRequests>()), ctx_(ctx), tools_(tools), options_(options),
+      allow_user_web_search_(allow_user_web_search) {}
+
+void ChatService::cancel(const HttpRequest& req, HttpResponse& response) {
+    const auto authorization = req.header("Authorization");
+    if (authorization.rfind("Bearer ", 0) != 0) { response.json_error(401, "Unauthorized"); return; }
+    const auto claims = ctx_.jwt->verify_token(authorization.substr(7));
+    if (!claims.valid) { response.json_error(401, "Unauthorized"); return; }
+    try {
+        const auto body = nlohmann::json::parse(req.body);
+        const auto session = body.at("session_id").get<std::string>();
+        const auto request = body.at("request_id").get<std::string>();
+        std::lock_guard<std::mutex> lock(active_->mutex);
+        auto item = active_->sessions.find(session);
+        if (item == active_->sessions.end() || item->second->user_id != claims.user_id
+            || item->second->tenant_id != claims.tenant_id || item->second->request_id != request) {
+            response.json_error(404, "Active request not found"); return;
+        }
+        item->second->cancelled = true;
+        response.json("{\"cancelled\":true}");
+    } catch (const std::exception&) { response.json_error(400, "session_id and request_id required"); }
+}
 
 std::string ChatService::generate_uuid() {
     std::random_device rd;
@@ -100,11 +137,31 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             return;
         }
 
+        auto state = std::make_shared<ChatRequestState>();
+        state->request_id = request_id;
+        state->user_id = claims.user_id;
+        state->tenant_id = claims.tenant_id;
+        {
+            std::lock_guard<std::mutex> lock(active_->mutex);
+            if (active_->sessions.count(session_id)) {
+                send_sse_error(sse_ctx, "This session already has an active request"); return;
+            }
+            active_->sessions[session_id] = state;
+        }
+        auto admission = std::shared_ptr<int>(new int(0), [active = active_, session_id, state](int* item) {
+            {
+                std::lock_guard<std::mutex> lock(active->mutex);
+                auto entry = active->sessions.find(session_id);
+                if (entry != active->sessions.end() && entry->second == state) active->sessions.erase(entry);
+            }
+            delete item;
+        });
+
         std::vector<ChatMessage> history;
         for (const auto& stored : ctx_.session_repository->list_messages(session_id, 200)) {
             if ((stored.role == "user" || stored.role == "assistant")
                 && !stored.content.empty()) {
-                history.push_back({stored.role, stored.content});
+                history.push_back({stored.role, stored.content, stored.reasoning});
             }
         }
 
@@ -138,16 +195,22 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             return;
         }
 
+        const bool use_agent = options_.enabled && engine->supports_tools();
         InferParams infer_params;
         infer_params.session_id = session_id;
-        infer_params.max_tokens = body.value("max_tokens", 512);
+        const int default_max_tokens = use_agent ? options_.max_output_tokens : (engine->supports_tools() ? 0 : 512);
+        infer_params.max_tokens = body.value("max_tokens", default_max_tokens);
+        if ((body.contains("max_tokens") && infer_params.max_tokens < 1)
+            || infer_params.max_tokens < 0 || infer_params.max_tokens > 8192) {
+            send_sse_error(sse_ctx, "max_tokens must be between 1 and 8192"); return;
+        }
         infer_params.temperature = body.value("temperature", 0.7f);
         infer_params.top_p = body.value("top_p", 0.9f);
         infer_params.history = std::move(history);
 
-        bool enable_rag = body.value("enable_rag", false);
+        bool enable_rag = body.value("enable_rag", use_agent);
         infer_params.system_prompt = ctx_.system_prompt;
-        if (enable_rag && ctx_.knowledge_search_service) {
+        if (!use_agent && enable_rag && ctx_.knowledge_search_service) {
             SearchKnowledgeRequest search_request;
             search_request.query = message;
             search_request.top_k = 3;
@@ -184,6 +247,25 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         infer_req->top_p = infer_params.top_p;
         infer_req->top_k = infer_params.top_k;
         infer_req->engine = engine;
+        infer_req->should_stop = [state, sse] { return state->cancelled.load() || !sse->is_active(); };
+        infer_req->deadline = std::chrono::steady_clock::now() + std::chrono::seconds(options_.timeout_seconds);
+        if (use_agent) {
+            CallerContext caller;
+            caller.tenant_id = claims.tenant_id;
+            caller.principal_id = claims.user_id;
+            caller.principal_type = "user";
+            caller.trace_id = request_id;
+            infer_req->owned_engine = std::make_shared<AgentRuntime>(*engine, tools_, *ctx_.rate_limiter,
+                caller, options_, enable_rag, claims.role == "admin" || allow_user_web_search_,
+                [sse](const nlohmann::json& event) {
+                    if (sse->is_active()) sse->send_event("message", event.dump());
+                }, [ctx, bill_tenant, bill_user]() -> long long {
+                    if (!ctx->billing_service) return 24000;
+                    auto quota = ctx->billing_service->check_quota(bill_tenant, bill_user);
+                    return quota.success ? quota.remaining : 0;
+                });
+            infer_req->engine = infer_req->owned_engine.get();
+        }
 
         auto utf8_buf = std::make_shared<std::string>();
 
@@ -230,7 +312,25 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             } catch (...) {}
         };
 
-        infer_req->on_done = [ctx, sse, utf8_buf, message, session_id, request_id, bill_tenant, bill_user](const InferResult& result) {
+        infer_req->on_done = [ctx, sse, utf8_buf, message, session_id, request_id, bill_tenant, bill_user, admission, active = active_, state](const InferResult& result) {
+            // Settle all completed model rounds, including cancelled/failed runs.
+            int total_tokens = result.prompt_tokens + result.completion_tokens;
+            BillingService::ChargeResult charge_result;
+            if (ctx->billing_service && total_tokens > 0) {
+                charge_result = ctx->billing_service->charge(
+                    bill_tenant, bill_user, session_id, request_id,
+                    result.prompt_tokens, result.completion_tokens);
+            }
+            bool messages_saved = false;
+            if (!result.text.empty()) {
+                messages_saved = ctx->message_repository && ctx->message_repository->insert_chat_pair(
+                    session_id, message, result.text, result.prompt_tokens, result.completion_tokens, result.reasoning);
+            }
+            {
+                std::lock_guard<std::mutex> lock(active->mutex);
+                auto entry = active->sessions.find(session_id);
+                if (entry != active->sessions.end() && entry->second == state) active->sessions.erase(entry);
+            }
             if (!result.error.empty()) {
                 spdlog::error("Chat inference failed: session={} request={} error={}",
                               session_id, request_id, result.error);
@@ -239,24 +339,17 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
                     err["type"] = "error";
                     err["error"] = result.error;
                     err["request_id"] = request_id;
+                    err["stop_reason"] = result.stop_reason;
+                    err["usage"] = {{"prompt_tokens", result.prompt_tokens}, {"completion_tokens", result.completion_tokens}, {"total_tokens", total_tokens}};
+                    err["usage"]["estimated"] = result.usage_estimated;
+                    err["messages"]["persisted"] = messages_saved;
+                    err["billing"]["status"] = charge_result.record_status;
                     sse->send_event("error", err.dump());
                     sse->close();
                 }
                 return;
             }
 
-            int total_tokens = result.prompt_tokens + result.completion_tokens;
-            BillingService::ChargeResult charge_result;
-            if (ctx->billing_service && total_tokens > 0) {
-                charge_result = ctx->billing_service->charge(
-                    bill_tenant, bill_user, session_id, request_id,
-                    result.prompt_tokens, result.completion_tokens);
-            }
-
-            bool messages_saved = ctx->message_repository
-                && ctx->message_repository->insert_chat_pair(
-                    session_id, message, result.text,
-                    result.prompt_tokens, result.completion_tokens);
             if (!messages_saved) {
                 spdlog::error("Failed to persist chat messages synchronously: session={} request={}",
                               session_id, request_id);
@@ -273,10 +366,13 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
 
             nlohmann::json j;
             j["type"] = "done";
+            j["finish_reason"] = result.finish_reason;
+            j["truncated"] = result.finish_reason == "length";
             j["request_id"] = request_id;
             j["usage"]["prompt_tokens"] = result.prompt_tokens;
             j["usage"]["completion_tokens"] = result.completion_tokens;
             j["usage"]["total_tokens"] = total_tokens;
+            j["usage"]["estimated"] = result.usage_estimated;
             j["messages"]["persisted"] = messages_saved;
             if (!messages_saved) {
                 j["messages"]["failure_reason"] = "message_insert_failed";
@@ -301,7 +397,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             sse->close();
         };
 
-        ctx_.scheduler->submit(infer_req);
+        if (!ctx_.scheduler->submit(infer_req)) send_sse_error(sse, "Chat queue is full; retry later");
     } catch (const std::exception& e) {
         nlohmann::json err;
         err["error"] = std::string("Invalid JSON: ") + e.what();

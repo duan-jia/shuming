@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <memory>
 #include <vector>
 #include <queue>
 #include <mutex>
@@ -25,6 +26,9 @@ struct InferRequest {
     int priority = 0;
 
     IInferenceEngine* engine = nullptr;
+    std::shared_ptr<IInferenceEngine> owned_engine;
+    std::function<bool()> should_stop;
+    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
 
     std::function<void(const std::string&)> on_token;
     std::function<void(const std::string&)> on_reasoning;
@@ -39,7 +43,7 @@ public:
     void start(int n_threads = 1);
     void stop();
 
-    void submit(std::shared_ptr<InferRequest> req);
+    bool submit(std::shared_ptr<InferRequest> req);
 
     size_t pending_count() const;
     size_t active_batch_size() const;
@@ -60,6 +64,7 @@ private:
     std::vector<std::thread> workers_;
     std::atomic<bool> running_{false};
 
+    size_t queue_limit_ = 64;
     size_t max_batch_size_ = 1;
     int n_threads_ = 1;
 };

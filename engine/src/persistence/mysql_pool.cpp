@@ -16,9 +16,10 @@ MysqlConnection::~MysqlConnection() {
 bool MysqlConnection::connect(const std::string& host, int port,
                                const std::string& user, const std::string& password,
                                const std::string& database) {
-    if (connected_) close();
+    close();
 
-    mysql_init(&mysql_);
+    if (!mysql_init(&mysql_)) return false;
+    initialized_ = true;
     mysql_options(&mysql_, MYSQL_SET_CHARSET_NAME, "utf8mb4");
 
     unsigned int connect_timeout = 2;
@@ -29,6 +30,7 @@ bool MysqlConnection::connect(const std::string& host, int port,
                                         port, nullptr, CLIENT_MULTI_STATEMENTS);
     if (!result) {
         spdlog::error("MySQL connect failed: {}", mysql_error(&mysql_));
+        close();
         return false;
     }
 
@@ -38,10 +40,21 @@ bool MysqlConnection::connect(const std::string& host, int port,
 }
 
 void MysqlConnection::close() {
-    if (connected_) {
+    if (initialized_) {
         mysql_close(&mysql_);
-        connected_ = false;
+        initialized_ = false;
     }
+    connected_ = false;
+}
+
+bool MysqlConnection::ping() {
+    if (!connected_) return false;
+    if (mysql_ping(&mysql_) != 0) {
+        spdlog::warn("MySQL connection check failed: {}", mysql_error(&mysql_));
+        connected_ = false;
+        return false;
+    }
+    return true;
 }
 
 bool MysqlConnection::execute(const std::string& sql) {
@@ -97,19 +110,21 @@ bool MysqlPool::initialize() {
 }
 
 MysqlPool::ConnPtr MysqlPool::acquire() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (pool_.empty()) {
-        auto conn = std::make_shared<MysqlConnection>();
-        if (conn->connect(host_, port_, user_, password_, database_)) {
-            return conn;
+    ConnPtr conn;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!pool_.empty()) {
+            conn = pool_.front();
+            pool_.pop();
         }
-        return nullptr;
     }
 
-    auto conn = pool_.front();
-    pool_.pop();
-
-    if (!conn->valid()) {
+    // Only reconnect before handing a connection to the caller. Never replay
+    // business SQL: a dropped connection may have interrupted a transaction.
+    // Keep network I/O outside the pool lock so other requests can return
+    // connections even when MySQL is slow or unavailable.
+    if (!conn) conn = std::make_shared<MysqlConnection>();
+    if (!conn->ping()) {
         if (!conn->connect(host_, port_, user_, password_, database_)) {
             return nullptr;
         }
@@ -119,6 +134,7 @@ MysqlPool::ConnPtr MysqlPool::acquire() {
 }
 
 void MysqlPool::release(ConnPtr conn) {
+    if (!conn || !conn->valid()) return;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         pool_.push(conn);
