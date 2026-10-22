@@ -71,7 +71,8 @@ jobs:
           docker save "$BACKEND_IMAGE" "$MCP_IMAGE" mirror.ccs.tencentyun.com/library/mysql:8.4 \
             | gzip -1 > .artifacts/staging-bundle/images.tar.gz
           cd .artifacts/staging-bundle
-          sha256sum source.tar.gz images.tar.gz > SHA256SUMS
+          printf '%s\n' "$GITHUB_SHA" > REVISION
+          sha256sum source.tar.gz images.tar.gz REVISION > SHA256SUMS
       - name: Upload staging bundle
         timeout-minutes: 10
         uses: actions/upload-artifact@v4
@@ -98,11 +99,37 @@ jobs:
         working-directory: ${{ github.workspace }}/.staging-${{ github.run_id }}-${{ github.run_attempt }}/source
     steps:
       - name: Download staging bundle
+        id: download
+        continue-on-error: true
         timeout-minutes: 10
         uses: actions/download-artifact@v4
         with:
           name: staging-bundle
           path: ${{ github.workspace }}/.staging-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Use separately transferred bundle if download failed
+        if: steps.download.outcome == 'failure'
+        timeout-minutes: 2
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, pathlib, shutil, zipfile
+          run = os.environ['GITHUB_RUN_ID']
+          attempt = os.environ['GITHUB_RUN_ATTEMPT']
+          bundle = pathlib.Path('/srv/fastllm-staging/bundles') / (run + '.zip')
+          target = pathlib.Path(os.environ['GITHUB_WORKSPACE']) / f'.staging-{run}-{attempt}'
+          target.mkdir(exist_ok=True)
+          if not bundle.is_file():
+              raise SystemExit(f'Artifact download failed. Transfer this run\'s staging-bundle ZIP to {bundle}, then retry the deployment job.')
+          with zipfile.ZipFile(bundle) as archive:
+              names = {'SHA256SUMS', 'REVISION', 'source.tar.gz', 'images.tar.gz'}
+              if set(archive.namelist()) != names:
+                  raise SystemExit('Unexpected deployment bundle contents')
+              for name in names:
+                  with archive.open(name) as source, (target / name).open('wb') as out:
+                      shutil.copyfileobj(source, out)
+          PY
       - name: Verify and import staging bundle
         id: import
         timeout-minutes: 8
@@ -111,6 +138,7 @@ jobs:
         run: |
           set -euo pipefail
           sha256sum --check SHA256SUMS
+          test "$(cat REVISION)" = "$GITHUB_SHA"
           mkdir source
           tar --extract --gzip --file source.tar.gz --directory source --no-same-owner
           python3 source/deploy/staging/guard.py
@@ -141,4 +169,6 @@ jobs:
         if: always()
         working-directory: ${{ github.workspace }}
         shell: bash
-        run: rm -rf -- "$GITHUB_WORKSPACE/.staging-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        run: |
+          rm -rf -- "$GITHUB_WORKSPACE/.staging-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          rm -f -- "/srv/fastllm-staging/bundles/$GITHUB_RUN_ID.zip"

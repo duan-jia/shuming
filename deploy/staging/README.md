@@ -48,3 +48,13 @@ Manual runs can reuse locally cached images. Missing images use three pull
 attempts of at most 120 seconds each. STAGING_OFFLINE=1 instead fails immediately
 when an image is missing; CI uses this mode so it cannot silently fall back to
 registry downloads. Compose startup always uses --pull never.
+
+If the server cannot download the artifact within ten minutes, an operator can
+download this run's `staging-bundle` ZIP through GitHub and transfer it over SSH
+to `/srv/fastllm-staging/bundles/<run-id>.zip`. Install it with mode 0600 for
+gha-runner, using a temporary filename followed by an atomic rename. The job
+uses this file after a download failure; retry only the deployment job if it
+has already ended. It verifies checksums and the exact workflow commit before
+importing anything. Both download paths run the same isolation checks and E2E.
+The ZIP is deleted after the run. This fallback needs no registry credentials
+or production configuration.
