@@ -1,0 +1,35 @@
+name: Production release
+on:
+  workflow_dispatch:
+    inputs:
+      image_revision:
+        description: Full SHA of images from a successful Staging E2E run
+        required: true
+        type: string
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: lab-server-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.ref == 'refs/heads/master'
+    environment: production
+    runs-on: [self-hosted, Linux, X64, staging]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate immutable image revision
+        env:
+          IMAGE_REVISION: ${{ inputs.image_revision }}
+        run: python3 deploy/server/release.py --revision "$IMAGE_REVISION"
+      - name: Log in to GHCR
+        run: echo '${{ github.token }}' | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+      - name: Release using persistent production overrides
+        env:
+          IMAGE_REVISION: ${{ inputs.image_revision }}
+        run: sudo /usr/local/sbin/lab-production-release "$IMAGE_REVISION"
+      - name: Log out from GHCR
+        if: always()
+        run: docker logout ghcr.io || true

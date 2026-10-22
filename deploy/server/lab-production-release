@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+if [ "$#" -ne 1 ]; then
+  echo 'Usage: lab-production-release FULL_IMAGE_SHA' >&2
+  exit 2
+fi
+exec env -i PATH=/usr/bin:/bin DOCKER_CONFIG=/home/gha-runner/.docker \
+  /usr/bin/python3 -I /usr/local/lib/lab-production-release/release.py \
+  --revision "$1" --apply
