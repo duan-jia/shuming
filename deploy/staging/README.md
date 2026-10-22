@@ -62,3 +62,8 @@ has already ended. It verifies checksums and the exact workflow commit before
 importing anything. Both download paths run the same isolation checks and E2E.
 The ZIP is deleted after the run. This fallback needs no registry credentials
 or production configuration.
+
+An optional loopback-only mihomo download proxy can be prepared with
+[deploy/proxy](../proxy/README.md). The download step uses it when port 7890
+is listening; otherwise direct download and the offline fallback remain.
+Subscription credentials stay on the server outside the repository.

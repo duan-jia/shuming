@@ -1,0 +1,17 @@
+name: shuming-download-proxy
+services:
+  mihomo:
+    image: metacubex/mihomo:v1.19.33
+    restart: unless-stopped
+    command: ["-d", "/root/.config/mihomo", "-f", "/root/.config/mihomo/config.json"]
+    ports:
+      - "127.0.0.1:7890:7890"
+    volumes:
+      - ./runtime:/root/.config/mihomo
+    mem_limit: 192m
+    cpus: 0.5
+    logging:
+      driver: local
+      options:
+        max-size: "5m"
+        max-file: "2"
