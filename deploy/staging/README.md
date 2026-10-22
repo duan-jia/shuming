@@ -67,3 +67,9 @@ An optional loopback-only mihomo download proxy can be prepared with
 [deploy/proxy](../proxy/README.md). The download step uses it when port 7890
 is listening; otherwise direct download and the offline fallback remain.
 Subscription credentials stay on the server outside the repository.
+
+The distributed backend image disables GGML_NATIVE so the embedding backend
+uses explicit AVX2/FMA/F16C features instead of inheriting the build runner's
+instructions, including Intel AMX. Backend CI uses the same setting. The live
+staging retrieval check exercises an embedding on the deployment CPU and
+catches instruction incompatibility that build-runner-only tests cannot.

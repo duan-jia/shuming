@@ -8,7 +8,7 @@ if ! sudo -n docker compose -f compose.yaml run --rm --no-deps mihomo -t -d /roo
     echo 'Mihomo validation failed. Inspect the private validation.log on this server.' >&2
     exit 1
 fi
-sudo -n docker compose -f compose.yaml up -d --pull never
+sudo -n docker compose -f compose.yaml up -d --force-recreate --pull never
 provider_ready() {
     sudo -n docker compose -f compose.yaml exec -T mihomo wget -T 3 -qO- \
         http://127.0.0.1:9090/providers/proxies 2>/dev/null | python3 -c '
