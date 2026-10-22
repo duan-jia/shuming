@@ -157,8 +157,10 @@ void LlmEngine::stream_complete(const std::string& prompt, const InferParams& pa
 
     ReasoningParser reasoning_parser;
     int n_completion = 0;
+    bool interrupted = false;
 
     for (int i = 0; i < params.max_tokens; ++i) {
+        if ((params.should_stop && params.should_stop()) || std::chrono::steady_clock::now() >= params.deadline) { interrupted = true; break; }
         llama_token new_token = llama_sampler_sample(smpl, ctx_, -1);
 
         if (llama_vocab_is_eog(vocab_, new_token)) break;
@@ -187,6 +189,10 @@ void LlmEngine::stream_complete(const std::string& prompt, const InferParams& pa
     result.completion_tokens = n_completion;
     result.reasoning = reasoning_parser.reasoning();
     result.text = reasoning_parser.answer();
+    if (interrupted) {
+        result.error = "Generation cancelled or timed out";
+        result.stop_reason = "cancelled";
+    }
 
     llama_sampler_free(smpl);
 

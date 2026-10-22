@@ -16,3 +16,6 @@ web/.env*
 mcp-gateway/node_modules
 mcp-gateway/dist
 mcp-gateway/.env
+
+config.json
+deploy/local/.env

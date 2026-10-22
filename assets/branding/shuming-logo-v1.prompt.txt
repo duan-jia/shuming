@@ -1,0 +1,10 @@
+Generation tool: built-in image_gen
+Transparent background: true
+
+Use case: logo-brand.
+Create one refined minimalist logo for "shuming", Chinese name 枢明, a private laboratory knowledge retrieval and question-answering platform built around shared knowledge search and RAG.
+Asset type: final standalone brand logo, square canvas.
+Design a distinctive compact black geometric symbol: two or three folded book-page shapes converge around a small open central hub; the negative space subtly suggests a lowercase s and an opening toward understanding. Aim for one coherent, very simple silhouette, not a detailed illustration. Restrained, confident, contemporary editorial / research software identity. Balanced geometry with gently softened corners, strong legibility at favicon scale.
+Composition: centered symbol above a small carefully spaced lowercase wordmark, exact text "shuming", clean modern sans serif. Generous surrounding whitespace; symbol is the focus. One logo only, no variant sheet or mockup.
+Palette: solid near-black #111111 only, with negative space. Actual transparent background.
+Avoid gradients, shadows, 3D, textures, glow, robot heads, brains, circuit boards, magnifying glasses, decorative stars, excessive nodes, fine hairlines, extra slogans, Chinese text, watermarks. Crisp flat vector-like edges.

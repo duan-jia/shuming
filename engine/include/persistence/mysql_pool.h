@@ -19,6 +19,7 @@ public:
                  const std::string& user, const std::string& password,
                  const std::string& database);
     void close();
+    bool ping();
 
     MYSQL* raw() { return &mysql_; }
     bool valid() const { return connected_; }
@@ -28,6 +29,7 @@ public:
 
 private:
     MYSQL mysql_;
+    bool initialized_ = false;
     bool connected_ = false;
 };
 

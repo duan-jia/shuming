@@ -7,6 +7,9 @@
 #include <spdlog/spdlog.h>
 
 #include "app/app_bootstrap.h"
+#include "mcp/mcp_service.h"
+#include "services/tool_service.h"
+#include "services/web_search_service.h"
 #include "routes/admin_routes.h"
 #include "routes/auth_routes.h"
 #include "routes/chat_routes.h"
@@ -80,18 +83,55 @@ int main(int argc, char* argv[]) {
     }
 
     AuthService auth(ctx);
-    ChatService chat(ctx);
     DocumentService documents(ctx);
     AdminService admin(ctx);
 
-    muduo::net::EventLoop loop;
-    muduo::net::InetAddress addr(options.port);
-    HttpServer server(&loop, addr, "fast-llm-reasoner", config.get_int("http_threads", 2));
-    server.set_static_dir(options.static_dir);
-
+    WebSearchOptions web_options;
+    web_options.enabled = config.get_bool("web_search.enabled", false);
+    web_options.endpoint = config.get_str("web_search.endpoint", "https://api.deepseek.com/v1/tools/search");
+    web_options.api_key = config.get_env_str("web_search.api_key", "DEEPSEEK_SEARCH_API_KEY");
+    if (web_options.api_key.empty()) {
+        web_options.api_key = config.get_env_str("remote_engine.api_key", "DEEPSEEK_API_KEY");
+    }
+    web_options.ca_bundle = config.get_str("web_search.ca_bundle", "/etc/ssl/certs/ca-certificates.crt");
+    web_options.timeout_seconds = config.get_int("web_search.timeout_seconds", 15);
+    web_options.max_concurrency = config.get_int("web_search.max_concurrency", 2);
+    WebSearchService web_search(web_options);
+    ToolService tools(*ctx.knowledge_search_service, web_search);
+    McpOptions mcp_options;
+    mcp_options.allow_user_web_search = config.get_bool("mcp.allow_user_web_search", false);
+    if (config.raw().contains("mcp") && config.raw()["mcp"].contains("allowed_origins")) {
+        mcp_options.allowed_origins = config.raw()["mcp"]["allowed_origins"].get<std::vector<std::string>>();
+    }
     AuthRequired require_auth = [&auth](const HttpRequest& req, HttpResponse& resp, UserInfo& user) {
         return auth.require_auth(req, resp, user);
     };
+    ctx.rate_limiter->add_rule("search_knowledge", config.get_int("mcp.knowledge_requests_per_minute", 60), 60);
+    ctx.rate_limiter->add_rule("search_web", config.get_int("mcp.web_requests_per_minute", 20), 60);
+    McpService mcp(tools, require_auth, *ctx.rate_limiter, mcp_options);
+    AgentOptions agent_options;
+    agent_options.enabled = config.get_bool("agent.enabled", true);
+    agent_options.max_turns = config.get_int("agent.max_turns", 6);
+    agent_options.max_output_tokens = config.get_int("agent.max_output_tokens", 0);
+    agent_options.max_total_tokens = config.get_int("agent.max_total_tokens", 24000);
+    agent_options.timeout_seconds = config.get_int("agent.timeout_seconds", 90);
+    agent_options.max_tool_calls_per_turn = config.get_int("agent.max_tool_calls_per_turn", 4);
+    agent_options.max_tool_result_bytes = config.get_int("agent.max_tool_result_bytes", 24000);
+    ChatService chat(ctx, tools, agent_options, mcp_options.allow_user_web_search);
+
+    muduo::net::EventLoop loop;
+    muduo::net::InetAddress addr(options.port);
+    HttpServer server(&loop, addr, "fast-llm-reasoner", config.get_int("http_threads", 2),
+                      config.get_int("mcp.worker_threads", 4), config.get_int("mcp.queue_limit", 64));
+    server.set_static_dir(options.static_dir);
+
+    for (const auto& endpoint : std::vector<std::pair<std::string, ToolSet>>{
+             {"/mcp", ToolSet::ALL}, {"/mcp/knowledge", ToolSet::KNOWLEDGE}, {"/mcp/web", ToolSet::WEB}}) {
+        server.router().worker_endpoint(endpoint.first,
+            [&mcp, set = endpoint.second](const HttpRequest& req, RouteParams, HttpResponse& resp) {
+                mcp.handle(req, resp, set);
+            });
+    }
 
     register_health_route(server, ctx);
     register_auth_routes(server, auth);
@@ -103,6 +143,7 @@ int main(int argc, char* argv[]) {
     spdlog::info("Starting fast-llm-reasoner on port {}", options.port);
     server.start();
     loop.loop();
+    ctx.scheduler->stop();
 
     return 0;
 }

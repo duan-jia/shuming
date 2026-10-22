@@ -75,9 +75,9 @@ std::string HttpResponse::serialize() const {
         if (k == "Content-Type") has_content_type = true;
     }
 
-    oss << "Access-Control-Allow-Origin: *\r\n";
-    oss << "Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-Id\r\n";
-    oss << "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    if (!headers.count("Access-Control-Allow-Origin")) oss << "Access-Control-Allow-Origin: *\r\n";
+    if (!headers.count("Access-Control-Allow-Headers")) oss << "Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-Id\r\n";
+    if (!headers.count("Access-Control-Allow-Methods")) oss << "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
 
     if (!has_content_type) {
         oss << "Content-Type: application/octet-stream\r\n";

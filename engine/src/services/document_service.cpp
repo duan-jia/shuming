@@ -1,3 +1,4 @@
+#include "services/tool_service.h"
 #include "services/document_service.h"
 
 #include <cstdint>
@@ -317,37 +318,7 @@ void DocumentService::search(const HttpRequest& req, const UserInfo& user, HttpR
 
         auto result = ctx_.knowledge_search_service->execute(search_request, caller);
 
-        nlohmann::json result_arr = nlohmann::json::array();
-        for (const auto& evidence : result.evidence) {
-            if (evidence.mode == KnowledgeSearchMode::PARENTS) {
-                nlohmann::json j;
-                j["doc_id"] = evidence.document_id;
-                j["filename"] = evidence.filename;
-                j["content"] = evidence.content;
-                j["matched_chunks"] = evidence.matched_chunks;
-                j["max_score"] = evidence.score;
-                result_arr.push_back(j);
-            } else {
-                nlohmann::json j;
-                j["doc_id"] = evidence.document_id;
-                j["filename"] = evidence.filename;
-                j["chunk_index"] = evidence.chunk_index;
-                j["score"] = evidence.score;
-                j["content"] = evidence.content;
-                result_arr.push_back(j);
-            }
-        }
-
-        nlohmann::json j;
-        j["query"] = result.query;
-        j["rewritten_query"] = result.rewrite.search_query;
-        j["query_rewritten"] = result.rewrite.rewritten;
-        j["query_aliases"] = result.rewrite.aliases;
-        if (!result.rewrite.failure_reason.empty()) {
-            j["rewrite_failure_reason"] = result.rewrite.failure_reason;
-        }
-        j["results"] = result_arr;
-        resp.json(j.dump());
+        resp.json(ToolService::knowledge_result(result).dump());
     } catch (const KnowledgeSearchError& e) {
         int status = e.code() == KnowledgeSearchErrorCode::UNAVAILABLE ? 503 : 400;
         resp.json_error(status, e.what());

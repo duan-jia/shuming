@@ -1,3 +1,7 @@
+> Compatibility gateway: new installations can use the C++ native MCP endpoints directly.
+> See [native MCP](../docs/native-mcp.md). This gateway remains available for existing
+> deployments and its service-principal token mapping; it is not required by native MCP.
+
 # MCP Gateway
 
 Internal remote MCP gateway for the `fast-llm-reasoner` RAG service. It exposes one tool:

@@ -45,11 +45,17 @@ public:
 
     void sse(const std::string& pattern, SseHandler handler);
 
+    // All methods for these endpoints execute on the server's bounded pool.
+    void worker_endpoint(const std::string& path, Handler handler);
+    bool requires_worker(const HttpRequest& req) const;
+    bool requires_sse(const HttpRequest& req) const;
+
     bool dispatch(const HttpRequest& req, HttpResponse& resp);
     bool dispatch_sse(const HttpRequest& req, std::shared_ptr<SseContext> sse_ctx);
 
 private:
     std::vector<Route> routes_;
+    std::unordered_map<std::string, Handler> worker_endpoints_;
     static std::pair<std::regex, std::vector<std::string>> compile_pattern(const std::string& pattern);
 };
 
