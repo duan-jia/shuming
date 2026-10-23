@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import Image from "next/image";
+import { createSseParser } from "../lib/sse";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -11,6 +12,7 @@ interface Message {
   content: string;
   isStreaming: boolean;
   isReasoning?: boolean;
+  reasoning?: string;
   toolStatus?: string;
   notice?: string;
 }
@@ -116,11 +118,14 @@ export default function Home() {
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const followOutput = useRef(true);
+  const [copiedId, setCopiedId] = useState("");
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (followOutput.current) messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
   }, [messages]);
 
   useEffect(() => {
@@ -216,6 +221,7 @@ export default function Home() {
     activeSessionRef.current = id;
     setActiveView("chat");
     setActiveSession(id);
+    followOutput.current = true;
     // In-flight replies are authoritative; do not replace them with DB history.
     if (requests.current.has(id)) return;
     const version = ++historySequence.current;
@@ -228,10 +234,11 @@ export default function Home() {
       const data = await res.json();
       if (data.messages && historyVersions.current.get(id) === version && !requests.current.has(id)) {
         const loaded: Message[] = data.messages.map(
-          (m: { id: number; role: string; content: string }) => ({
+          (m: { id: number; role: string; content: string; reasoning?: string }) => ({
             id: String(m.id),
             role: m.role as "user" | "assistant",
             content: m.content || "",
+            reasoning: m.reasoning || "",
             isStreaming: false,
           })
         );
@@ -472,6 +479,8 @@ export default function Home() {
     setMessages((prev) => [...prev, assistantMsg]);
     if (navigation === navigationVersion.current) setInput("");
 
+    followOutput.current = true;
+    setShowJumpToLatest(false);
     const requestId = createRequestId();
     requestIds.current.set(sid, requestId);
     try {
@@ -491,83 +500,67 @@ export default function Home() {
       if (!reader) throw new Error("No reader");
 
       const decoder = new TextDecoder();
-      let buffer = "";
-      let eventType = "message";
-
       let finished = false;
+      const parse = createSseParser(({ event, data }) => {
+        if (finished) return;
+        if (data === "[DONE]") { finished = true; return; }
+        const parsed = JSON.parse(data);
+        if (event === "error" || parsed.type === "error" || parsed.error) {
+          finished = true;
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === msgId
+                ? {
+                    ...message,
+                    content: message.content,
+                    notice: parsed.stop_reason === "cancelled" ? "已停止生成" : parsed.stop_reason === "output_limit" ? "本轮推理达到长度上限，请缩短问题或联系管理员调整输出上限。" : parsed.error || "生成失败",
+                    toolStatus: undefined,
+                    isStreaming: false,
+                    isReasoning: false,
+                  }
+                : message
+            )
+          );
+        } else if (parsed.type === "answer") {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === msgId
+                ? {
+                    ...message,
+                    content: message.content + parsed.content,
+                    toolStatus: undefined,
+                    isReasoning: false,
+                  }
+                : message
+            )
+          );
+        } else if (parsed.type === "tool_start" || parsed.type === "tool_end") {
+          const name = parsed.name === "search_knowledge" ? "知识库检索" : parsed.name === "search_web" ? "网页搜索" : "工具调用";
+          setMessages((prev) => prev.map((message) => message.id === msgId
+            ? { ...message, isReasoning: false, toolStatus: parsed.type === "tool_start" ? `正在${name}…` : parsed.is_error ? `${name}未完成，正在继续处理…` : `${name}完成，正在整理…` }
+            : message));
+        } else if (parsed.type === "reasoning") {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === msgId ? { ...message, isReasoning: true, reasoning: (message.reasoning || "") + (parsed.content || "") } : message
+            )
+          );
+        } else if (parsed.type === "done") {
+          finished = true;
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === msgId
+                ? { ...message, isStreaming: false, isReasoning: false, toolStatus: undefined, notice: parsed.truncated ? "回答已达到长度上限，可发送“继续”接着生成。" : message.notice }
+                : message
+            )
+          );
+        }
+      });
       try {
         while (!finished) {
           const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (line.startsWith("event: ")) {
-              eventType = line.slice(7);
-            } else if (line.startsWith("data: ")) {
-              const data = line.slice(6);
-              if (data === "[DONE]") { finished = true; break; }
-              try {
-                const parsed = JSON.parse(data);
-                if (eventType === "error" || parsed.type === "error" || parsed.error) {
-                  finished = true;
-                  setMessages((prev) =>
-                    prev.map((message) =>
-                      message.id === msgId
-                        ? {
-                            ...message,
-                            content: message.content,
-                            notice: parsed.stop_reason === "cancelled" ? "已停止生成" : parsed.stop_reason === "output_limit" ? "本轮推理达到长度上限，请缩短问题或联系管理员调整输出上限。" : parsed.error || "生成失败",
-                            toolStatus: undefined,
-                            isStreaming: false,
-                            isReasoning: false,
-                          }
-                        : message
-                    )
-                  );
-                } else if (parsed.type === "answer") {
-                  setMessages((prev) =>
-                    prev.map((message) =>
-                      message.id === msgId
-                        ? {
-                            ...message,
-                            content: message.content + parsed.content,
-                            toolStatus: undefined,
-                            isReasoning: false,
-                          }
-                        : message
-                    )
-                  );
-                } else if (parsed.type === "tool_start" || parsed.type === "tool_end") {
-                  const name = parsed.name === "search_knowledge" ? "知识库检索" : parsed.name === "search_web" ? "网页搜索" : "工具调用";
-                  setMessages((prev) => prev.map((message) => message.id === msgId
-                    ? { ...message, isReasoning: false, toolStatus: parsed.type === "tool_start" ? `正在${name}…` : parsed.is_error ? `${name}未完成，正在继续处理…` : `${name}完成，正在整理…` }
-                    : message));
-                } else if (parsed.type === "reasoning") {
-                  setMessages((prev) =>
-                    prev.map((message) =>
-                      message.id === msgId ? { ...message, isReasoning: true } : message
-                    )
-                  );
-                } else if (parsed.type === "done") {
-                  finished = true;
-                  setMessages((prev) =>
-                    prev.map((message) =>
-                      message.id === msgId
-                        ? { ...message, isStreaming: false, isReasoning: false, toolStatus: undefined, notice: parsed.truncated ? "回答已达到长度上限，可发送“继续”接着生成。" : message.notice }
-                        : message
-                    )
-                  );
-                }
-              } catch {}
-              if (finished) break;
-            } else if (line === "") {
-              eventType = "message";
-            }
-          }
+          if (done) { parse(decoder.decode()); break; }
+          parse(decoder.decode(value, { stream: true }));
         }
         if (!finished) throw new Error("连接中断，请重试");
       } finally {
@@ -732,13 +725,15 @@ export default function Home() {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="flex shrink-0 items-center justify-between bg-background px-5 py-4">
+        <header className="chat-header flex shrink-0 items-center justify-between bg-background px-5 py-4">
           <div className="flex items-center gap-3">
-            <button className="rounded-lg border border-line px-2.5 py-1.5 text-neutral-300 md:hidden" aria-label="打开导航" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}>☰</button>
+            <button className="rounded-lg border border-line px-2.5 py-1.5 text-neutral-300 md:hidden" aria-label="打开导航" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
             <div>
-            <h1 className="text-sm font-medium">{activeView === "chat" ? "对话" : "文档管理"}</h1>
+            <h1 className="text-sm font-medium">{activeView === "chat" ? sessions.find(session => session.id === activeSession)?.title || "知识对话" : "文档管理"}</h1>
+            {activeView === "chat" && <p className="mt-1 text-xs text-neutral-400">实验室文档问答</p>}
             </div>
           </div>
+          {activeView === "chat" && <span className="stream-badge" role="status">{loading ? "正在生成" : "知识库问答"}</span>}
           {activeView === "documents" && (
             <div>
               <input
@@ -760,7 +755,7 @@ export default function Home() {
           )}
         </header>
 
-        <div className={`mx-auto min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain px-5 py-5 ${activeView === "chat" ? "max-w-4xl" : "max-w-7xl"}`}>
+        <main onScroll={(event) => { const el = event.currentTarget; followOutput.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100; setShowJumpToLatest(!followOutput.current); }} className={`mx-auto min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain px-5 py-5 ${activeView === "chat" ? "max-w-4xl" : "max-w-7xl"}`}>
           {uploadNotice && (
             <div
               className={`mb-5 rounded-lg border px-4 py-3 text-sm ${
@@ -777,38 +772,35 @@ export default function Home() {
             <>
               {messages.length === 0 && (
                 <div className="chat-welcome">
-                  <h2 className="wordmark">EMOS</h2>
+                  <div className="welcome-content">
+                    <div className="research-mark" aria-hidden="true"><svg width="36" height="36" viewBox="0 0 32 32" fill="none"><path d="M8 4h12l5 5v19H8zM20 4v6h5M12 15h9M12 19h9M12 23h5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /></svg></div>
+                    <h2>从文献中寻找答案</h2>
+                    <p>围绕实验室文档提问，比较方法、梳理证据。<br />也可以从下面的研究任务开始。</p>
+                    <div className="prompt-grid" aria-label="研究任务建议">
+                      {[
+                        { title: "梳理研究脉络", detail: "提取研究问题、关键方法与结论", prompt: "请围绕「研究主题」检索文献，梳理研究问题、关键方法与结论。" },
+                        { title: "对比不同方法", detail: "比较适用场景、优势和局限", prompt: "请比较「方法一」与「方法二」的适用场景、优势和局限，并给出文档依据。" },
+                        { title: "寻找文献依据", detail: "为一个观点检索支持与反例", prompt: "请检索与「研究观点」有关的文献，分别整理支持证据与不同结论。" },
+                      ].map(task => <button key={task.title} onClick={() => { setInput(task.prompt); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="输入问题"]')?.focus(); }}><span className="task-title">{task.title}</span><span className="task-description">{task.detail}</span></button>)}
+                    </div>
+                  </div>
                 </div>
               )}
               {messages.map((msg) => (
-                <div key={msg.id} className={`mb-5 flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={`max-w-[82%] rounded-xl px-4 py-3 ${
-                      msg.role === "user"
-                        ? "bg-foreground text-background"
-                        : "border border-line bg-surface text-foreground"
-                    }`}
-                  >
-                    {msg.role === "assistant" ? (
-                      <div className="prose prose-sm max-w-none prose-slate">
-                        {msg.isReasoning && !msg.content ? (
-                          <span className="text-neutral-400">正在思考…</span>
-                        ) : (
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {msg.content}
-                          </ReactMarkdown>
-                        )}
-                      </div>
-                    ) : (
-                      <span>{msg.content}</span>
-                    )}
-                    {msg.isStreaming && msg.toolStatus && <p role="status" className="mt-2 text-xs text-neutral-400">{msg.toolStatus}</p>}
-                    {msg.notice && <p role="status" className="mt-2 text-sm text-neutral-400">{msg.notice}</p>}
-                    {msg.isStreaming && (
-                      <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-neutral-400" />
-                    )}
+                <article key={msg.id} className={`message-row ${msg.role}`} aria-label={msg.role === "user" ? "你的问题" : "EMOS 的回答"}>
+                  <div className="message-avatar" aria-hidden="true">{msg.role === "user" ? "你" : "E"}</div>
+                  <div className="message-body" aria-busy={msg.isStreaming}>
+                    <div className="message-label">{msg.role === "user" ? "你" : "EMOS"}<span>{msg.isStreaming ? "生成中" : msg.role === "assistant" ? "研究助手" : ""}</span></div>
+                    {msg.role === "assistant" ? <>
+                      {msg.reasoning && <details className="reasoning-panel"><summary>{msg.isReasoning ? "正在思考…" : "思考过程"}</summary><div>{msg.reasoning}</div></details>}
+                      <div className="prose prose-sm max-w-none prose-slate"><ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown></div>
+                      {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" />{msg.toolStatus || (msg.isReasoning ? "正在思考…" : msg.content ? "正在输出…" : "正在连接知识与灵感…")}</div>}
+                      {msg.notice && <p role="status" className="message-notice">{msg.notice}</p>}
+                      {!msg.isStreaming && msg.content && <button className="copy-answer" onClick={async () => { try { await navigator.clipboard.writeText(msg.content); setCopiedId(msg.id); } catch { setCopiedId("failed"); } }}>{copiedId === msg.id ? "已复制" : "复制回答"}</button>}
+                      {copiedId === "failed" && <span role="status">复制失败，请手动选择文字。</span>}
+                    </> : <p className="user-content">{msg.content}</p>}
                   </div>
-                </div>
+                </article>
               ))}
               <div ref={messagesEndRef} />
             </>
@@ -963,17 +955,19 @@ export default function Home() {
               )}
             </section>
           )}
-        </div>
+        </main>
 
         {activeView === "chat" && (
-          <div className="shrink-0 px-4 pb-6 pt-3">
+          <div className="composer-area shrink-0 px-4 pb-6 pt-3">
+            {showJumpToLatest && messages.length > 0 && <button className="jump-to-latest" onClick={() => { followOutput.current = true; messagesEndRef.current?.scrollIntoView({ behavior: "instant" }); setShowJumpToLatest(false); }}>查看最新回答 ↓</button>}
             <div className="composer mx-auto flex max-w-4xl gap-2">
-              <input
+              <textarea
+                rows={2}
                 aria-label="输入问题" className="min-w-0 flex-1 bg-transparent px-3 py-2.5 outline-none"
-                placeholder="向 EMOS 提问…"
+                placeholder="输入研究问题，或描述你想查找的文献…"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void sendMessage(); } }}
                 disabled={loading}
               />
               <button
@@ -984,6 +978,7 @@ export default function Home() {
                 {loading ? "停止生成" : "发送"}
               </button>
             </div>
+            <p className="composer-hint">Enter 发送 · Shift + Enter 换行 · 回答仅供参考，请核实重要信息</p>
           </div>
         )}
       </div>
