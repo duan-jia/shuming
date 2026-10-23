@@ -725,15 +725,11 @@ export default function Home() {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="chat-header flex shrink-0 items-center justify-between bg-background px-5 py-4">
+        <header className={`flex shrink-0 items-center justify-between bg-background px-5 py-4 ${activeView === "chat" ? "chat-navigation md:hidden" : "chat-header"}`}>
           <div className="flex items-center gap-3">
             <button className="rounded-lg border border-line px-2.5 py-1.5 text-neutral-300 md:hidden" aria-label="打开导航" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
-            <div>
-            <h1 className="text-sm font-medium">{activeView === "chat" ? sessions.find(session => session.id === activeSession)?.title || "知识对话" : "文档管理"}</h1>
-            {activeView === "chat" && <p className="mt-1 text-xs text-neutral-400">实验室文档问答</p>}
-            </div>
+            {activeView === "documents" && <h1 className="text-sm font-medium">文档管理</h1>}
           </div>
-          {activeView === "chat" && <span className="stream-badge" role="status">{loading ? "正在生成" : "知识库问答"}</span>}
           {activeView === "documents" && (
             <div>
               <input
@@ -756,6 +752,7 @@ export default function Home() {
         </header>
 
         <main onScroll={(event) => { const el = event.currentTarget; followOutput.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100; setShowJumpToLatest(!followOutput.current); }} className={`mx-auto min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain px-5 py-5 ${activeView === "chat" ? "max-w-4xl" : "max-w-7xl"}`}>
+          {activeView === "chat" && <h1 className="sr-only">知识对话</h1>}
           {uploadNotice && (
             <div
               className={`mb-5 rounded-lg border px-4 py-3 text-sm ${
@@ -788,13 +785,11 @@ export default function Home() {
               )}
               {messages.map((msg) => (
                 <article key={msg.id} className={`message-row ${msg.role}`} aria-label={msg.role === "user" ? "你的问题" : "EMOS 的回答"}>
-                  <div className="message-avatar" aria-hidden="true">{msg.role === "user" ? "你" : <Image src="/shuming-icon.png" alt="" width={30} height={30} className="assistant-avatar-logo" />}</div>
                   <div className="message-body" aria-busy={msg.isStreaming}>
-                    <div className="message-label">{msg.role === "user" ? "你" : "EMOS"}<span>{msg.isStreaming ? "生成中" : msg.role === "assistant" ? "研究助手" : ""}</span></div>
                     {msg.role === "assistant" ? <>
                       {msg.reasoning && <details className="reasoning-panel"><summary>{msg.isReasoning ? "正在思考…" : "思考过程"}</summary><div>{msg.reasoning}</div></details>}
                       <div className="prose prose-sm max-w-none prose-slate"><ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown></div>
-                      {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" />{msg.toolStatus || (msg.isReasoning ? "正在思考…" : msg.content ? "正在输出…" : "正在连接知识与灵感…")}</div>}
+                      {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" aria-hidden="true" /><span className="sr-only">{msg.toolStatus || (msg.isReasoning ? "正在思考" : "正在生成回答")}</span></div>}
                       {msg.notice && <p role="status" className="message-notice">{msg.notice}</p>}
                       {!msg.isStreaming && msg.content && <button className="copy-answer" onClick={async () => { try { await navigator.clipboard.writeText(msg.content); setCopiedId(msg.id); } catch { setCopiedId("failed"); } }}>{copiedId === msg.id ? "已复制" : "复制回答"}</button>}
                       {copiedId === "failed" && <span role="status">复制失败，请手动选择文字。</span>}

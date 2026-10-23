@@ -131,7 +131,9 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     await wait(`!!window.mock.streams.A`);
     await evaluate(`window.mock.emit('A',{type:'reasoning',content:'先检索实验室资料，再对比研究结论。'});window.mock.emit('A',{type:'answer',content:'回答A第一段'})`);
     await wait(`document.body.innerText.includes('回答A第一段')`);
-    assert.equal(await evaluate(`document.querySelector('.assistant-avatar-logo')?.getAttribute('src')?.includes('shuming-icon')`), true);
+    assert.equal(await evaluate(`document.querySelector('.message-avatar, .assistant-avatar-logo, .message-label, .stream-badge') === null`), true);
+    assert.equal(await evaluate(`document.querySelector('header').innerText.trim()`), '');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('header')).display`), 'none');
     assert.equal(await evaluate(`document.querySelector('.composer-hint') === null`), true);
     assert.equal(await evaluate(`document.body.innerText.includes('Shift + Enter')`), false);
     await click('会话B');
