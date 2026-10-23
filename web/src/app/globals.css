@@ -92,12 +92,13 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .task-title { font-size: 13px; font-weight: 500; white-space: nowrap; }
 .task-description { font-size: 12px; color: #a3aab4; }
 .message-row { display: flex; align-items: flex-start; gap: 14px; margin: 20px 0 34px; }
-.message-avatar { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; border: 1px solid #b5c9e230; color: #b5c9e2; background: #b5c9e20; font-size: 13px; font-weight: 600; }
+.message-avatar { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; font-size: 13px; font-weight: 600; }
+.assistant-avatar-logo { display: block; width: 30px; height: 30px; filter: invert(1); mix-blend-mode: screen; }
 .message-body { min-width: 0; flex: 1; }
 .message-label { display: flex; align-items: center; gap: 12px; margin: 5px 0 13px; font-size: 12px; font-weight: 600; }
 .message-label span { color: #a3a3a3; font-size: 10px; font-weight: 400; }
 .message-row.user { padding: 18px; border: 1px solid var(--line); background: #ffffff04; border-radius: 16px; }
-.user .message-avatar { background: #ffffff0a; color: #c7c7c7; border-color: var(--line); }
+.user .message-avatar { background: #ffffff0a; color: #c7c7c7; border: 1px solid var(--line); border-radius: 10px; }
 .user-content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
 .prose { font-size: 14px; color: #dedede; }
 .prose h1 { font-size: 1.6em; }.prose h2 { font-size: 1.35em; }.prose h3 { font-size: 1.15em; }
@@ -114,7 +115,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .composer:focus-within { border-color: #b5c9e260; }
 .composer textarea { resize: none; min-height: 72px; max-height: 180px; line-height: 1.7; }
 .composer > button { margin: 3px; white-space: nowrap; background: #b5c9e2; font-size: 12px; border-radius: 11px; }
-.composer-hint { margin-top: 12px; color: #a3a3a3; text-align: center; font-size: 10px; }
 textarea:focus-visible { outline: none; }
 @media (max-width: 767px) {
   .prompt-grid { margin-top: 24px; }
@@ -123,7 +123,6 @@ textarea:focus-visible { outline: none; }
   .chat-header p { max-width: 170px; font-size: 10px; }
   .stream-badge { padding: 5px 8px; font-size: 10px; }
   .message-row { gap: 10px; }.message-row.user { padding: 12px; }
-  .composer-hint { font-size: 9px; }
 }
 @media (prefers-reduced-motion: reduce) { .stream-dot { animation: none; } }
 

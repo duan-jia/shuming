@@ -788,7 +788,7 @@ export default function Home() {
               )}
               {messages.map((msg) => (
                 <article key={msg.id} className={`message-row ${msg.role}`} aria-label={msg.role === "user" ? "你的问题" : "EMOS 的回答"}>
-                  <div className="message-avatar" aria-hidden="true">{msg.role === "user" ? "你" : "E"}</div>
+                  <div className="message-avatar" aria-hidden="true">{msg.role === "user" ? "你" : <Image src="/shuming-icon.png" alt="" width={30} height={30} className="assistant-avatar-logo" />}</div>
                   <div className="message-body" aria-busy={msg.isStreaming}>
                     <div className="message-label">{msg.role === "user" ? "你" : "EMOS"}<span>{msg.isStreaming ? "生成中" : msg.role === "assistant" ? "研究助手" : ""}</span></div>
                     {msg.role === "assistant" ? <>
@@ -978,7 +978,6 @@ export default function Home() {
                 {loading ? "停止生成" : "发送"}
               </button>
             </div>
-            <p className="composer-hint">Enter 发送 · Shift + Enter 换行 · 回答仅供参考，请核实重要信息</p>
           </div>
         )}
       </div>

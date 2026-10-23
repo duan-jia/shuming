@@ -35,3 +35,7 @@
 ![桌面流式对话](screenshots/chat-desktop.png)
 
 ![移动端流式对话](screenshots/chat-mobile.png)
+
+### 反馈修订（2026-10-23）
+
+助手头像复用项目现有的枢明书页标志，以反白方式适配深色界面，替代方框中的 E；不新增图标系统。移除输入框下方整行快捷键与免责声明文字，保留 Enter / Shift+Enter 行为。
