@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { memo, useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import Image from "next/image";
 import { createSseParser } from "../lib/sse";
 import ReactMarkdown from "react-markdown";
@@ -87,6 +87,11 @@ const documentStatus: Record<DocumentItem["status"], { label: string; className:
 
 const API_BASE = "";
 const EMPTY_MESSAGES: Message[] = [];
+// Keep completed answers out of the Markdown parser while another reply streams.
+const MarkdownContent = memo(function MarkdownContent({ content }: { content: string }) {
+  return <div className="prose max-w-none prose-slate"><ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown></div>;
+});
+
 export default function Home() {
   const [sessionMessages, setSessionMessages] = useState<Record<string, Message[]>>({});
   const [input, setInput] = useState("");
@@ -121,12 +126,15 @@ export default function Home() {
   const followOutput = useRef(true);
   const [copiedId, setCopiedId] = useState("");
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagePaneRef = useRef<HTMLElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (followOutput.current) messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
-  }, [messages]);
+  useLayoutEffect(() => {
+    const pane = messagePaneRef.current;
+    // Scroll only the message pane, before paint. scrollIntoView also moves
+    // ancestor scroll containers and can pull the composer out of the viewport.
+    if (activeView === "chat" && followOutput.current && pane) pane.scrollTop = pane.scrollHeight;
+  }, [messages, activeView]);
 
   useEffect(() => {
     const pending = requests.current;
@@ -457,9 +465,21 @@ export default function Home() {
     }
 
     historyVersions.current.set(sid, ++historySequence.current);
+    let pendingUpdates: ((messages: Message[]) => Message[])[] = [];
+    let updateTimer: ReturnType<typeof setTimeout> | undefined;
+    const flushMessages = () => {
+      clearTimeout(updateTimer);
+      updateTimer = undefined;
+      const updates = pendingUpdates;
+      pendingUpdates = [];
+      if (!updates.length || requests.current.get(sid) !== controller) return;
+      setSessionMessages((prev) => ({ ...prev, [sid]: updates.reduce((value, update) => update(value), prev[sid] || []) }));
+    };
     const setMessages = (update: (messages: Message[]) => Message[]) => {
       if (requests.current.get(sid) !== controller) return;
-      setSessionMessages((prev) => ({ ...prev, [sid]: update(prev[sid] || []) }));
+      pendingUpdates.push(update);
+      // Network chunks can arrive much faster than the UI can parse Markdown.
+      if (updateTimer === undefined) updateTimer = setTimeout(flushMessages, 50);
     };
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -591,6 +611,8 @@ export default function Home() {
       setMessages((prev) => prev.map((message) =>
         message.id === msgId ? { ...message, isStreaming: false, isReasoning: false, toolStatus: undefined } : message
       ));
+      // Publish the tail and terminal state before releasing this request.
+      flushMessages();
       if (requests.current.get(sid) === controller) {
         requests.current.delete(sid);
         requestIds.current.delete(sid);
@@ -751,7 +773,7 @@ export default function Home() {
           )}
         </header>
 
-        <main onScroll={(event) => { const el = event.currentTarget; followOutput.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100; setShowJumpToLatest(!followOutput.current); }} className={`mx-auto min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain px-5 py-5 ${activeView === "chat" ? "max-w-4xl" : "max-w-7xl"}`}>
+        <main ref={messagePaneRef} onScroll={(event) => { if (activeView !== "chat") return; const el = event.currentTarget; followOutput.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100; setShowJumpToLatest(!followOutput.current); }} className={`message-pane relative mx-auto min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain px-5 py-5 ${activeView === "chat" ? "chat-content" : "max-w-7xl"}`}>
           {activeView === "chat" && <h1 className="sr-only">知识对话</h1>}
           {uploadNotice && (
             <div
@@ -770,15 +792,19 @@ export default function Home() {
               {messages.length === 0 && (
                 <div className="chat-welcome">
                   <div className="welcome-content">
-                    <div className="research-mark" aria-hidden="true"><svg width="36" height="36" viewBox="0 0 32 32" fill="none"><path d="M8 4h12l5 5v19H8zM20 4v6h5M12 15h9M12 19h9M12 23h5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /></svg></div>
-                    <h2>从文献中寻找答案</h2>
-                    <p>围绕实验室文档提问，比较方法、梳理证据。<br />也可以从下面的研究任务开始。</p>
-                    <div className="prompt-grid" aria-label="研究任务建议">
+                    <h2 className="wordmark">EMOS</h2>
+                    <p>What would you like to explore?</p>
+                    <div className="welcome-prompts" aria-label="Suggested questions">
                       {[
-                        { title: "梳理研究脉络", detail: "提取研究问题、关键方法与结论", prompt: "请围绕「研究主题」检索文献，梳理研究问题、关键方法与结论。" },
-                        { title: "对比不同方法", detail: "比较适用场景、优势和局限", prompt: "请比较「方法一」与「方法二」的适用场景、优势和局限，并给出文档依据。" },
-                        { title: "寻找文献依据", detail: "为一个观点检索支持与反例", prompt: "请检索与「研究观点」有关的文献，分别整理支持证据与不同结论。" },
-                      ].map(task => <button key={task.title} onClick={() => { setInput(task.prompt); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="输入问题"]')?.focus(); }}><span className="task-title">{task.title}</span><span className="task-description">{task.detail}</span></button>)}
+                        "What makes a good research question?",
+                        "How do I compare two approaches?",
+                        "How can I turn an idea into a plan?",
+                      ].map((question) => (
+                        <button key={question} type="button" onClick={() => {
+                          setInput(question);
+                          document.querySelector<HTMLTextAreaElement>('textarea[aria-label="输入问题"]')?.focus();
+                        }}>{question}</button>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -788,7 +814,7 @@ export default function Home() {
                   <div className="message-body" aria-busy={msg.isStreaming}>
                     {msg.role === "assistant" ? <>
                       {msg.reasoning && <details className="reasoning-panel"><summary>{msg.isReasoning ? "正在思考…" : "思考过程"}</summary><div>{msg.reasoning}</div></details>}
-                      <div className="prose prose-sm max-w-none prose-slate"><ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown></div>
+                      <MarkdownContent content={msg.content} />
                       {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" aria-hidden="true" /><span className="sr-only">{msg.toolStatus || (msg.isReasoning ? "正在思考" : "正在生成回答")}</span></div>}
                       {msg.notice && <p role="status" className="message-notice">{msg.notice}</p>}
                       {!msg.isStreaming && msg.content && <button className="copy-answer" onClick={async () => { try { await navigator.clipboard.writeText(msg.content); setCopiedId(msg.id); } catch { setCopiedId("failed"); } }}>{copiedId === msg.id ? "已复制" : "复制回答"}</button>}
@@ -797,7 +823,6 @@ export default function Home() {
                   </div>
                 </article>
               ))}
-              <div ref={messagesEndRef} />
             </>
           ) : (
             <section>
@@ -954,12 +979,12 @@ export default function Home() {
 
         {activeView === "chat" && (
           <div className="composer-area shrink-0 px-4 pb-6 pt-3">
-            {showJumpToLatest && messages.length > 0 && <button className="jump-to-latest" onClick={() => { followOutput.current = true; messagesEndRef.current?.scrollIntoView({ behavior: "instant" }); setShowJumpToLatest(false); }}>查看最新回答 ↓</button>}
-            <div className="composer mx-auto flex max-w-4xl gap-2">
+            {showJumpToLatest && messages.length > 0 && <button className="jump-to-latest" onClick={() => { followOutput.current = true; const pane = messagePaneRef.current; if (pane) pane.scrollTop = pane.scrollHeight; setShowJumpToLatest(false); }}>查看最新回答 ↓</button>}
+            <div className="composer mx-auto flex gap-2">
               <textarea
                 rows={2}
                 aria-label="输入问题" className="min-w-0 flex-1 bg-transparent px-3 py-2.5 outline-none"
-                placeholder="输入研究问题，或描述你想查找的文献…"
+                placeholder="Ask anything…"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void sendMessage(); } }}
