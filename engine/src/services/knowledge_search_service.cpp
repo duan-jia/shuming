@@ -64,7 +64,7 @@ SearchKnowledgeResult KnowledgeSearchService::execute(
     result.rewrite = backend_.rewrite_query(request.query);
     if (request.mode == KnowledgeSearchMode::PARENTS) {
         result.evidence = backend_.retrieve_parents(
-            result.rewrite, request.top_k, caller.tenant_id);
+            result.rewrite, request.top_k, caller.public_only ? 0 : caller.tenant_id);
     } else {
         result.evidence = backend_.retrieve_chunks(
             result.rewrite, request.top_k, caller.tenant_id);

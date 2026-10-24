@@ -17,7 +17,7 @@ UserLookupStatus UserRepository::find_login_user(const std::string& username, Lo
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) return UserLookupStatus::Unavailable;
 
-    std::string sql = "SELECT id, tenant_id, username, role, password_hash FROM users WHERE username='"
+    std::string sql = "SELECT u.id, u.tenant_id, u.username, u.role, u.password_hash, u.status, t.status FROM users u JOIN tenants t ON t.id=u.tenant_id WHERE u.username='"
         + escape_sql(conn->raw(), username) + "' LIMIT 1";
     auto* result = conn->query(sql);
     if (!result) {
@@ -37,6 +37,8 @@ UserLookupStatus UserRepository::find_login_user(const std::string& username, Lo
     user.username = row[2] ? row[2] : "";
     user.role = row[3] ? row[3] : "user";
     user.password_hash = row[4] ? row[4] : "";
+    user.active = row[5] && std::string(row[5]) == "active"
+        && row[6] && std::string(row[6]) == "active";
     mysql_free_result(result);
     mysql_.release(conn);
     return UserLookupStatus::Found;
@@ -57,6 +59,19 @@ bool UserRepository::create_user(int tenant_id, const std::string& username,
     if (ok) {
         user_id = static_cast<int>(mysql_insert_id(conn->raw()));
     }
+    mysql_.release(conn);
+    return ok;
+}
+
+bool UserRepository::create_guest_user(int tenant_id, const std::string& username, int& user_id) {
+    auto conn = mysql_.acquire();
+    if (!conn || !conn->valid()) return false;
+    const std::string sql = "INSERT INTO users (tenant_id, username, password_hash, role) "
+        "SELECT id, '" + escape_sql(conn->raw(), username)
+        + "', '!guest-password-login-disabled', 'guest' FROM tenants WHERE id="
+        + std::to_string(tenant_id) + " AND name='__guest__' AND status='active'";
+    const bool ok = conn->execute(sql) && mysql_affected_rows(conn->raw()) == 1;
+    if (ok) user_id = static_cast<int>(mysql_insert_id(conn->raw()));
     mysql_.release(conn);
     return ok;
 }
