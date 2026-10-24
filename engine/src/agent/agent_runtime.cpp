@@ -93,13 +93,31 @@ void AgentRuntime::stream_complete(const std::string& prompt, const InferParams&
     for (int turn = 0; total.error.empty() && turn < options_.max_turns; ++turn) {
         if (check_stop()) break;
         const long long used = static_cast<long long>(total.prompt_tokens) + total.completion_tokens;
-        long long remaining = options_.max_total_tokens > 0
+        const long long budget_remaining = options_.max_total_tokens > 0
             ? options_.max_total_tokens - used : std::numeric_limits<long long>::max();
-        if (remaining_quota_) remaining = std::min(remaining, remaining_quota_() - used);
-        if (remaining <= 0) { stop("token_limit", "Agent token budget or user quota exhausted"); break; }
+        // Billing settles this request after the loop, so subtract its usage here.
+        const long long quota_remaining = remaining_quota_
+            ? remaining_quota_() - used : std::numeric_limits<long long>::max();
+        const bool quota_limited = quota_remaining <= budget_remaining;
+        const long long remaining = std::min(budget_remaining, quota_remaining);
+        auto stop_tokens = [&](long long estimated_input) {
+            const auto message = std::string(quota_limited
+                ? "Daily user token quota insufficient for the next model turn"
+                : "Agent per-request token budget insufficient for the next model turn")
+                + " (remaining=" + std::to_string(std::max(0LL, remaining))
+                + ", estimated_input=" + std::to_string(estimated_input)
+                + ", request_used=" + std::to_string(used) + "). "
+                + (quota_limited ? "Wait for the daily quota to reset or ask an administrator to increase it."
+                                 : "Increase agent.max_total_tokens or set it to 0 to disable the per-request budget.");
+            spdlog::warn("Agent token check failed: request={} turn={} limit={} remaining={} estimated_input={} request_used={}",
+                         caller_.trace_id, turn + 1, quota_limited ? "daily_quota" : "agent_budget",
+                         remaining, estimated_input, used);
+            stop("token_limit", message);
+        };
+        if (remaining <= 0) { stop_tokens(0); break; }
         params.max_tokens = input.max_tokens > 0 ? std::min<long long>(input.max_tokens, remaining) : 0;
         const auto estimate = model_.estimate_input_tokens(prompt, params);
-        if (estimate >= remaining) { stop("token_limit", "Insufficient token budget for the next model turn"); break; }
+        if (estimate >= remaining) { stop_tokens(estimate); break; }
         // Do not invent a per-call limit when the caller uses provider defaults.
         // In that case the cumulative budget is checked between model calls.
         params.max_tokens = input.max_tokens > 0 ? std::min<long long>(input.max_tokens, remaining - estimate) : 0;

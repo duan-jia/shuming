@@ -199,6 +199,28 @@ class AgentTest(native.NativeMcpTest):
                 self.assertNotIn('search_web', [t['function']['name'] for t in Model.requests[-1]['tools']])
                 self.assertIn('error', Model.requests[-1]['messages'][-1]['content'])
 
+    def test_agent_budget_error_identifies_the_limiting_resource(self):
+        for limits, message in [
+            ({'remaining_quota': 1}, 'Daily user token quota'),
+            ({'max_total_tokens': 1}, 'Agent per-request token budget'),
+            ({'remaining_quota': 1, 'max_total_tokens': 2}, 'Daily user token quota'),
+            ({'remaining_quota': 2, 'max_total_tokens': 1}, 'Agent per-request token budget'),
+        ]:
+            before = len(Model.requests)
+            events = self.stream('direct', **limits)
+            self.assertEqual(events[-1]['stop_reason'], 'token_limit', events)
+            self.assertIn(message, events[-1]['error'])
+            self.assertIn('remaining=1, estimated_input=', events[-1]['error'])
+            self.assertEqual(events[-1]['usage']['prompt_tokens'], 0)
+            self.assertEqual(len(Model.requests), before)
+
+        events = self.stream('high-usage', remaining_quota=25011)
+        self.assertEqual(events[-1]['stop_reason'], 'token_limit', events)
+        self.assertIn('Daily user token quota', events[-1]['error'])
+        self.assertIn('remaining=1, estimated_input=', events[-1]['error'])
+        self.assertIn('request_used=25010', events[-1]['error'])
+        self.assertEqual(len([e for e in events if e['type'] == 'agent_turn']), 1)
+
     def test_agent_limits_and_partial_usage_on_failure(self):
         for limits, reason in [({'max_turns': 1}, 'turn_limit'), ({'max_total_tokens': 1}, 'token_limit'), ({'remaining_quota': 1}, 'token_limit')]:
             events = self.stream('loop', **limits)
