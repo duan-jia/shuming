@@ -286,6 +286,6 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     await new Promise<void>((resolve) => {
       if (browser.exitCode !== null) resolve(); else browser.once('exit', () => resolve());
     });
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

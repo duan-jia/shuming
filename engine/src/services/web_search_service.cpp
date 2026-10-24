@@ -7,6 +7,7 @@
 #include <memory>
 #include <stdexcept>
 #include <httplib.h>
+#include <regex>
 
 namespace fastllm {
 namespace {
@@ -62,8 +63,31 @@ void WebSearchService::validate(const nlohmann::json& args) {
     }
 }
 
-nlohmann::json WebSearchService::execute(const nlohmann::json& args, std::function<bool()> should_stop) {
-    validate(args);
+nlohmann::json WebSearchService::fetch_schema() {
+    return {{"type", "object"}, {"additionalProperties", false}, {"required", {"url"}},
+        {"properties", {{"url", {{"type", "string"}, {"minLength", 1}, {"maxLength", 8192},
+            {"description", "Public HTTP(S) webpage URL. Never send private document text or credentials."}}}}}};
+}
+
+nlohmann::json WebSearchService::fetch(const nlohmann::json& args, std::function<bool()> should_stop) {
+    if (!args.is_object() || args.size() != 1 || !args.contains("url") || !args["url"].is_string())
+        throw std::invalid_argument("Only url is accepted");
+    const auto url = args["url"].get<std::string>();
+    // The provider fetches the target; the application never connects to arbitrary URLs.
+    // Reject credentials and control characters before sharing the URL with the provider.
+    static const std::regex pattern(R"(^https?://([^/?#@\s]+)([/?#].*)?$)");
+    if (url.size() > 8192 || !std::regex_match(url, pattern)
+        || std::any_of(url.begin(), url.end(), [](unsigned char c) { return c <= 32 || c == 127 || c == '\\'; }))
+        throw std::invalid_argument("url must be an HTTP(S) URL with a host and no credentials or whitespace");
+    const auto result = request(options_.fetch_endpoint, args, should_stop);
+    if (!result.contains("title") || !result["title"].is_string()
+        || !result.contains("content") || !result["content"].is_string())
+        throw std::runtime_error("Web fetch upstream returned invalid content");
+    return {{"url", url}, {"title", result["title"]}, {"content", result["content"]}};
+}
+
+nlohmann::json WebSearchService::request(const std::string& endpoint, const nlohmann::json& body,
+                                       std::function<bool()> should_stop) {
     if (!options_.enabled || options_.api_key.empty()) throw std::runtime_error("Web search is not configured");
     const int previous = active_.fetch_add(1);
     struct Release { std::atomic<int>& active; ~Release() { --active; } } release{active_};
@@ -71,10 +95,10 @@ nlohmann::json WebSearchService::execute(const nlohmann::json& args, std::functi
 
     // Endpoint is operator configuration, never a tool argument. Plain HTTP is
     // restricted to loopback for deterministic local integration tests.
-    const auto split = options_.endpoint.find('/', options_.endpoint.find("://") + 3);
+    const auto split = endpoint.find('/', endpoint.find("://") + 3);
     if (split == std::string::npos) throw std::runtime_error("Invalid web search endpoint");
-    const auto origin = options_.endpoint.substr(0, split);
-    const auto path = options_.endpoint.substr(split);
+    const auto origin = endpoint.substr(0, split);
+    const auto path = endpoint.substr(split);
     if (origin.rfind("https://", 0) != 0 && origin.rfind("http://127.0.0.1:", 0) != 0) {
         throw std::runtime_error("Web search requires HTTPS");
     }
@@ -86,9 +110,6 @@ nlohmann::json WebSearchService::execute(const nlohmann::json& args, std::functi
     client.enable_server_certificate_verification(true);
     client.set_ca_cert_path(options_.ca_bundle.c_str());
 
-    auto body = args;
-    if (!body.contains("count")) body["count"] = 5;
-    if (!body.contains("need_content")) body["need_content"] = false;
     httplib::Request request;
     request.method = "POST";
     request.path = path;
@@ -116,7 +137,17 @@ nlohmann::json WebSearchService::execute(const nlohmann::json& args, std::functi
         throw std::runtime_error("Web search upstream returned HTTP " + std::to_string(response->status));
     }
     auto result = nlohmann::json::parse(received, nullptr, false);
-    if (!result.is_object() || !result.contains("results") || !result["results"].is_array()) {
+    if (!result.is_object()) throw std::runtime_error("Web provider returned invalid JSON");
+    return result;
+}
+
+nlohmann::json WebSearchService::execute(const nlohmann::json& args, std::function<bool()> should_stop) {
+    validate(args);
+    auto body = args;
+    if (!body.contains("count")) body["count"] = 5;
+    if (!body.contains("need_content")) body["need_content"] = false;
+    auto result = request(options_.endpoint, body, should_stop);
+    if (!result.contains("results") || !result["results"].is_array()) {
         throw std::runtime_error("Web search upstream returned invalid results");
     }
     // Return only documented public evidence fields, never arbitrary upstream fields.

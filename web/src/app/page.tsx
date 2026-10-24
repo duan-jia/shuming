@@ -92,6 +92,43 @@ const MarkdownContent = memo(function MarkdownContent({ content }: { content: st
   return <div className="prose max-w-none prose-slate"><ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown></div>;
 });
 
+function CopyMessageButton({ content, role }: { content: string; role: Message["role"] }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+
+  useEffect(() => {
+    if (status === "idle") return;
+    const timer = window.setTimeout(() => setStatus("idle"), 2500);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(content);
+      setStatus("copied");
+    } catch {
+      setStatus("failed");
+    }
+  }
+
+  return (
+    <div className="message-actions">
+      <button className="copy-message" type="button" onClick={copy}
+        aria-label={role === "user" ? "Copy question" : "Copy answer"}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          {status === "copied" ? <path d="m5 12 4 4L19 6" /> : <>
+            <rect x="8" y="8" width="12" height="12" rx="2" />
+            <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+          </>}
+        </svg>
+        <span>Copy</span>
+      </button>
+      <span className={status === "failed" ? "copy-error" : "sr-only"} role="status">
+        {status === "copied" ? "Copied to clipboard" : status === "failed" ? "Copy failed. Please select and copy the text." : ""}
+      </span>
+    </div>
+  );
+}
+
 export default function Home() {
   const [sessionMessages, setSessionMessages] = useState<Record<string, Message[]>>({});
   const [input, setInput] = useState("");
@@ -124,7 +161,6 @@ export default function Home() {
     message: string;
   } | null>(null);
   const followOutput = useRef(true);
-  const [copiedId, setCopiedId] = useState("");
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const messagePaneRef = useRef<HTMLElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
@@ -555,7 +591,13 @@ export default function Home() {
             )
           );
         } else if (parsed.type === "tool_start" || parsed.type === "tool_end") {
-          const name = parsed.name === "search_knowledge" ? "知识库检索" : parsed.name === "search_web" ? "网页搜索" : "工具调用";
+          const toolNames: Record<string, string> = {
+            search_knowledge: "知识库检索",
+            fetch_knowledge: "读取论文",
+            search_web: "网页搜索",
+            fetch_web: "读取网页",
+          };
+          const name = toolNames[parsed.name] || "工具调用";
           setMessages((prev) => prev.map((message) => message.id === msgId
             ? { ...message, isReasoning: false, toolStatus: parsed.type === "tool_start" ? `正在${name}…` : parsed.is_error ? `${name}未完成，正在继续处理…` : `${name}完成，正在整理…` }
             : message));
@@ -817,9 +859,8 @@ export default function Home() {
                       <MarkdownContent content={msg.content} />
                       {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" aria-hidden="true" /><span className="sr-only">{msg.toolStatus || (msg.isReasoning ? "正在思考" : "正在生成回答")}</span></div>}
                       {msg.notice && <p role="status" className="message-notice">{msg.notice}</p>}
-                      {!msg.isStreaming && msg.content && <button className="copy-answer" onClick={async () => { try { await navigator.clipboard.writeText(msg.content); setCopiedId(msg.id); } catch { setCopiedId("failed"); } }}>{copiedId === msg.id ? "已复制" : "复制回答"}</button>}
-                      {copiedId === "failed" && <span role="status">复制失败，请手动选择文字。</span>}
                     </> : <p className="user-content">{msg.content}</p>}
+                    {!msg.isStreaming && msg.content && <CopyMessageButton content={msg.content} role={msg.role} />}
                   </div>
                 </article>
               ))}

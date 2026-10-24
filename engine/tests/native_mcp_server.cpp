@@ -47,12 +47,27 @@ int main(int argc, char** argv) {
     options.enabled = true;
     options.api_key = "fixture-provider-key";
     options.endpoint = argv[2];
+    options.fetch_endpoint = std::string(argv[2]).substr(0, std::string(argv[2]).rfind('/')) + "/fetch";
     options.timeout_seconds = 1;
     options.max_concurrency = 1;
     WebSearchService web(options);
-    ToolService tools(knowledge, web);
+    KnowledgeFetchOptions fetch_options;
+    fetch_options.pdf_directory = std::getenv("FIXTURE_PDF_DIR") ? std::getenv("FIXTURE_PDF_DIR") : ".tmp/fetch-fixture";
+    fetch_options.signing_secret = "fixture-download-secret";
+    fetch_options.public_base_url = "http://127.0.0.1:" + std::string(argv[1]);
+    fetch_options.link_ttl_seconds = 2;
+    KnowledgeFetchService documents([](int id, int tenant, DocumentDetails& document) {
+        if (id != tenant && id != 99) return false;
+        document.id = id;
+        document.source_filename = "fixture paper.pdf";
+        document.source_storage_name = "00000000-0000-0000-0000-000000000001.pdf";
+        if (id == 99) document.source_storage_name = "../outside.pdf";
+        return true;
+    }, fetch_options);
+    ToolService tools(knowledge, web, documents);
     RateLimiter limiter;
     limiter.add_rule("search_web", 30, 60);
+    limiter.add_rule("fetch_web", 30, 60);
     AuthRequired auth = [&jwt](const HttpRequest& req, HttpResponse& resp, UserInfo& user) {
         auto token = req.header("Authorization");
         if (token.rfind("Bearer ", 0) != 0) { resp.json_error(401, "Unauthorized"); return false; }
@@ -66,7 +81,9 @@ int main(int argc, char** argv) {
     McpService mcp(tools, auth, limiter, mcp_options);
     WorkerPool agent_workers(2, 4);
     std::unique_ptr<RemoteEngine> model;
-    if (argc == 4) model = std::make_unique<RemoteEngine>(argv[3], "fixture-model", "fixture-model-key");
+    std::unique_ptr<RemoteEngine> text_model;
+    if (argc == 4) model = std::make_unique<RemoteEngine>(argv[3], "fixture-model", "fixture-model-key", 32768, true);
+    if (argc == 4) text_model = std::make_unique<RemoteEngine>(argv[3], "fixture-model", "fixture-model-key");
     muduo::net::EventLoop loop;
     HttpServer server(&loop, muduo::net::InetAddress(std::atoi(argv[1]), true), "native-mcp-fixture", 1, 2, 2);
     for (const auto& endpoint : std::vector<std::pair<std::string, ToolSet>>{
@@ -75,6 +92,9 @@ int main(int argc, char** argv) {
             mcp.handle(req, resp, set);
         });
     }
+    server.router().worker_endpoint("/api/knowledge/download", [&documents](const HttpRequest& req, RouteParams, HttpResponse& resp) {
+        documents.download(req, resp);
+    });
     if (model) server.router().sse("/api/chat/stream", [&](const HttpRequest& req, RouteParams, std::shared_ptr<SseContext> sse) {
         HttpResponse response;
         UserInfo user{};
@@ -83,7 +103,7 @@ int main(int argc, char** argv) {
         if (!agent_workers.submit([&, body, sse, user] {
             AgentOptions limits;
             limits.max_turns = body.value("max_turns", 6);
-            limits.max_total_tokens = body.value("max_total_tokens", 24000);
+            limits.max_total_tokens = body.value("max_total_tokens", limits.max_total_tokens);
             limits.timeout_seconds = body.value("timeout_seconds", 5);
             InferParams params;
             params.max_tokens = body.value("max_tokens", limits.max_output_tokens);
@@ -92,8 +112,8 @@ int main(int argc, char** argv) {
             caller.tenant_id = user.tenant_id;
             caller.principal_id = user.id;
             auto event = [sse](const nlohmann::json& value) { sse->send_event("message", value.dump()); };
-            AgentRuntime runtime(*model, tools, limiter, caller, limits, true, user.role == Role::ADMIN, event,
-                [body] { return body.value("remaining_quota", 24000LL); });
+            AgentRuntime runtime(body.value("image_inputs", true) ? *model : *text_model, tools, limiter, caller, limits, true, user.role == Role::ADMIN, event,
+                [body] { return body.value("remaining_quota", 1000000LL); });
             sse->send_event("message", "{\"type\":\"start\"}");
             runtime.stream_complete(body.value("message", "test"), params,
                 [event](const std::string& text) { event({{"type", "answer"}, {"content", text}}); },

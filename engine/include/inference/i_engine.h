@@ -69,6 +69,7 @@ public:
         std::function<void(const InferResult&)> on_done = nullptr) = 0;
 
     virtual bool supports_tools() const { return false; }
+    virtual bool supports_images() const { return false; }
     virtual int estimate_input_tokens(const std::string& prompt, const InferParams& params) {
         int tokens = count_tokens(prompt) + count_tokens(params.system_prompt) + 8;
         for (const auto& message : params.history) tokens += count_tokens(message.content) + 4;

@@ -46,7 +46,8 @@ jobs:
             gfortran \
             libboost-all-dev \
             libopenblas-dev \
-            libssl-dev
+            libssl-dev \
+            poppler-utils
 
       - name: Configure CPU Release build
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_NATIVE=OFF
