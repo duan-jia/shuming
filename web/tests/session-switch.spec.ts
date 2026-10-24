@@ -70,8 +70,8 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     };
     const send = async (text: string): Promise<void> => {
       await evaluate(`(() => {
-        const input = document.querySelector('input[placeholder="输入问题"]');
-        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(text)});
+        const input = document.querySelector('textarea[aria-label="输入问题"]');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,${JSON.stringify(text)});
         input.dispatchEvent(new Event('input',{bubbles:true}));
       })()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==='发送'&&!b.disabled)`);
@@ -112,34 +112,113 @@ test('background replies and session navigation stay isolated', { timeout: 90000
         };
       })();` });
     await command('Page.navigate', { url: process.env.TEST_URL || 'http://localhost:3000' });
-    await wait(`document.querySelector('input[placeholder="请输入密码"]')!==null`);
+    await wait(`document.querySelector('input[type="password"]')!==null`);
     await wait(`Object.keys(document.querySelector('input')).some(k=>k.startsWith('__reactProps'))`);
+    await evaluate(`(() => { const input = document.querySelector('input[type="password"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'test-password'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     await click('登录');
     await wait(`document.body.innerText.includes('会话A')`);
+    for (const [name, width] of [['desktop',1280],['tablet',768],['mobile',390]] as const) {
+      await command('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 768 });
+      await new Promise(resolve => setTimeout(resolve, 350));
+      assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+      if (width < 768) assert.equal(await evaluate('document.querySelector("aside").getBoundingClientRect().right <= 0'), true);
+      const shot = await command('Page.captureScreenshot', { format: 'png' });
+      await writeFile('/tmp/shuming-' + name + '.png', Buffer.from(shot.data as string, 'base64'));
+    }
+    await command('Emulation.setDeviceMetricsOverride', { width:1280, height:900, deviceScaleFactor:1, mobile:false });
     await click('会话A');
     await send('问题A');
     await wait(`!!window.mock.streams.A`);
-    await evaluate(`window.mock.emit('A',{type:'answer',content:'回答A第一段'})`);
+    await evaluate(`window.mock.emit('A',{type:'reasoning',content:'先检索实验室资料，再对比研究结论。'});window.mock.emit('A',{type:'answer',content:'回答A第一段'})`);
     await wait(`document.body.innerText.includes('回答A第一段')`);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.prose')).fontSize`), '19px');
+    assert.ok(await evaluate<number>(`document.querySelector('main').getBoundingClientRect().width`) > 896);
+    assert.equal(await evaluate(`document.querySelector('.message-avatar, .assistant-avatar-logo, .message-label, .stream-badge') === null`), true);
+    assert.equal(await evaluate(`document.querySelector('header').innerText.trim()`), '');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('header')).display`), 'none');
+    assert.equal(await evaluate(`document.querySelector('.composer-hint') === null`), true);
+    assert.equal(await evaluate(`document.body.innerText.includes('Shift + Enter')`), false);
     await click('会话B');
-    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`!document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await send('问题B');
     await wait(`!!window.mock.streams.B`);
     await evaluate(`window.mock.emit('A',{type:'answer',content:'后台第二段'})`);
     assert.equal(await evaluate(`document.body.innerText.includes('后台第二段')`), false);
     await evaluate(`window.mock.emit('B',{type:'answer',content:'回答B'});window.mock.emit('B',{type:'done'})`);
     // Deliberately keep the transport open after done: UI must still unlock.
-    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled&&document.body.innerText.includes('回答B')`);
+    await wait(`!document.querySelector('textarea[aria-label="输入问题"]').disabled&&document.body.innerText.includes('回答B')`);
     await click('会话A');
-    await wait(`document.body.innerText.includes('回答A第一段后台第二段')&&document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`document.body.innerText.includes('回答A第一段后台第二段')&&document.querySelector('textarea[aria-label="输入问题"]').disabled`);
+    await evaluate(`window.mock.emit('A',{type:'answer',content:'\\n\\n### 研究要点\\n\\n- 先确认研究问题与实验假设\\n- 对照文档中的方法、指标与局限\\n\\n> 结论应结合原始文献和实验条件核实。\\n\\n| 对比维度 | 阅读重点 |\\n| --- | --- |\\n| 方法 | 适用场景与前提 |\\n| 证据 | 数据集与评价指标 |'})`);
+    await wait(`document.body.innerText.includes('研究要点')`);
+    await command('Emulation.setDeviceMetricsOverride', { width:390, height:900, deviceScaleFactor:1, mobile:true });
+    await new Promise(resolve => setTimeout(resolve, 350));
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.prose')).fontSize`), '18px');
+    const mobileChat = await command('Page.captureScreenshot', { format:'png' });
+    await writeFile('/tmp/shuming-mobile-chat.png', Buffer.from(mobileChat.data as string,'base64'));
+    await command('Emulation.setDeviceMetricsOverride', { width:1280, height:900, deviceScaleFactor:1, mobile:false });
+    await new Promise(resolve => setTimeout(resolve, 350));
     const screenshot = await command('Page.captureScreenshot', { format: 'png' });
     await writeFile(process.env.SCREENSHOT_PATH || '/tmp/shuming-session-switch.png', Buffer.from(screenshot.data as string, 'base64'));
-    await evaluate(`window.mock.emit('A',{type:'done'})`);
-    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    // Deliver tiny chunks across separate tasks, then finish with a pending tail.
+    // The DOM should update in batches and preserve every byte at completion.
+    await evaluate(`(() => {
+      window.streamMutations = 0;
+      window.streamObserver = new MutationObserver(() => window.streamMutations++);
+      window.streamObserver.observe(document.querySelector('article.assistant .prose'), {subtree:true,childList:true,characterData:true});
+    })()`);
+    await evaluate(`(async () => {
+      window.mock.emit('A',{type:'answer',content:'\\n\\n'});
+      for (let i=0;i<200;i++) {
+        window.mock.emit('A',{type:'answer',content:'流'});
+        await new Promise(resolve=>setTimeout(resolve,2));
+      }
+      window.mock.emit('A',{type:'answer',content:'尾部完成'});
+      window.mock.emit('A',{type:'done'});
+    })()`);
+    await wait(`!document.querySelector('textarea[aria-label="输入问题"]').disabled`);
+    assert.equal(await evaluate(`document.querySelector('article.assistant .prose').textContent.endsWith('流'.repeat(200)+'尾部完成')`), true);
+    assert.ok(await evaluate<number>('window.streamMutations') < 80, 'Streaming should batch DOM updates');
+    await evaluate('window.streamObserver.disconnect()');
+    // A second question after a multi-screen answer must only scroll the chat pane.
+    for (const width of [1280, 390]) {
+      await command('Emulation.setDeviceMetricsOverride', { width, height:900, deviceScaleFactor:1, mobile:width < 768 });
+      await send('长会话滚动检查');
+      await wait(`!!window.mock.streams.A && document.querySelector('textarea').disabled`);
+      await evaluate(`window.mock.emit('A',{type:'answer',content:('长回答：检查滚动边界。\\n\\n').repeat(100)})`);
+      await wait(`document.querySelector('main').scrollHeight > document.querySelector('main').clientHeight * 2`);
+      await new Promise(resolve=>setTimeout(resolve,150));
+      console.log('long-chat geometry', width, await evaluate(`(() => { const m=document.querySelector('main'),c=document.querySelector('.composer-area').getBoundingClientRect();return {rootHeight:document.documentElement.scrollHeight,viewport:innerHeight,windowY:scrollY,mainTop:m.getBoundingClientRect().top,mainHeight:m.clientHeight,scroll:m.scrollTop,total:m.scrollHeight,composerBottom:c.bottom};})()`));
+      assert.equal(await evaluate('document.documentElement.scrollHeight <= innerHeight'), true, 'Only the message pane should scroll');
+      assert.equal(await evaluate('scrollY'), 0, 'Streaming must not move the document');
+      assert.ok(await evaluate<number>(`Math.abs(document.querySelector('.composer-area').getBoundingClientRect().bottom-innerHeight)`) < 1);
+      await wait(`(() => {const m=document.querySelector('main');return m.scrollHeight-m.clientHeight-m.scrollTop < 3})()`);
+      await evaluate(`document.querySelector('main').scrollTop=200`);
+      await new Promise(resolve=>setTimeout(resolve,100));
+      await evaluate(`window.mock.emit('A',{type:'answer',content:'继续追加内容\\n\\n'.repeat(20)})`);
+      await new Promise(resolve=>setTimeout(resolve,150));
+      assert.ok(await evaluate<number>(`Math.abs(document.querySelector('main').scrollTop-200)`) < 3, 'Reading history must pause auto-follow');
+      await click('查看最新回答 ↓');
+      await wait(`(() => {const m=document.querySelector('main');return m.scrollHeight-m.clientHeight-m.scrollTop < 3})()`);
+      const composerBefore = await evaluate<number>(`document.querySelector('.composer-area').getBoundingClientRect().top`);
+      for (let i=0;i<5;i++) {
+        await evaluate(`window.mock.emit('A',{type:'answer',content:'新一段持续输出。\\n\\n'.repeat(10)})`);
+        await new Promise(resolve=>setTimeout(resolve,80));
+        assert.equal(await evaluate('scrollY'), 0);
+        assert.equal(await evaluate<number>(`document.querySelector('.composer-area').getBoundingClientRect().top`), composerBefore);
+        await wait(`(() => {const m=document.querySelector('main');return m.scrollHeight-m.clientHeight-m.scrollTop < 3})()`);
+      }
+      const longShot = await command('Page.captureScreenshot', { format:'png' });
+      await writeFile('/tmp/shuming-long-chat-' + width + '.png', Buffer.from(longShot.data as string,'base64'));
+      await evaluate(`window.mock.emit('A',{type:'done'})`);
+      await wait(`!document.querySelector('textarea').disabled`);
+    }
+    await command('Emulation.setDeviceMetricsOverride', { width:1280,height:900,deviceScaleFactor:1,mobile:false });
     await send('再次提问A');
-    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await evaluate(`window.mock.emit('A',{type:'error',error:'测试生成失败'})`);
-    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled&&document.body.innerText.includes('测试生成失败')`);
+    await wait(`!document.querySelector('textarea[aria-label="输入问题"]').disabled&&document.body.innerText.includes('测试生成失败')`);
     // Delayed history must not overwrite a later generation or the active view.
     await evaluate(`window.mock.delayed.C=true`);
     await click('会话C');
@@ -156,35 +235,46 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     // Finishing a background reply must not clear another session's busy flag.
     await click('会话A');
     await send('并行A');
-    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await evaluate(`window.mock.emit('C',{type:'done'})`);
-    assert.equal(await evaluate(`document.querySelector('input[placeholder="输入问题"]').disabled`), true);
+    assert.equal(await evaluate(`document.querySelector('textarea[aria-label="输入问题"]').disabled`), true);
     await evaluate(`window.mock.emit('A',{type:'done'})`);
-    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`!document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await evaluate(`window.mock.status=503`);
     await send('请求失败');
-    await wait(`document.body.innerText.includes('HTTP 503')&&!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`document.body.innerText.includes('HTTP 503')&&!document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await evaluate(`window.mock.status=200`);
     // New-session navigation must not cancel the old stream.
     await send('保留后台');
-    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await click('新建对话');
-    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`!document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await evaluate(`window.mock.emit('A',{type:'answer',content:'仍在后台'})`);
     await click('会话A');
     await wait(`document.body.innerText.includes('仍在后台')`);
     await evaluate(`window.mock.streams.A.close()`);
-    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`!document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await send('DONE标记');
-    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await evaluate(`window.mock.streams.A.enqueue(new TextEncoder().encode('data: [DONE]\\n\\n'))`);
-    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`!document.querySelector('textarea[aria-label="输入问题"]').disabled`);
+    await send('停止测试');
+    await wait(`document.querySelector('textarea').disabled`);
+    await click('停止生成');
+    await wait(`!document.querySelector('textarea').disabled && document.body.innerText.includes('已停止生成')`);
+    await evaluate(`(() => {
+      const input=document.querySelector('textarea');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'中文输入中');
+      input.dispatchEvent(new Event('input',{bubbles:true}));
+    })()`);
+    await evaluate(`document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true}))`);
+    assert.equal(await evaluate(`document.querySelector('textarea').disabled`), false);
     await send('删除生成会话');
-    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await evaluate(`Array.from(document.querySelectorAll('aside span')).find(e=>e.textContent==='会话A').parentElement.querySelector('button').click()`);
-    await wait(`!document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`!document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await send('自动创建并生成');
-    await wait(`document.querySelector('input[placeholder="输入问题"]').disabled`);
+    await wait(`document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await click('退出');
     await click('登录');
     await wait(`document.body.innerText.includes('会话A')`);
@@ -196,6 +286,6 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     await new Promise<void>((resolve) => {
       if (browser.exitCode !== null) resolve(); else browser.once('exit', () => resolve());
     });
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

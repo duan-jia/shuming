@@ -10,7 +10,7 @@ POST /api/chat/stream
   → 有界推理队列
   → Agent Runtime
       → RemoteEngine（流式模型调用）
-      → search_knowledge / search_web（需要时）
+      → search_knowledge / fetch_knowledge / search_web / fetch_web（需要时）
       → 结果回传模型 → 继续或完成
   → 汇总用量、结算、保存回答
 ```
@@ -26,8 +26,9 @@ POST /api/chat/stream
 可用工具由后端决定：
 
 - `search_knowledge`：按认证用户的 tenant 检索。请求显式传 `enable_rag=false`
-  时不提供此工具；Agent 默认提供知识库工具。
-- `search_web`：需要开启 web_search，并通过已有 MCP 网页搜索权限策略。
+  时不提供知识库 search/fetch；Agent 默认提供知识库工具。
+- `fetch_knowledge`：按同一租户权限读取源 PDF，支持正文、下载链接，以及视觉模型的页面图片。
+- `search_web` / `fetch_web`：需要开启 web_search，并通过已有 MCP 网页搜索权限策略。
   管理员可用；普通用户需 `mcp.allow_user_web_search=true`。
 
 模型返回未知工具、越权工具、无效参数或执行失败时，Runtime 将错误作为 tool 结果
@@ -46,7 +47,7 @@ POST /api/chat/stream
     "enabled": true,
     "max_turns": 6,
     "max_output_tokens": 0,
-    "max_total_tokens": 24000,
+    "max_total_tokens": 0,
     "timeout_seconds": 90,
     "max_tool_calls_per_turn": 4,
     "max_tool_result_bytes": 24000
@@ -61,7 +62,8 @@ POST /api/chat/stream
   不执行被截断的工具调用。只有 reasoning、没有可见回答的截断返回 output_limit。
 - 轮数包括最终回答的模型调用。到最后一轮仍要求工具时，停止并返回 turn_limit，
   不再执行无机会读取结果的工具调用。
-- 请求 token 预算累计每一轮的 prompt 和 completion；每轮前检查剩余用户额度，
+- max_total_tokens 默认为 0，不限制单次问答累计 token；正值可启用预算，
+  累计每一轮的 prompt 和 completion。每轮前仍检查剩余用户额度，
   显式指定输出上限时根据输入估算缩小它；不指定时不注入上限，单轮消耗可能超过
   剩余预算，结束后停止后续调用。上下文裁剪只删除旧的完整问答对，保留本次工具链。
 - 不为并发的不同 session 预留额度；逐轮额度检查不能消除不同请求之间的额度竞争。
@@ -125,3 +127,5 @@ python3 tests/agent_runtime_e2e.py --server-command build/bin/native-mcp-test-se
 使用真实 muduo、RemoteEngine、SSE 和 Runtime，加本地模型/搜索 fixture，覆盖多轮
 工具链、tool_calls 分片、reasoning 回传、工具错误与权限、用量累计、预算与轮数、超时、
 断线后释放工作线程，以及既有 MCP 回归。不依赖真实模型密钥或付费搜索权限。
+
+PDF 原文读取、页面图片及源文件下载使用 `fetch_knowledge`，网页正文使用 `fetch_web`。权限、依赖、分页和视觉开关见 [Native MCP Fetch](native-mcp.md#fetch网页正文和源论文)。

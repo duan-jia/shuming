@@ -27,12 +27,13 @@ RUN set -eux; \
 FROM ${UBUNTU_IMAGE} AS runtime
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates curl \
+    && apt-get install --yes --no-install-recommends ca-certificates curl python3 poppler-utils \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /app fastllm \
     && mkdir -p /models
 COPY --from=build /runtime-libs/ /opt/fast-llm-reasoner/lib/
 COPY --from=build /src/build/bin/fast-llm-reasoner /usr/local/bin/fast-llm-reasoner
+COPY scripts/read_pdf.py /app/scripts/read_pdf.py
 COPY .artifacts/embedding/bge-small-zh-v1.5-q4_k_m.gguf /models/bge-small-zh-v1.5-q4_k_m.gguf
 RUN chmod 0444 /models/bge-small-zh-v1.5-q4_k_m.gguf
 ENV LD_LIBRARY_PATH=/opt/fast-llm-reasoner/lib

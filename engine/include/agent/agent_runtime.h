@@ -10,7 +10,7 @@ struct AgentOptions {
     bool enabled = true;
     int max_turns = 6;
     int max_output_tokens = 0; // Zero leaves the provider output limit unspecified.
-    int max_total_tokens = 24000;
+    int max_total_tokens = 0; // Zero disables the per-request cumulative token budget.
     int timeout_seconds = 90;
     int max_tool_calls_per_turn = 4;
     int max_tool_result_bytes = 24000;

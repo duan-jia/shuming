@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import subprocess
 import urllib.request
 
@@ -74,6 +75,9 @@ cp /etc/ssl/certs/ca-certificates.crt .tmp/local-runtime/certs/
 chown -R "$LOCAL_UID:$LOCAL_GID" .tmp/local-runtime
 '''
         run('docker', 'run', '--rm', '-e', 'HTTP_PROXY', '-e', 'HTTPS_PROXY', '-v', f'{ROOT}:/src', '-w', '/src', '-e', f'LOCAL_UID={os.getuid()}', '-e', f'LOCAL_GID={os.getgid()}', args.builder_image, 'bash', '-c', build_script)
+    reader_directory = ROOT / '.tmp/local-runtime/scripts'
+    reader_directory.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / 'scripts/read_pdf.py', reader_directory / 'read_pdf.py')
     print('Ready: docker compose -f deploy/local/compose.yml up -d --build')
 
 

@@ -128,7 +128,13 @@ void McpService::handle(const HttpRequest& req, HttpResponse& response, ToolSet 
                 caller.trace_id = req.header("X-Request-Id");
                 try {
                     auto evidence = tools_.execute(name, arguments, caller);
-                    result = {{"content", {{{"type", "text"}, {"text", evidence.dump()}}}}, {"structuredContent", evidence}, {"isError", false}};
+                    auto content = Json::array({{{"type", "text"}, {"text", evidence.data.dump()}}});
+                    for (auto& attachment : evidence.attachments) content.push_back(std::move(attachment));
+                    if (evidence.data.contains("download_url") && !evidence.data.value("url_is_relative", true) && version != "2025-03-26") {
+                        content.push_back({{"type", "resource_link"}, {"uri", evidence.data["download_url"]},
+                            {"name", evidence.data["filename"]}, {"mimeType", "application/pdf"}, {"size", evidence.data["size_bytes"]}});
+                    }
+                    result = {{"content", std::move(content)}, {"structuredContent", evidence.data}, {"isError", evidence.data.contains("error")}};
                 } catch (const std::invalid_argument&) {
                     throw;
                 } catch (const std::exception& error) {
