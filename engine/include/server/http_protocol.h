@@ -17,6 +17,8 @@ struct HttpRequest {
     std::unordered_map<std::string, std::string> headers;
     std::unordered_map<std::string, std::string> query_params;
     std::string body;
+    // Transport peer, set by HttpServer; never read from client forwarding headers.
+    std::string peer_ip;
 
     std::string method_string() const;
     std::string header(const std::string& key, const std::string& def = "") const;

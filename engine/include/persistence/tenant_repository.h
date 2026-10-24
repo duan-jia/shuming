@@ -21,6 +21,7 @@ public:
 
     bool create_tenant(const std::string& name, int token_limit_daily, int& tenant_id);
     std::vector<TenantSummary> list_tenants();
+    bool ensure_guest_tenant(int& tenant_id);
 
 private:
     MysqlPool& mysql_;

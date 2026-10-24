@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     tenant_id         INT NOT NULL,
     username          VARCHAR(64) NOT NULL,
     password_hash     VARCHAR(256) NOT NULL,
-    role              ENUM('admin','user') DEFAULT 'user',
+    role              ENUM('admin','user','guest') DEFAULT 'user',
     status            ENUM('active','disabled') DEFAULT 'active',
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
