@@ -84,14 +84,17 @@ test('background replies and session navigation stay isolated', { timeout: 90000
       (() => {
         const original = window.fetch.bind(window);
         const sessions = ['A','B','C'].map(id=>({id,title:'会话'+id}));
-        window.mock = { streams:{}, histories:{}, delayed:{}, status:200 };
+        window.mock = { streams:{}, histories:{}, delayed:{}, status:200, created:[], failCreate:false };
         const json = data => new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
         window.mock.emit = (id,data) => window.mock.streams[id].enqueue(new TextEncoder().encode('data: '+JSON.stringify(data)+'\\n\\n'));
         window.fetch = async (input, options={}) => {
           const url = new URL(String(input), location.href);
           if (url.pathname === '/api/auth/login') return json({token:'test-only',user:{role:'user'}});
           if (url.pathname === '/api/sessions' && options.method === 'POST') {
-            const id = 'N'+sessions.length; sessions.push({id,title:'新会话'+id}); return json({id});
+            if (window.mock.failCreate) return new Response('{}',{status:503});
+            const id = 'N'+sessions.length;
+            const title = JSON.parse(options.body).title;
+            window.mock.created.push({id,title}); sessions.push({id,title}); return json({id});
           }
           if (url.pathname === '/api/sessions') return json({sessions});
           if (url.pathname === '/api/chat/stream') {
@@ -117,6 +120,30 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     await evaluate(`(() => { const input = document.querySelector('input[type="password"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'test-password'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     await click('登录');
     await wait(`document.body.innerText.includes('会话A')`);
+    assert.equal(await evaluate('window.mock.created.length'), 0, 'Login must not create a session');
+    await click('新建对话');
+    await click('新建对话');
+    assert.equal(await evaluate('window.mock.created.length'), 0, 'New chat must stay a local draft');
+    // A failed create keeps the draft available for retry.
+    await evaluate('window.mock.failCreate=true');
+    await send('草稿创建失败后重试');
+    await wait(`!document.querySelector('textarea').disabled`);
+    assert.equal(await evaluate(`document.querySelector('textarea').value`), '草稿创建失败后重试');
+    await evaluate('window.mock.failCreate=false');
+    await send('首问'.repeat(15));
+    await wait(`window.mock.created.length===1 && !!window.mock.streams.N3`);
+    assert.equal(await evaluate('window.mock.created[0].title'), '首问'.repeat(12) + '…');
+    await wait(`document.querySelector('aside span[title="${'首问'.repeat(12)}…"]')!==null`);
+    await evaluate(`window.mock.emit('N3',{type:'answer',content:'首问回答'});window.mock.emit('N3',{type:'done'})`);
+    await wait(`!document.querySelector('textarea').disabled`);
+    await send('第二个问题不修改标题');
+    await wait(`document.querySelector('textarea').disabled`);
+    assert.equal(await evaluate('window.mock.created.length'), 1);
+    assert.equal(await evaluate('window.mock.created[0].title'), '首问'.repeat(12) + '…');
+    await evaluate(`window.mock.emit('N3',{type:'done'})`);
+    await wait(`!document.querySelector('textarea').disabled`);
+    await click('新建对话');
+    assert.equal(await evaluate('window.mock.created.length'), 1);
     for (const [name, width] of [['desktop',1280],['tablet',768],['mobile',390]] as const) {
       await command('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 768 });
       await new Promise(resolve => setTimeout(resolve, 350));
@@ -278,6 +305,7 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     await click('退出');
     await click('登录');
     await wait(`document.body.innerText.includes('会话A')`);
+    assert.equal(await evaluate('window.mock.created.length'), 2, 'Logging in again must not create another session');
     assert.equal(await evaluate(`document.body.innerText.includes('仍在后台')`), false);
     assert.deepEqual(errors, []);
   } finally {

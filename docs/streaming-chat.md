@@ -9,6 +9,9 @@
 - 石墨黑 / 钢蓝对话界面，响应式研究欢迎页与任务建议、用户头像、Markdown 回答、可折叠思考过程、工具与生成状态、复制回答。
 - 多行输入：Enter 发送、Shift+Enter 换行；中文输入法选字不误发送。停止按钮保留部分回答。
 - 只有滚动至底部附近时自动跟随，向上阅读不会被每个 token 拉回底部；保留后台会话独立生成行为。
+- 登录和“新建对话”只进入本地空白草稿，首次发送有效问题时才创建会话。
+  标题使用首问，合并空白并保留前 24 个可见字符，超出加 `…`；不会拆开 emoji 或组合字符。
+  侧边栏按宽度省略，桌面悬停可查看保存的标题；后续问题不改变标题。
 
 ## 验证
 
@@ -20,6 +23,7 @@ npm ci
 npm run lint
 npm run build
 node --experimental-strip-types --test tests/sse.spec.ts
+node --experimental-strip-types --test tests/session-title.spec.ts
 # 终端 1，默认上游配置 http://127.0.0.1:9006
 npm start
 # 终端 2，9006 需空闲：启动测试上游，验证首个事件在上游结束前已到达
