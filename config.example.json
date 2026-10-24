@@ -62,7 +62,8 @@
     "endpoint": "https://api.deepseek.com/v1",
     "model": "deepseek-chat",
     "context_window_tokens": 32768,
-    "api_key": ""
+    "api_key": "",
+    "supports_images": false
   },
   "web_search": {
     "enabled": false,
@@ -70,7 +71,8 @@
     "api_key": "",
     "timeout_seconds": 15,
     "max_concurrency": 2,
-    "ca_bundle": "/etc/ssl/certs/ca-certificates.crt"
+    "ca_bundle": "/etc/ssl/certs/ca-certificates.crt",
+    "fetch_endpoint": "https://api.deepseek.com/v1/tools/fetch"
   },
   "mcp": {
     "allowed_origins": [],
@@ -78,15 +80,26 @@
     "worker_threads": 4,
     "queue_limit": 64,
     "knowledge_requests_per_minute": 60,
-    "web_requests_per_minute": 20
+    "web_requests_per_minute": 20,
+    "knowledge_fetch_requests_per_minute": 30,
+    "web_fetch_requests_per_minute": 20
   },
   "agent": {
     "enabled": true,
     "max_turns": 6,
-    "max_total_tokens": 24000,
+    "max_total_tokens": 0,
     "timeout_seconds": 90,
     "max_tool_calls_per_turn": 4,
     "max_tool_result_bytes": 24000,
     "max_output_tokens": 0
+  },
+  "knowledge_fetch": {
+    "pdf_directory": "data/pdfs",
+    "reader_script": "scripts/read_pdf.py",
+    "python": "python3",
+    "public_base_url": "",
+    "link_ttl_seconds": 300,
+    "timeout_seconds": 20,
+    "max_concurrency": 2
   }
 }

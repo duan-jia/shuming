@@ -25,7 +25,7 @@ class Model(BaseHTTPRequestHandler):
         with self.condition:
             self.requests.append(body)
             self.condition.notify_all()
-        prompt = next(item['content'] for item in reversed(body['messages']) if item['role'] == 'user')
+        prompt = next(item['content'] for item in reversed(body['messages']) if item['role'] == 'user' and isinstance(item['content'], str))
         tools = [item for item in body['messages'] if item['role'] == 'tool']
         if prompt == 'resume':
             previous = [item for item in body['messages'] if item['role'] == 'assistant']
@@ -55,7 +55,7 @@ class Model(BaseHTTPRequestHandler):
             elif prompt == 'truncated-stream':
                 delta({'content': 'partial'})
                 return
-            elif prompt in ('direct', 'slow-model', 'disconnect', 'missing-usage', 'partial-timeout', 'resume', 'length-answer') or (tools and prompt != 'loop' and (prompt != 'both' or len(tools) >= 2)):
+            elif prompt in ('direct', 'slow-model', 'disconnect', 'missing-usage', 'partial-timeout', 'resume', 'length-answer') or (tools and prompt != 'loop' and (prompt not in ('both', 'search-fetch') or len(tools) >= 2)):
                 if tools:
                     assistant = next(item for item in reversed(body['messages']) if item['role'] == 'assistant')
                     assert assistant['reasoning_content'] == 'fixture reasoning'
@@ -66,13 +66,19 @@ class Model(BaseHTTPRequestHandler):
             else:
                 name = 'search_web' if prompt in ('web', 'unauthorized') or (prompt == 'both' and tools) else 'search_knowledge'
                 arguments = '{invalid' if prompt == 'invalid-arguments' else json.dumps({'query': 'evidence'})
+                if prompt == 'fetch-web':
+                    name, arguments = 'fetch_web', json.dumps({'url': 'https://example.org/paper'})
+                elif prompt in ('fetch-text', 'fetch-pages', 'fetch-source') or (prompt == 'search-fetch' and tools):
+                    name = 'fetch_knowledge'
+                    representation = 'pages' if prompt == 'fetch-pages' else 'source' if prompt == 'fetch-source' else 'text'
+                    arguments = json.dumps({'doc_id': 7, 'representation': representation, 'start_page': 2, 'page_count': 1})
                 delta({'reasoning_content': 'fixture reasoning'})
                 delta({'tool_calls': [{'index': 0, 'id': 'call_' + str(len(tools)), 'type': 'function',
                                        'function': {'name': name[:7], 'arguments': arguments[:5]}}]})
                 delta({'tool_calls': [{'index': 0, 'function': {'name': name[7:], 'arguments': arguments[5:]}}]})
                 delta({}, 'length' if prompt == 'truncated-tool' else 'tool_calls')
             if prompt != 'missing-usage':
-                send({'choices': [], 'usage': {'prompt_tokens': 100, 'completion_tokens': 10}})
+                send({'choices': [], 'usage': {'prompt_tokens': 25000 if prompt == 'high-usage' else 100, 'completion_tokens': 10}})
             self.wfile.write(b'data: [DONE]\n\n')
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
@@ -106,6 +112,40 @@ class AgentTest(native.NativeMcpTest):
             connection.close()
         return events
 
+    def test_agent_fetch_tools_and_pdf_images(self):
+        for prompt, tool in [('fetch-web', 'fetch_web'), ('fetch-text', 'fetch_knowledge'),
+                             ('fetch-source', 'fetch_knowledge'), ('fetch-pages', 'fetch_knowledge')]:
+            events = self.stream(prompt)
+            self.assertEqual(events[-1]['type'], 'done', events)
+            self.assertEqual([e['name'] for e in events if e['type'] == 'tool_start'], [tool])
+            self.assertFalse(next(e for e in events if e['type'] == 'tool_end')['is_error'])
+            messages = Model.requests[-1]['messages']
+            evidence = json.loads(next(m['content'] for m in messages if m['role'] == 'tool'))
+            if prompt == 'fetch-text':
+                self.assertIn('Original PDF page 2', evidence['content'])
+            elif prompt == 'fetch-web':
+                self.assertIn('Original fetched Markdown', evidence['content'])
+            elif prompt == 'fetch-source':
+                self.assertIn('/api/knowledge/download?', evidence['download_url'])
+            else:
+                self.assertNotIn('images', evidence)
+                image_message = messages[-1]
+                self.assertEqual(image_message['role'], 'user')
+                self.assertEqual(image_message['content'][0]['type'], 'text')
+                self.assertTrue(image_message['content'][1]['image_url']['url'].startswith('data:image/png;base64,'))
+                self.assertEqual(messages[-2]['role'], 'tool')
+        events = self.stream('search-fetch')
+        self.assertEqual(events[-1]['type'], 'done')
+        self.assertEqual([e['name'] for e in events if e['type'] == 'tool_start'], ['search_knowledge', 'fetch_knowledge'])
+
+    def test_agent_text_only_model_rejects_image_fetch(self):
+        events = self.stream('fetch-pages', image_inputs=False)
+        self.assertEqual(events[-1]['type'], 'done')
+        self.assertTrue(next(e for e in events if e['type'] == 'tool_end')['is_error'])
+        self.assertFalse(any(isinstance(m['content'], list) for m in Model.requests[-1]['messages']))
+        tool = next(t for t in Model.requests[-1]['tools'] if t['function']['name'] == 'fetch_knowledge')
+        self.assertEqual(tool['function']['parameters']['properties']['representation']['enum'], ['source', 'text'])
+
     def test_agent_visible_output_limit_is_a_truncated_answer(self):
         events = self.stream('length-answer')
         self.assertEqual(events[-1]['type'], 'done')
@@ -138,6 +178,17 @@ class AgentTest(native.NativeMcpTest):
         messages = final_request['messages']
         self.assertEqual([m['role'] for m in messages][-5:], ['user', 'assistant', 'tool', 'assistant', 'tool'])
         self.assertIn('tenant-7.md', messages[2]['content'] if messages[2]['role'] == 'tool' else messages[3]['content'])
+
+    def test_agent_cumulative_budget_is_disabled_by_default_and_zero(self):
+        for limits in ({}, {'max_total_tokens': 0}):
+            events = self.stream('high-usage', **limits)
+            self.assertEqual(events[-1]['type'], 'done', events)
+            self.assertEqual(events[-1]['usage']['prompt_tokens'], 50000)
+            self.assertEqual(len([e for e in events if e['type'] == 'agent_turn']), 2)
+        for limits in ({'max_total_tokens': 24000}, {'remaining_quota': 24000}):
+            events = self.stream('high-usage', **limits)
+            self.assertEqual(events[-1]['stop_reason'], 'token_limit', events)
+            self.assertEqual(events[-1]['usage']['prompt_tokens'], 25000)
 
     def test_agent_tool_failure_and_permission_recovery(self):
         for prompt, token in [('invalid-arguments', 'ADMIN_TOKEN'), ('unauthorized', 'USER_TOKEN')]:

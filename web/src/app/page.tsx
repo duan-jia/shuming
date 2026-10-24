@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { memo, useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import Image from "next/image";
+import { createSseParser } from "../lib/sse";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -11,6 +12,7 @@ interface Message {
   content: string;
   isStreaming: boolean;
   isReasoning?: boolean;
+  reasoning?: string;
   toolStatus?: string;
   notice?: string;
 }
@@ -85,6 +87,48 @@ const documentStatus: Record<DocumentItem["status"], { label: string; className:
 
 const API_BASE = "";
 const EMPTY_MESSAGES: Message[] = [];
+// Keep completed answers out of the Markdown parser while another reply streams.
+const MarkdownContent = memo(function MarkdownContent({ content }: { content: string }) {
+  return <div className="prose max-w-none prose-slate"><ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown></div>;
+});
+
+function CopyMessageButton({ content, role }: { content: string; role: Message["role"] }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+
+  useEffect(() => {
+    if (status === "idle") return;
+    const timer = window.setTimeout(() => setStatus("idle"), 2500);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(content);
+      setStatus("copied");
+    } catch {
+      setStatus("failed");
+    }
+  }
+
+  return (
+    <div className="message-actions">
+      <button className="copy-message" type="button" onClick={copy}
+        aria-label={role === "user" ? "Copy question" : "Copy answer"}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          {status === "copied" ? <path d="m5 12 4 4L19 6" /> : <>
+            <rect x="8" y="8" width="12" height="12" rx="2" />
+            <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+          </>}
+        </svg>
+        <span>Copy</span>
+      </button>
+      <span className={status === "failed" ? "copy-error" : "sr-only"} role="status">
+        {status === "copied" ? "Copied to clipboard" : status === "failed" ? "Copy failed. Please select and copy the text." : ""}
+      </span>
+    </div>
+  );
+}
+
 export default function Home() {
   const [sessionMessages, setSessionMessages] = useState<Record<string, Message[]>>({});
   const [input, setInput] = useState("");
@@ -116,12 +160,17 @@ export default function Home() {
     type: "success" | "error";
     message: string;
   } | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const followOutput = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const messagePaneRef = useRef<HTMLElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useLayoutEffect(() => {
+    const pane = messagePaneRef.current;
+    // Scroll only the message pane, before paint. scrollIntoView also moves
+    // ancestor scroll containers and can pull the composer out of the viewport.
+    if (activeView === "chat" && followOutput.current && pane) pane.scrollTop = pane.scrollHeight;
+  }, [messages, activeView]);
 
   useEffect(() => {
     const pending = requests.current;
@@ -216,6 +265,7 @@ export default function Home() {
     activeSessionRef.current = id;
     setActiveView("chat");
     setActiveSession(id);
+    followOutput.current = true;
     // In-flight replies are authoritative; do not replace them with DB history.
     if (requests.current.has(id)) return;
     const version = ++historySequence.current;
@@ -228,10 +278,11 @@ export default function Home() {
       const data = await res.json();
       if (data.messages && historyVersions.current.get(id) === version && !requests.current.has(id)) {
         const loaded: Message[] = data.messages.map(
-          (m: { id: number; role: string; content: string }) => ({
+          (m: { id: number; role: string; content: string; reasoning?: string }) => ({
             id: String(m.id),
             role: m.role as "user" | "assistant",
             content: m.content || "",
+            reasoning: m.reasoning || "",
             isStreaming: false,
           })
         );
@@ -450,9 +501,21 @@ export default function Home() {
     }
 
     historyVersions.current.set(sid, ++historySequence.current);
+    let pendingUpdates: ((messages: Message[]) => Message[])[] = [];
+    let updateTimer: ReturnType<typeof setTimeout> | undefined;
+    const flushMessages = () => {
+      clearTimeout(updateTimer);
+      updateTimer = undefined;
+      const updates = pendingUpdates;
+      pendingUpdates = [];
+      if (!updates.length || requests.current.get(sid) !== controller) return;
+      setSessionMessages((prev) => ({ ...prev, [sid]: updates.reduce((value, update) => update(value), prev[sid] || []) }));
+    };
     const setMessages = (update: (messages: Message[]) => Message[]) => {
       if (requests.current.get(sid) !== controller) return;
-      setSessionMessages((prev) => ({ ...prev, [sid]: update(prev[sid] || []) }));
+      pendingUpdates.push(update);
+      // Network chunks can arrive much faster than the UI can parse Markdown.
+      if (updateTimer === undefined) updateTimer = setTimeout(flushMessages, 50);
     };
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -472,6 +535,8 @@ export default function Home() {
     setMessages((prev) => [...prev, assistantMsg]);
     if (navigation === navigationVersion.current) setInput("");
 
+    followOutput.current = true;
+    setShowJumpToLatest(false);
     const requestId = createRequestId();
     requestIds.current.set(sid, requestId);
     try {
@@ -491,83 +556,73 @@ export default function Home() {
       if (!reader) throw new Error("No reader");
 
       const decoder = new TextDecoder();
-      let buffer = "";
-      let eventType = "message";
-
       let finished = false;
+      const parse = createSseParser(({ event, data }) => {
+        if (finished) return;
+        if (data === "[DONE]") { finished = true; return; }
+        const parsed = JSON.parse(data);
+        if (event === "error" || parsed.type === "error" || parsed.error) {
+          finished = true;
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === msgId
+                ? {
+                    ...message,
+                    content: message.content,
+                    notice: parsed.stop_reason === "cancelled" ? "已停止生成" : parsed.stop_reason === "output_limit" ? "本轮推理达到长度上限，请缩短问题或联系管理员调整输出上限。" : parsed.error || "生成失败",
+                    toolStatus: undefined,
+                    isStreaming: false,
+                    isReasoning: false,
+                  }
+                : message
+            )
+          );
+        } else if (parsed.type === "answer") {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === msgId
+                ? {
+                    ...message,
+                    content: message.content + parsed.content,
+                    toolStatus: undefined,
+                    isReasoning: false,
+                  }
+                : message
+            )
+          );
+        } else if (parsed.type === "tool_start" || parsed.type === "tool_end") {
+          const toolNames: Record<string, string> = {
+            search_knowledge: "知识库检索",
+            fetch_knowledge: "读取论文",
+            search_web: "网页搜索",
+            fetch_web: "读取网页",
+          };
+          const name = toolNames[parsed.name] || "工具调用";
+          setMessages((prev) => prev.map((message) => message.id === msgId
+            ? { ...message, isReasoning: false, toolStatus: parsed.type === "tool_start" ? `正在${name}…` : parsed.is_error ? `${name}未完成，正在继续处理…` : `${name}完成，正在整理…` }
+            : message));
+        } else if (parsed.type === "reasoning") {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === msgId ? { ...message, isReasoning: true, reasoning: (message.reasoning || "") + (parsed.content || "") } : message
+            )
+          );
+        } else if (parsed.type === "done") {
+          finished = true;
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === msgId
+                ? { ...message, isStreaming: false, isReasoning: false, toolStatus: undefined, notice: parsed.truncated ? "回答已达到长度上限，可发送“继续”接着生成。" : message.notice }
+                : message
+            )
+          );
+        }
+      });
       try {
         while (!finished) {
           const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (line.startsWith("event: ")) {
-              eventType = line.slice(7);
-            } else if (line.startsWith("data: ")) {
-              const data = line.slice(6);
-              if (data === "[DONE]") { finished = true; break; }
-              try {
-                const parsed = JSON.parse(data);
-                if (eventType === "error" || parsed.type === "error" || parsed.error) {
-                  finished = true;
-                  setMessages((prev) =>
-                    prev.map((message) =>
-                      message.id === msgId
-                        ? {
-                            ...message,
-                            content: message.content,
-                            notice: parsed.stop_reason === "cancelled" ? "已停止生成" : parsed.stop_reason === "output_limit" ? "本轮推理达到长度上限，请缩短问题或联系管理员调整输出上限。" : parsed.error || "生成失败",
-                            toolStatus: undefined,
-                            isStreaming: false,
-                            isReasoning: false,
-                          }
-                        : message
-                    )
-                  );
-                } else if (parsed.type === "answer") {
-                  setMessages((prev) =>
-                    prev.map((message) =>
-                      message.id === msgId
-                        ? {
-                            ...message,
-                            content: message.content + parsed.content,
-                            toolStatus: undefined,
-                            isReasoning: false,
-                          }
-                        : message
-                    )
-                  );
-                } else if (parsed.type === "tool_start" || parsed.type === "tool_end") {
-                  const name = parsed.name === "search_knowledge" ? "知识库检索" : parsed.name === "search_web" ? "网页搜索" : "工具调用";
-                  setMessages((prev) => prev.map((message) => message.id === msgId
-                    ? { ...message, isReasoning: false, toolStatus: parsed.type === "tool_start" ? `正在${name}…` : parsed.is_error ? `${name}未完成，正在继续处理…` : `${name}完成，正在整理…` }
-                    : message));
-                } else if (parsed.type === "reasoning") {
-                  setMessages((prev) =>
-                    prev.map((message) =>
-                      message.id === msgId ? { ...message, isReasoning: true } : message
-                    )
-                  );
-                } else if (parsed.type === "done") {
-                  finished = true;
-                  setMessages((prev) =>
-                    prev.map((message) =>
-                      message.id === msgId
-                        ? { ...message, isStreaming: false, isReasoning: false, toolStatus: undefined, notice: parsed.truncated ? "回答已达到长度上限，可发送“继续”接着生成。" : message.notice }
-                        : message
-                    )
-                  );
-                }
-              } catch {}
-              if (finished) break;
-            } else if (line === "") {
-              eventType = "message";
-            }
-          }
+          if (done) { parse(decoder.decode()); break; }
+          parse(decoder.decode(value, { stream: true }));
         }
         if (!finished) throw new Error("连接中断，请重试");
       } finally {
@@ -598,6 +653,8 @@ export default function Home() {
       setMessages((prev) => prev.map((message) =>
         message.id === msgId ? { ...message, isStreaming: false, isReasoning: false, toolStatus: undefined } : message
       ));
+      // Publish the tail and terminal state before releasing this request.
+      flushMessages();
       if (requests.current.get(sid) === controller) {
         requests.current.delete(sid);
         requestIds.current.delete(sid);
@@ -732,12 +789,10 @@ export default function Home() {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="flex shrink-0 items-center justify-between bg-background px-5 py-4">
+        <header className={`flex shrink-0 items-center justify-between bg-background px-5 py-4 ${activeView === "chat" ? "chat-navigation md:hidden" : "chat-header"}`}>
           <div className="flex items-center gap-3">
-            <button className="rounded-lg border border-line px-2.5 py-1.5 text-neutral-300 md:hidden" aria-label="打开导航" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}>☰</button>
-            <div>
-            <h1 className="text-sm font-medium">{activeView === "chat" ? "对话" : "文档管理"}</h1>
-            </div>
+            <button className="rounded-lg border border-line px-2.5 py-1.5 text-neutral-300 md:hidden" aria-label="打开导航" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
+            {activeView === "documents" && <h1 className="text-sm font-medium">文档管理</h1>}
           </div>
           {activeView === "documents" && (
             <div>
@@ -760,7 +815,8 @@ export default function Home() {
           )}
         </header>
 
-        <div className={`mx-auto min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain px-5 py-5 ${activeView === "chat" ? "max-w-4xl" : "max-w-7xl"}`}>
+        <main ref={messagePaneRef} onScroll={(event) => { if (activeView !== "chat") return; const el = event.currentTarget; followOutput.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100; setShowJumpToLatest(!followOutput.current); }} className={`message-pane relative mx-auto min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain px-5 py-5 ${activeView === "chat" ? "chat-content" : "max-w-7xl"}`}>
+          {activeView === "chat" && <h1 className="sr-only">知识对话</h1>}
           {uploadNotice && (
             <div
               className={`mb-5 rounded-lg border px-4 py-3 text-sm ${
@@ -777,40 +833,37 @@ export default function Home() {
             <>
               {messages.length === 0 && (
                 <div className="chat-welcome">
-                  <h2 className="wordmark">EMOS</h2>
+                  <div className="welcome-content">
+                    <h2 className="wordmark">EMOS</h2>
+                    <p>What would you like to explore?</p>
+                    <div className="welcome-prompts" aria-label="Suggested questions">
+                      {[
+                        "What makes a good research question?",
+                        "How do I compare two approaches?",
+                        "How can I turn an idea into a plan?",
+                      ].map((question) => (
+                        <button key={question} type="button" onClick={() => {
+                          setInput(question);
+                          document.querySelector<HTMLTextAreaElement>('textarea[aria-label="输入问题"]')?.focus();
+                        }}>{question}</button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
               {messages.map((msg) => (
-                <div key={msg.id} className={`mb-5 flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={`max-w-[82%] rounded-xl px-4 py-3 ${
-                      msg.role === "user"
-                        ? "bg-foreground text-background"
-                        : "border border-line bg-surface text-foreground"
-                    }`}
-                  >
-                    {msg.role === "assistant" ? (
-                      <div className="prose prose-sm max-w-none prose-slate">
-                        {msg.isReasoning && !msg.content ? (
-                          <span className="text-neutral-400">正在思考…</span>
-                        ) : (
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {msg.content}
-                          </ReactMarkdown>
-                        )}
-                      </div>
-                    ) : (
-                      <span>{msg.content}</span>
-                    )}
-                    {msg.isStreaming && msg.toolStatus && <p role="status" className="mt-2 text-xs text-neutral-400">{msg.toolStatus}</p>}
-                    {msg.notice && <p role="status" className="mt-2 text-sm text-neutral-400">{msg.notice}</p>}
-                    {msg.isStreaming && (
-                      <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-neutral-400" />
-                    )}
+                <article key={msg.id} className={`message-row ${msg.role}`} aria-label={msg.role === "user" ? "你的问题" : "EMOS 的回答"}>
+                  <div className="message-body" aria-busy={msg.isStreaming}>
+                    {msg.role === "assistant" ? <>
+                      {msg.reasoning && <details className="reasoning-panel"><summary>{msg.isReasoning ? "正在思考…" : "思考过程"}</summary><div>{msg.reasoning}</div></details>}
+                      <MarkdownContent content={msg.content} />
+                      {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" aria-hidden="true" /><span className="sr-only">{msg.toolStatus || (msg.isReasoning ? "正在思考" : "正在生成回答")}</span></div>}
+                      {msg.notice && <p role="status" className="message-notice">{msg.notice}</p>}
+                    </> : <p className="user-content">{msg.content}</p>}
+                    {!msg.isStreaming && msg.content && <CopyMessageButton content={msg.content} role={msg.role} />}
                   </div>
-                </div>
+                </article>
               ))}
-              <div ref={messagesEndRef} />
             </>
           ) : (
             <section>
@@ -963,17 +1016,19 @@ export default function Home() {
               )}
             </section>
           )}
-        </div>
+        </main>
 
         {activeView === "chat" && (
-          <div className="shrink-0 px-4 pb-6 pt-3">
-            <div className="composer mx-auto flex max-w-4xl gap-2">
-              <input
+          <div className="composer-area shrink-0 px-4 pb-6 pt-3">
+            {showJumpToLatest && messages.length > 0 && <button className="jump-to-latest" onClick={() => { followOutput.current = true; const pane = messagePaneRef.current; if (pane) pane.scrollTop = pane.scrollHeight; setShowJumpToLatest(false); }}>查看最新回答 ↓</button>}
+            <div className="composer mx-auto flex gap-2">
+              <textarea
+                rows={2}
                 aria-label="输入问题" className="min-w-0 flex-1 bg-transparent px-3 py-2.5 outline-none"
-                placeholder="向 EMOS 提问…"
+                placeholder="Ask anything…"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void sendMessage(); } }}
                 disabled={loading}
               />
               <button

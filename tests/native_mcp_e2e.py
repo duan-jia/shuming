@@ -14,12 +14,41 @@ import socket
 import subprocess
 import threading
 import time
+import tempfile
+import base64
+import struct
+import urllib.parse
+from pathlib import Path
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 COMMAND = []
 SDK_COMMAND = []
 SERVER_EXTRA_ARGS = []
+
+
+def fixture_pdf():
+    """Small real, four-page PDF; page 1 exercises text pagination, page 3 is blank."""
+    objects = [b'<< /Type /Catalog /Pages 2 0 R >>',
+               b'<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R] /Count 4 >>',
+               b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>']
+    for page in range(1, 5):
+        stream_id = len(objects) + 2
+        objects.append(f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 3 0 R >> >> /Contents {stream_id} 0 R >>'.encode())
+        lines = ([f'Original PDF page one row {i}: ' + 'source evidence ' * 5 for i in range(60)] if page == 1 else
+                 [] if page == 3 else [f'Original PDF page {page}: Figure 1 source evidence'])
+        stream = ('BT /F1 4 Tf 20 780 Td 12 TL ' + ' '.join(f'({line}) Tj T*' for line in lines) + ' ET').encode()
+        objects.append(f'<< /Length {len(stream)} >>\nstream\n'.encode() + stream + b'\nendstream')
+    output = b'%PDF-1.4\n'
+    offsets = [0]
+    for index, item in enumerate(objects, 1):
+        offsets.append(len(output))
+        output += f'{index} 0 obj\n'.encode() + item + b'\nendobj\n'
+    xref = len(output)
+    output += f'xref\n0 {len(objects) + 1}\n0000000000 65535 f \n'.encode()
+    output += b''.join(f'{offset:010d} 00000 n \n'.encode() for offset in offsets[1:])
+    output += f'trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode()
+    return output
 
 
 class Provider(BaseHTTPRequestHandler):
@@ -32,6 +61,25 @@ class Provider(BaseHTTPRequestHandler):
     def do_POST(self):
         data = json.loads(self.rfile.read(int(self.headers['content-length'])))
         self.received.append((self.path, self.headers.get('authorization'), data))
+        if self.path.endswith('/fetch'):
+            query = data['url'].rsplit('/', 1)[-1]
+            if query == 'timeout':
+                time.sleep(1.8)
+            if query == 'error':
+                self.send_response(429)
+                self.end_headers()
+                self.wfile.write(b'secret-provider-error')
+                return
+            body = (b'{"content": 1}' if query == 'malformed' else b'x' * (2 * 1024 * 1024 + 1) if query == 'huge' else
+                    json.dumps({'title': 'Fetched page', 'content': '# Original fetched Markdown', 'provider_secret': 'must-not-leak'}).encode())
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         query = data['query']
         if query in ('slow', 'timeout'):
             self.started.set()
@@ -69,8 +117,13 @@ class NativeMcpTest(unittest.TestCase):
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             cls.port = sock.getsockname()[1]
+        cls.pdf_directory = tempfile.TemporaryDirectory(prefix='fetch-fixture-')
+        cls.addClassCleanup(cls.pdf_directory.cleanup)
+        cls.pdf_bytes = fixture_pdf()
+        cls.pdf_path = Path(cls.pdf_directory.name) / '00000000-0000-0000-0000-000000000001.pdf'
+        cls.pdf_path.write_bytes(cls.pdf_bytes)
         cls.process = subprocess.Popen(COMMAND + [str(cls.port), f'http://127.0.0.1:{cls.provider.server_port}/v1/tools/search'] + SERVER_EXTRA_ARGS,
-                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=dict(os.environ, FIXTURE_PDF_DIR=cls.pdf_directory.name))
         cls.addClassCleanup(cls.cleanup_process)
         cls.addClassCleanup(cls.provider.shutdown)
         cls.addClassCleanup(cls.provider.server_close)
@@ -116,7 +169,7 @@ class NativeMcpTest(unittest.TestCase):
             conn.request(method, path, body=body, headers=request_headers)
             response = conn.getresponse()
             content = response.read()
-            return response.status, dict(response.getheaders()), json.loads(content) if content else None
+            return response.status, dict(response.getheaders()), content if response.getheader('Content-Type') == 'application/pdf' else json.loads(content) if content else None
         finally:
             conn.close()
 
@@ -147,7 +200,7 @@ class NativeMcpTest(unittest.TestCase):
         subprocess.run(SDK_COMMAND, check=True, timeout=30, env=env)
 
     def test_scoped_endpoints(self):
-        expected = {'/mcp': ['search_knowledge', 'search_web'], '/mcp/knowledge': ['search_knowledge'], '/mcp/web': ['search_web']}
+        expected = {'/mcp': ['search_knowledge', 'fetch_knowledge', 'search_web', 'fetch_web'], '/mcp/knowledge': ['search_knowledge', 'fetch_knowledge'], '/mcp/web': ['search_web', 'fetch_web']}
         for path, names in expected.items():
             self.assertEqual([tool['name'] for tool in self.rpc('tools/list', path=path)[2]['result']['tools']], names)
         self.assertEqual(self.call('search_web', {'query': 'test'}, path='/mcp/knowledge')[2]['error']['code'], -32602)
@@ -190,6 +243,94 @@ class NativeMcpTest(unittest.TestCase):
         self.assertEqual(data['ori_question'], '原问题')
         self.assertEqual(self.call('search_web', {'query': 'empty'})[2]['result']['structuredContent']['results'], [])
         self.assertEqual(self.call('search_web', {'query': '中' * 128})[2]['result']['isError'], False)
+
+    def test_fetch_web_contract(self):
+        result = self.call('fetch_web', {'url': 'https://example.org/paper'})[2]['result']
+        self.assertFalse(result['isError'])
+        self.assertEqual(result['structuredContent']['content'], '# Original fetched Markdown')
+        self.assertNotIn('provider_secret', json.dumps(result))
+        path, authorization, data = Provider.received[-1]
+        self.assertEqual((path, authorization, data), ('/v1/tools/fetch', 'Bearer fixture-provider-key', {'url': 'https://example.org/paper'}))
+        for url in ('file:///etc/passwd', 'http://user:pass@example.org/', 'https://example.org/\n', 'https://', 'http://example.org/a b'):
+            self.assertEqual(self.call('fetch_web', {'url': url})[2]['error']['code'], -32602)
+        self.assertEqual(self.call('fetch_web', {'url': 'https://example.org', 'endpoint': 'http://evil'})[2]['error']['code'], -32602)
+        self.assertEqual(self.call('fetch_web', {'url': 'https://example.org'}, token='USER_TOKEN')[2]['error']['code'], -32602)
+        self.assertEqual(self.call('fetch_web', {'url': 'https://example.org'}, path='/mcp/knowledge')[2]['error']['code'], -32602)
+        for suffix in ('malformed', 'error', 'huge', 'timeout'):
+            result = self.call('fetch_web', {'url': 'https://example.org/' + suffix})[2]['result']
+            self.assertTrue(result['isError'])
+            self.assertNotIn('secret-provider-error', json.dumps(result))
+
+    def test_fetch_knowledge_pdf_text_pages_and_tenant(self):
+        args = {'doc_id': 7, 'representation': 'text', 'start_page': 1, 'page_count': 1}
+        result = self.call('fetch_knowledge', args)[2]['result']
+        self.assertFalse(result['isError'])
+        data = result['structuredContent']
+        self.assertEqual(data['total_pages'], 4)
+        self.assertIn('Original PDF page one', data['content'])
+        self.assertNotIn('Tenant evidence', data['content'])
+        self.assertIsNotNone(data['next_offset'])
+        following = self.call('fetch_knowledge', {**args, 'offset': data['next_offset']})[2]['result']['structuredContent']
+        self.assertIsNone(following['next_offset'])
+        self.assertEqual(following['next_page'], 2)
+        blank = self.call('fetch_knowledge', {**args, 'start_page': 3})[2]['result']['structuredContent']
+        self.assertFalse(blank['text_available'])
+        result = self.call('fetch_knowledge', {**args, 'representation': 'pages', 'start_page': 2})[2]['result']
+        self.assertFalse(result['isError'])
+        image = result['content'][1]
+        self.assertEqual((image['type'], image['mimeType']), ('image', 'image/png'))
+        png = base64.b64decode(image['data'])
+        self.assertTrue(png.startswith(b'\x89PNG\r\n\x1a\n'))
+        self.assertEqual(max(struct.unpack('>II', png[16:24])), 1600)
+        self.assertNotIn('data', result['structuredContent'])
+        self.assertTrue(self.call('fetch_knowledge', {'doc_id': 7}, token='USER_TOKEN')[2]['result']['isError'])
+        self.assertFalse(self.call('fetch_knowledge', {'doc_id': 8, 'page_count': 1}, token='USER_TOKEN')[2]['result']['isError'])
+        self.assertTrue(self.call('fetch_knowledge', {'doc_id': 99})[2]['result']['isError'])
+        self.assertEqual(self.call('fetch_knowledge', {'doc_id': 7}, path='/mcp/web')[2]['error']['code'], -32602)
+        for args in ({'doc_id': 7, 'tenant_id': 8}, {'doc_id': 7, 'representation': 'bad'}, {'doc_id': 7, 'page_count': 4}, {'doc_id': True}):
+            self.assertEqual(self.call('fetch_knowledge', args)[2]['error']['code'], -32602)
+        self.assertTrue(self.call('fetch_knowledge', {'doc_id': 7, 'start_page': 9})[2]['result']['isError'])
+
+    def test_fetch_knowledge_rejects_symlinks_and_invalid_pdf(self):
+        alternate = self.pdf_path.with_name('alternate.pdf')
+        alternate.write_bytes(self.pdf_bytes)
+        self.pdf_path.unlink()
+        self.pdf_path.symlink_to(alternate)
+        try:
+            self.assertTrue(self.call('fetch_knowledge', {'doc_id': 7})[2]['result']['isError'])
+        finally:
+            self.pdf_path.unlink()
+            self.pdf_path.write_bytes(self.pdf_bytes)
+            alternate.unlink()
+        self.pdf_path.write_bytes(b'%PDF-corrupt but has expected magic')
+        try:
+            self.assertTrue(self.call('fetch_knowledge', {'doc_id': 7})[2]['result']['isError'])
+        finally:
+            self.pdf_path.write_bytes(self.pdf_bytes)
+
+    def test_fetch_knowledge_signed_download(self):
+        result = self.call('fetch_knowledge', {'doc_id': 7, 'representation': 'source'})[2]['result']
+        data = result['structuredContent']
+        self.assertFalse(result['isError'])
+        self.assertEqual(result['content'][1]['type'], 'resource_link')
+        url = urllib.parse.urlsplit(data['download_url'])
+        path = url.path + '?' + url.query
+        status, headers, content = self.request('GET', path, token=None)
+        self.assertEqual(status, 200)
+        self.assertEqual(content, self.pdf_bytes)
+        self.assertIn('attachment;', headers['Content-Disposition'])
+        self.assertEqual(headers['Cache-Control'], 'private, no-store')
+        self.assertEqual(self.request('GET', path.replace('doc_id=7', 'doc_id=8'), token=None)[0], 403)
+        self.assertEqual(self.request('GET', path.replace('tenant_id=7', 'tenant_id=8'), token=None)[0], 403)
+        self.assertEqual(self.request('GET', '/api/knowledge/download', token=None)[0], 403)
+        self.pdf_path.unlink()
+        try:
+            self.assertEqual(self.request('GET', path, token=None)[0], 404)
+        finally:
+            self.pdf_path.write_bytes(self.pdf_bytes)
+        # A validly signed URL must stop working after its short fixture lifetime.
+        time.sleep(3)
+        self.assertEqual(self.request('GET', path, token=None)[0], 403)
 
     def test_protocol_and_argument_errors(self):
         self.assertEqual(self.request('POST', raw='{')[2]['error']['code'], -32700)

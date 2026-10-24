@@ -8,12 +8,13 @@ namespace fastllm {
 class RemoteEngine : public IInferenceEngine {
 public:
     RemoteEngine(const std::string& endpoint, const std::string& model,
-                 const std::string& api_key, int context_window_tokens = 32768);
+                 const std::string& api_key, int context_window_tokens = 32768, bool supports_images = false);
     ~RemoteEngine() override = default;
 
     bool is_loaded() const override { return true; }
     std::string model_name() const override { return model_; }
     bool supports_tools() const override { return true; }
+    bool supports_images() const override { return supports_images_; }
     int estimate_input_tokens(const std::string& prompt, const InferParams& params) override;
 
     void stream_complete(const std::string& prompt, const InferParams& params,
@@ -26,6 +27,7 @@ private:
     std::string model_;
     std::string api_key_;
     int context_window_tokens_;
+    bool supports_images_;
 };
 
 }

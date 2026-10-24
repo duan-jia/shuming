@@ -110,7 +110,8 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
         config.get_str("remote_engine.endpoint", "https://api.deepseek.com/v1"),
         config.get_str("remote_engine.model", "deepseek-chat"),
         config.get_env_str("remote_engine.api_key", "DEEPSEEK_API_KEY"),
-        config.get_int("remote_engine.context_window_tokens", 32768)
+        config.get_int("remote_engine.context_window_tokens", 32768),
+        config.get_bool("remote_engine.supports_images", false)
     );
     ctx.model_mgr->add_engine("remote", std::move(remote));
 
