@@ -6,6 +6,7 @@ add_executable(fast-llm-reasoner
     src/main.cpp
     src/mcp/mcp_service.cpp
     src/server/worker_pool.cpp
+    src/services/knowledge_fetch_service.cpp
     src/services/tool_service.cpp
     src/services/web_search_service.cpp
     src/server/http_server.cpp
@@ -153,6 +154,7 @@ if(FASTLLM_BUILD_TESTS)
         src/agent/agent_runtime.cpp
         src/inference/remote_engine.cpp
         src/mcp/mcp_service.cpp
+        src/services/knowledge_fetch_service.cpp
         src/services/tool_service.cpp
         src/services/web_search_service.cpp
         src/services/knowledge_search_service.cpp

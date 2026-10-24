@@ -88,8 +88,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .message-pane { overflow-anchor: none; scrollbar-gutter: stable; }
 .message-row { display: flex; align-items: flex-start; gap: 14px; margin: 20px 0 34px; }
 .message-body { min-width: 0; flex: 1; }
-.message-row.user { width: fit-content; max-width: 85%; margin-left: auto; padding: 14px 18px; border: 1px solid var(--line); background: #ffffff08; border-radius: 16px; }
-.user-content { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 19px; line-height: 1.8; }
+.message-row.user { width: fit-content; max-width: 85%; margin-left: auto; }
+.user-content { padding: 14px 18px; border: 1px solid var(--line); background: #ffffff08; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 19px; line-height: 1.8; }
 .prose { font-size: 19px; color: #dedede; }
 .prose h1 { font-size: 1.6em; }.prose h2 { font-size: 1.35em; }.prose h3 { font-size: 1.15em; }
 .reasoning-panel { background: #ffffff04; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; color: #aaa; font-size: 14px; }
@@ -98,8 +98,18 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .generation-status { display: flex; align-items: center; gap: 8px; color: #b5c9e2; font-size: 11px; margin-top: 12px; }
 .stream-dot { display: inline-block; height: 6px; width: 6px; border-radius: 50%; background: #b5c9e2; animation: breathe 1.3s ease-in-out infinite; }
 @keyframes breathe { 50% { opacity: .3; } }
-.copy-answer { color: #aaa; padding: 6px 0; margin-top: 12px; font-size: 13px; }
-.copy-answer:hover { color: #b5c9e2; }
+.message-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.message-row.user .message-actions { justify-content: flex-end; }
+@media (hover: hover) and (pointer: fine) {
+  .message-row.user .message-actions { opacity: 0; pointer-events: none; transition: opacity .15s; }
+  .message-row.user:hover .message-actions,
+  .message-row.user:focus-within .message-actions { opacity: 1; pointer-events: auto; }
+}
+.copy-message { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 8px; border-radius: 6px; color: #aaa; font-size: 13px; line-height: 1.5; cursor: pointer; transition: color .15s, background .15s; }
+.copy-message:hover { color: #d8e4f4; background: #ffffff08; }
+.copy-message:focus-visible { outline: 2px solid #b5c9e2; outline-offset: 2px; }
+.copy-message svg { flex-shrink: 0; }
+.copy-error { color: #d5ac69; font-size: 12px; }
 .message-notice { margin-top: 12px; border-left: 2px solid #d5ac69; padding-left: 10px; color: #d5c39d; font-size: 12px; }
 .composer { max-width: 1184px; align-items: flex-end; border-radius: 18px; box-shadow: 0 12px 40px #0003; }
 .composer:focus-within { border-color: #b5c9e260; }
@@ -110,7 +120,7 @@ textarea:focus-visible { outline: none; }
   .prose, .user-content, .composer textarea { font-size: 18px; }
   .chat-header { min-height: 76px; }
   .chat-header p { max-width: 170px; font-size: 10px; }
-  .message-row { gap: 10px; }.message-row.user { padding: 12px; }
+  .message-row { gap: 10px; }.user-content { padding: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { .stream-dot { animation: none; } }
 

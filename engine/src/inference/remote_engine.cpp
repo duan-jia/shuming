@@ -14,9 +14,9 @@
 namespace fastllm {
 
 RemoteEngine::RemoteEngine(const std::string& endpoint, const std::string& model,
-                           const std::string& api_key, int context_window_tokens)
+                           const std::string& api_key, int context_window_tokens, bool supports_images)
     : endpoint_(endpoint), model_(model), api_key_(api_key),
-      context_window_tokens_(context_window_tokens > 0 ? context_window_tokens : 32768) {}
+      context_window_tokens_(context_window_tokens > 0 ? context_window_tokens : 32768), supports_images_(supports_images) {}
 
 struct StreamCtx {
     std::function<void(const std::string&)> on_token;
@@ -65,6 +65,26 @@ static size_t estimate_message_tokens(const ChatMessage& message) {
     return estimate_text_tokens(message.content + message.reasoning) + 4;
 }
 
+static size_t estimate_messages(const nlohmann::json& messages) {
+    size_t tokens = 0;
+    for (auto message : messages) {
+        if (message.contains("content") && message["content"].is_array()) {
+            for (const auto& part : message["content"]) {
+                if (part.value("type", "") == "image_url") {
+                    // Conservative image allowance; never tokenize Base64 as text.
+                    // Actual provider usage is still charged after inference.
+                    tokens += 4096;
+                } else if (part.contains("text") && part["text"].is_string()) {
+                    tokens += estimate_text_tokens(part["text"].get<std::string>());
+                }
+            }
+            message.erase("content");
+        }
+        tokens += estimate_text_tokens(message.dump()) + 4;
+    }
+    return tokens;
+}
+
 static std::vector<ConversationTurn> collect_complete_turns(
     const std::vector<ChatMessage>& history) {
     std::vector<ConversationTurn> turns;
@@ -103,7 +123,7 @@ static bool build_messages(const std::string& prompt, const InferParams& params,
         return false;
     }
 
-    if (!params.tool_messages.empty()) required_tokens += estimate_text_tokens(params.tool_messages.dump());
+    if (!params.tool_messages.empty()) required_tokens += estimate_messages(params.tool_messages);
     if (!params.tools.empty()) required_tokens += estimate_text_tokens(params.tools.dump());
     if (required_tokens > input_budget) {
         error = "Tool conversation exceeds the configured remote context window";
@@ -267,7 +287,7 @@ int RemoteEngine::estimate_input_tokens(const std::string& prompt, const InferPa
     nlohmann::json messages;
     std::string error;
     if (!build_messages(prompt, params, context_window_tokens_, messages, error)) return context_window_tokens_;
-    return static_cast<int>(estimate_text_tokens(messages.dump()) + estimate_text_tokens(params.tools.dump()) + 16);
+    return static_cast<int>(estimate_messages(messages) + estimate_text_tokens(params.tools.dump()) + 16);
 }
 
 void RemoteEngine::stream_complete(

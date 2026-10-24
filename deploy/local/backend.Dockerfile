@@ -1,5 +1,8 @@
 # Runtime context is .tmp/local-runtime, prepared by prepare.py.
 FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends python3 poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/ /app/scripts/
 COPY certs/ /etc/ssl/certs/
 COPY bin/ /usr/local/bin/
 COPY lib/ /opt/shuming/lib/

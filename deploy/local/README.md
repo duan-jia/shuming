@@ -52,3 +52,5 @@ docker compose -f deploy/local/compose.yml down
 ```
 
 不要用 `down -v`，除非明确要删除本地 MySQL 数据。此配置用于本机测试，所有宿主端口只绑定 `127.0.0.1`。
+
+后端镜像现在还包含 Python 3、Poppler 和 `scripts/read_pdf.py`，供 `fetch_knowledge` 读取原 PDF 和渲染页面。运行 prepare.py 后重建镜像才能获得这些依赖。外部下载地址、签名配置及模型视觉开关见 [原生 MCP 文档](../../docs/native-mcp.md)。

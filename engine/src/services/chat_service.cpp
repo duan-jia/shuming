@@ -5,6 +5,7 @@
 #include <random>
 #include <atomic>
 #include <mutex>
+#include <limits>
 #include <unordered_map>
 
 #include <nlohmann/json.hpp>
@@ -260,7 +261,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
                 [sse](const nlohmann::json& event) {
                     if (sse->is_active()) sse->send_event("message", event.dump());
                 }, [ctx, bill_tenant, bill_user]() -> long long {
-                    if (!ctx->billing_service) return 24000;
+                    if (!ctx->billing_service) return std::numeric_limits<long long>::max();
                     auto quota = ctx->billing_service->check_quota(bill_tenant, bill_user);
                     return quota.success ? quota.remaining : 0;
                 });

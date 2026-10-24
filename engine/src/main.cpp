@@ -89,6 +89,7 @@ int main(int argc, char* argv[]) {
     WebSearchOptions web_options;
     web_options.enabled = config.get_bool("web_search.enabled", false);
     web_options.endpoint = config.get_str("web_search.endpoint", "https://api.deepseek.com/v1/tools/search");
+    web_options.fetch_endpoint = config.get_str("web_search.fetch_endpoint", "https://api.deepseek.com/v1/tools/fetch");
     web_options.api_key = config.get_env_str("web_search.api_key", "DEEPSEEK_SEARCH_API_KEY");
     if (web_options.api_key.empty()) {
         web_options.api_key = config.get_env_str("remote_engine.api_key", "DEEPSEEK_API_KEY");
@@ -97,7 +98,20 @@ int main(int argc, char* argv[]) {
     web_options.timeout_seconds = config.get_int("web_search.timeout_seconds", 15);
     web_options.max_concurrency = config.get_int("web_search.max_concurrency", 2);
     WebSearchService web_search(web_options);
-    ToolService tools(*ctx.knowledge_search_service, web_search);
+    KnowledgeFetchOptions fetch_options;
+    fetch_options.pdf_directory = config.get_str("knowledge_fetch.pdf_directory", "data/pdfs");
+    fetch_options.reader_script = config.get_str("knowledge_fetch.reader_script", "scripts/read_pdf.py");
+    fetch_options.python = config.get_str("knowledge_fetch.python", "python3");
+    fetch_options.public_base_url = config.get_str("knowledge_fetch.public_base_url", "");
+    fetch_options.signing_secret = config.get_env_str("knowledge_fetch.signing_secret", "KNOWLEDGE_DOWNLOAD_SECRET");
+    if (fetch_options.signing_secret.empty()) fetch_options.signing_secret = config.get_str("jwt.secret", "change-me");
+    fetch_options.link_ttl_seconds = config.get_int("knowledge_fetch.link_ttl_seconds", 300);
+    fetch_options.timeout_seconds = config.get_int("knowledge_fetch.timeout_seconds", 20);
+    fetch_options.max_concurrency = config.get_int("knowledge_fetch.max_concurrency", 2);
+    KnowledgeFetchService knowledge_fetch([&ctx](int id, int tenant, DocumentDetails& detail) {
+        return ctx.document_repository && ctx.document_repository->find_visible_document(id, tenant, detail);
+    }, fetch_options);
+    ToolService tools(*ctx.knowledge_search_service, web_search, knowledge_fetch);
     McpOptions mcp_options;
     mcp_options.allow_user_web_search = config.get_bool("mcp.allow_user_web_search", false);
     if (config.raw().contains("mcp") && config.raw()["mcp"].contains("allowed_origins")) {
@@ -108,12 +122,14 @@ int main(int argc, char* argv[]) {
     };
     ctx.rate_limiter->add_rule("search_knowledge", config.get_int("mcp.knowledge_requests_per_minute", 60), 60);
     ctx.rate_limiter->add_rule("search_web", config.get_int("mcp.web_requests_per_minute", 20), 60);
+    ctx.rate_limiter->add_rule("fetch_knowledge", config.get_int("mcp.knowledge_fetch_requests_per_minute", 30), 60);
+    ctx.rate_limiter->add_rule("fetch_web", config.get_int("mcp.web_fetch_requests_per_minute", 20), 60);
     McpService mcp(tools, require_auth, *ctx.rate_limiter, mcp_options);
     AgentOptions agent_options;
     agent_options.enabled = config.get_bool("agent.enabled", true);
     agent_options.max_turns = config.get_int("agent.max_turns", 6);
     agent_options.max_output_tokens = config.get_int("agent.max_output_tokens", 0);
-    agent_options.max_total_tokens = config.get_int("agent.max_total_tokens", 24000);
+    agent_options.max_total_tokens = config.get_int("agent.max_total_tokens", 0);
     agent_options.timeout_seconds = config.get_int("agent.timeout_seconds", 90);
     agent_options.max_tool_calls_per_turn = config.get_int("agent.max_tool_calls_per_turn", 4);
     agent_options.max_tool_result_bytes = config.get_int("agent.max_tool_result_bytes", 24000);
@@ -124,6 +140,9 @@ int main(int argc, char* argv[]) {
     HttpServer server(&loop, addr, "fast-llm-reasoner", config.get_int("http_threads", 2),
                       config.get_int("mcp.worker_threads", 4), config.get_int("mcp.queue_limit", 64));
     server.set_static_dir(options.static_dir);
+    server.router().worker_endpoint("/api/knowledge/download", [&knowledge_fetch](const HttpRequest& req, RouteParams, HttpResponse& resp) {
+        knowledge_fetch.download(req, resp);
+    });
 
     for (const auto& endpoint : std::vector<std::pair<std::string, ToolSet>>{
              {"/mcp", ToolSet::ALL}, {"/mcp/knowledge", ToolSet::KNOWLEDGE}, {"/mcp/web", ToolSet::WEB}}) {
