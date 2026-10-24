@@ -40,12 +40,17 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
         return false;
     }
 
+    const auto jwt_secret = config.get_env_str("jwt.secret", "JWT_SECRET");
+    if (jwt_secret.size() < 32 || jwt_secret.find("change-this") != std::string::npos
+        || jwt_secret == "fast-llm-reasoner-secret-key-change-in-production") {
+        spdlog::critical("Set a non-placeholder JWT_SECRET of at least 32 bytes before startup"); return false;
+    }
     if (!ensure_admin(ctx, config)) {
         return false;
     }
 
     ctx.jwt = std::make_unique<JwtHandler>(
-        config.get_str("jwt.secret", "fast-llm-reasoner-secret-key-change-in-production"),
+        jwt_secret,
         config.get_int("jwt.expiry_seconds", 86400)
     );
     ctx.rbac = std::make_unique<RbacManager>();
@@ -70,6 +75,10 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
     ctx.billing_service = std::make_unique<BillingService>(*ctx.mysql_pool);
     ctx.user_repository = std::make_unique<UserRepository>(*ctx.mysql_pool);
     ctx.tenant_repository = std::make_unique<TenantRepository>(*ctx.mysql_pool);
+    ctx.guest_enabled = config.get_bool("auth.guest_enabled", false);
+    if (ctx.guest_enabled && !ctx.tenant_repository->ensure_guest_tenant(ctx.guest_tenant_id)) {
+        spdlog::critical("Cannot initialize isolated guest tenant"); return false;
+    }
     ctx.document_repository = std::make_unique<DocumentRepository>(*ctx.mysql_pool);
     ctx.message_repository = std::make_unique<MessageRepository>(*ctx.mysql_pool);
     ctx.session_repository = std::make_unique<SessionRepository>(*ctx.mysql_pool);
@@ -162,13 +171,16 @@ bool AppBootstrap::ensure_admin(AppContext& ctx, const ConfigManager& config) {
     int count = row ? std::stoi(row[0]) : 0;
     mysql_free_result(res);
     if (count == 0) {
+        if (default_pw.size() < 12 || default_pw == "changeme123") {
+            ctx.mysql_pool->release(conn);
+            spdlog::critical("Configure a non-default admin.default_password of at least 12 bytes"); return false;
+        }
         std::string hash = CryptoUtils::hash_password(default_pw);
         std::string sql = "INSERT INTO users (tenant_id, username, password_hash, role) VALUES "
                           "(1, '" + escape_sql(conn->raw(), admin_username) + "', '"
                           + escape_sql(conn->raw(), hash) + "', 'admin')";
         if (conn->execute(sql)) {
-            spdlog::warn("Created default admin '{}' with password '{}'. CHANGE IT IMMEDIATELY.",
-                         admin_username, default_pw);
+            spdlog::warn("Created bootstrap admin; rotate the bootstrap password before deployment");
         }
     }
     ctx.mysql_pool->release(conn);

@@ -3,6 +3,7 @@
 import { memo, useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import Image from "next/image";
 import { createSseParser } from "../lib/sse";
+import { sessionTitle } from "../lib/session-title";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -135,10 +136,14 @@ export default function Home() {
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
   const [token, setToken] = useState("");
   const [loggedIn, setLoggedIn] = useState(false);
-  const [userRole, setUserRole] = useState<"admin" | "user">("user");
+  const [userRole, setUserRole] = useState<"admin" | "user" | "guest">("user");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [guestEnabled, setGuestEnabled] = useState(false);
+  const [loginPending, setLoginPending] = useState(false);
+  const [loginCooldown, setLoginCooldown] = useState(0);
+  const loginInFlight = useRef(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<string>("");
   const messages = sessionMessages[activeSession] || EMPTY_MESSAGES;
@@ -179,6 +184,21 @@ export default function Home() {
       pending.clear();
     };
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/auth/config", { cache: "no-store", signal: controller.signal })
+      .then(response => response.ok ? response.json() : null)
+      .then(data => setGuestEnabled(data?.guest_enabled === true))
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (loginCooldown <= 0) return;
+    const timer = window.setTimeout(() => setLoginCooldown(value => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [loginCooldown]);
 
   const fetchSessions = useCallback(async () => {
     if (!token) return;
@@ -238,27 +258,20 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [activeView, documents, fetchDocuments]);
 
-  const createSession = useCallback(async () => {
-    const navigation = ++navigationVersion.current;
-    try {
-      const res = await fetch(`${API_BASE}/api/sessions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ title: "新对话" }),
-      });
-      const data = await res.json();
-      if (data.id && navigation === navigationVersion.current) {
-        activeSessionRef.current = data.id;
-        setActiveView("chat");
-        setActiveSession(data.id);
-        setSessionMessages((prev) => ({ ...prev, [data.id]: [] }));
-        fetchSessions();
-      }
-    } catch {}
-  }, [token, fetchSessions]);
+  const startNewChat = useCallback(() => {
+    ++navigationVersion.current;
+    // A new chat is a local draft until the first question is submitted.
+    // Keep replies in existing sessions running in the background.
+    requests.current.get("")?.abort();
+    requests.current.delete("");
+    setGenerating((prev) => ({ ...prev, "": false }));
+    activeSessionRef.current = "";
+    setActiveSession("");
+    setActiveView("chat");
+    setInput("");
+    followOutput.current = true;
+    setShowJumpToLatest(false);
+  }, []);
 
   const switchSession = useCallback(async (id: string) => {
     ++navigationVersion.current;
@@ -319,26 +332,38 @@ export default function Home() {
     [token, fetchSessions]
   );
 
-  const login = useCallback(async () => {
+  const login = useCallback(async (mode: "password" | "guest" = "password") => {
+    if (loginInFlight.current || loginCooldown > 0) return;
+    loginInFlight.current = true;
+    setLoginPending(true);
+    setLoginError("");
     try {
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
+      const res = await fetch(`${API_BASE}/api/auth/${mode === "guest" ? "guest" : "login"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(mode === "guest" ? {} : { username, password }),
       });
       const data = await res.json();
-      if (data.token) {
+      if (res.ok && typeof data.token === "string" && data.token) {
         setToken(data.token);
-        setUserRole(data.user?.role === "admin" ? "admin" : "user");
+        setUserRole(data.user?.role === "admin" ? "admin" : data.user?.role === "guest" ? "guest" : "user");
+        setActiveView("chat");
+        setPassword("");
         setLoggedIn(true);
-        setLoginError("");
+      } else if (res.status === 429) {
+        const delay = Number(res.headers.get("Retry-After"));
+        setLoginCooldown(Number.isFinite(delay) && delay > 0 ? Math.min(Math.ceil(delay), 3600) : 60);
+        setLoginError("尝试过于频繁，请稍后再试。");
       } else {
-        setLoginError(data.error || "登录失败");
+        setLoginError(res.status === 401 ? "用户名或密码不正确，或账号暂不可用。" : mode === "guest" ? "游客体验暂不可用，请使用账号登录。" : "暂时无法登录，请稍后再试。");
       }
     } catch {
       setLoginError("暂时无法登录，请稍后再试。");
+    } finally {
+      loginInFlight.current = false;
+      setLoginPending(false);
     }
-  }, [username, password]);
+  }, [username, password, loginCooldown]);
 
   const uploadPdf = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -474,12 +499,12 @@ export default function Home() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ title: input.slice(0, 40) }),
+          body: JSON.stringify({ title: sessionTitle(input) }),
           signal: controller.signal,
         });
         const data = await res.json();
         if (requests.current.get("") !== controller) return;
-        if (!res.ok || !data.id) throw new Error("无法创建会话");
+        if (!res.ok || !data.id) throw new Error(res.status === 429 ? "体验次数已达上限，请稍后再试或登录账号。" : res.status === 401 ? "登录已过期，请退出后重新登录。" : "无法创建会话，请稍后重试。");
         if (data.id) {
           sid = data.id;
           requests.current.delete("");
@@ -491,7 +516,8 @@ export default function Home() {
           }
           fetchSessions();
         }
-      } catch {
+      } catch (error) {
+        if (!controller.signal.aborted) setUploadNotice({ type: "error", message: error instanceof Error ? error.message : "无法创建会话。" });
         if (requests.current.get("") === controller) {
           requests.current.delete("");
           setGenerating((prev) => ({ ...prev, "": false }));
@@ -692,8 +718,12 @@ export default function Home() {
               密码
               <input className="login-input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
             </label>
-            <button className="primary-button mt-8 w-full" type="submit">登录</button>
+            <button className="primary-button mt-8 w-full disabled:opacity-50" type="submit" disabled={loginPending || loginCooldown > 0}>{loginPending ? "正在登录…" : loginCooldown > 0 ? `请等待 ${loginCooldown} 秒` : "登录"}</button>
           </form>
+          {guestEnabled && <div className="guest-entry">
+            <button type="button" className="guest-button" disabled={loginPending || loginCooldown > 0} onClick={() => void login("guest")}>游客体验</button>
+            <p>仅公开知识 · 15 分钟体验 · 无上传权限</p>
+          </div>}
           <SupportCredit className="login-support" />
         </section>
       </main>
@@ -709,11 +739,11 @@ export default function Home() {
           <div className="wordmark sidebar-wordmark">EMOS</div>
           <button
             className="mt-7 w-full rounded-lg border border-line px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-white/5"
-            onClick={() => { void createSession(); setSidebarOpen(false); }}
+            onClick={() => { startNewChat(); setSidebarOpen(false); }}
           >
             新建对话
           </button>
-          <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className={`mt-3 grid gap-2 ${userRole === "guest" ? "grid-cols-1" : "grid-cols-2"}`}>
             <button
               className={`rounded-lg px-3 py-2 text-sm transition ${
                 activeView === "chat" ? "bg-white/10 text-foreground" : "text-neutral-500 hover:bg-white/5 hover:text-foreground"
@@ -726,7 +756,7 @@ export default function Home() {
             >
               对话
             </button>
-            <button
+            {userRole !== "guest" && (            <button
               className={`rounded-lg px-3 py-2 text-sm transition ${
                 activeView === "documents" ? "bg-white/10 text-foreground" : "text-neutral-500 hover:bg-white/5 hover:text-foreground"
               }`}
@@ -738,7 +768,7 @@ export default function Home() {
               }}
             >
               文档管理
-            </button>
+            </button>)}
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-3">
@@ -752,7 +782,7 @@ export default function Home() {
                   }`}
                   onClick={() => { void switchSession(s.id); setSidebarOpen(false); }}
                 >
-                  <span className="flex-1 truncate text-sm">{s.title}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm" title={s.title}>{s.title}</span>
                   <button
                     aria-label={`删除会话 ${s.title}`} className="text-xs text-neutral-500 hover:text-red-300 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
                     onClick={(e) => deleteSession(s.id, e)}
@@ -765,6 +795,7 @@ export default function Home() {
           ) : null}
         </div>
         <div className="shrink-0 border-t border-line p-4">
+          {userRole === "guest" && <p className="mb-3 text-xs text-neutral-400">游客体验 · 仅公开知识</p>}
           <button
             className="text-sm text-neutral-500 transition hover:text-foreground"
             onClick={() => {

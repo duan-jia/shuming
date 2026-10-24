@@ -99,6 +99,11 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         return;
     }
 
+    const bool guest = claims.role == "guest";
+    if (guest && (!ctx_.guest_enabled || claims.tenant_id != ctx_.guest_tenant_id
+        || !ctx_.guest_limiter.allow_guest_chat(claims.user_id, req.peer_ip))) {
+        send_sse_error(sse_ctx, "Guest chat limit reached or guest access disabled"); return;
+    }
     sse_ctx->user_id = claims.user_id;
     sse_ctx->tenant_id = claims.tenant_id;
     sse_ctx->role = claims.role;
@@ -121,6 +126,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             request_id = generate_uuid();
         }
 
+        if (guest && message.size() > 2048) { send_sse_error(sse_ctx, "Guest message is too long"); return; }
         if (!has_non_whitespace(message)) {
             send_sse_error(sse_ctx, "Message is required");
             return;
@@ -196,21 +202,22 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             return;
         }
 
-        const bool use_agent = options_.enabled && engine->supports_tools();
+        const bool use_agent = !guest && options_.enabled && engine->supports_tools();
         InferParams infer_params;
         infer_params.session_id = session_id;
-        const int default_max_tokens = use_agent ? options_.max_output_tokens : (engine->supports_tools() ? 0 : 512);
+        const int default_max_tokens = guest ? 512 : use_agent ? options_.max_output_tokens : (engine->supports_tools() ? 0 : 512);
         infer_params.max_tokens = body.value("max_tokens", default_max_tokens);
         if ((body.contains("max_tokens") && infer_params.max_tokens < 1)
             || infer_params.max_tokens < 0 || infer_params.max_tokens > 8192) {
             send_sse_error(sse_ctx, "max_tokens must be between 1 and 8192"); return;
         }
+        if (guest) infer_params.max_tokens = std::min(infer_params.max_tokens, 512);
         infer_params.temperature = body.value("temperature", 0.7f);
         infer_params.top_p = body.value("top_p", 0.9f);
         infer_params.history = std::move(history);
 
-        bool enable_rag = body.value("enable_rag", use_agent);
-        infer_params.system_prompt = ctx_.system_prompt;
+        bool enable_rag = guest || body.value("enable_rag", use_agent);
+        infer_params.system_prompt = guest ? "You are a research assistant for a public knowledge demo. Use only publicly available context and do not claim access to private laboratory data." : ctx_.system_prompt;
         if (!use_agent && enable_rag && ctx_.knowledge_search_service) {
             SearchKnowledgeRequest search_request;
             search_request.query = message;
@@ -218,6 +225,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             search_request.mode = KnowledgeSearchMode::CHUNKS;
 
             CallerContext caller;
+            caller.public_only = guest;
             caller.tenant_id = claims.tenant_id;
             caller.principal_id = claims.user_id;
             caller.principal_type = "user";
@@ -227,7 +235,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
                 auto search_result = ctx_.knowledge_search_service->execute(
                     search_request, caller);
                 infer_params.system_prompt = RagPromptFormatter::format(
-                    search_result, ctx_.system_prompt);
+                    search_result, infer_params.system_prompt);
             } catch (const KnowledgeSearchError& e) {
                 spdlog::warn("RAG search skipped for chat request {}: {}", request_id, e.what());
             }

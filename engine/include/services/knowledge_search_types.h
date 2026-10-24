@@ -21,6 +21,7 @@ struct CallerContext {
     int principal_id = 0;
     std::string principal_type;
     std::string trace_id;
+    bool public_only = false;
 };
 
 struct QueryRewriteInfo {

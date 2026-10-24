@@ -15,6 +15,7 @@
 #include "persistence/user_repository.h"
 #include "rag/document_store.h"
 #include "security/rate_limiter.h"
+#include "security/login_limiter.h"
 #include "security/rbac_manager.h"
 #include "services/knowledge_search_service.h"
 #include "services/rag_knowledge_search_backend.h"
@@ -23,6 +24,9 @@
 namespace fastllm {
 
 struct AppContext {
+    bool guest_enabled = false;
+    int guest_tenant_id = 0;
+    LoginLimiter guest_limiter;
     std::string rag_dir = "data/rag";
     std::string system_prompt = "You are a helpful AI assistant for enterprise internal use.";
 
