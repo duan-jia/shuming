@@ -3,6 +3,7 @@
 import { memo, useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import Image from "next/image";
 import { createSseParser } from "../lib/sse";
+import { sessionTitle } from "../lib/session-title";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -238,27 +239,20 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [activeView, documents, fetchDocuments]);
 
-  const createSession = useCallback(async () => {
-    const navigation = ++navigationVersion.current;
-    try {
-      const res = await fetch(`${API_BASE}/api/sessions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ title: "新对话" }),
-      });
-      const data = await res.json();
-      if (data.id && navigation === navigationVersion.current) {
-        activeSessionRef.current = data.id;
-        setActiveView("chat");
-        setActiveSession(data.id);
-        setSessionMessages((prev) => ({ ...prev, [data.id]: [] }));
-        fetchSessions();
-      }
-    } catch {}
-  }, [token, fetchSessions]);
+  const startNewChat = useCallback(() => {
+    ++navigationVersion.current;
+    // A new chat is a local draft until the first question is submitted.
+    // Keep replies in existing sessions running in the background.
+    requests.current.get("")?.abort();
+    requests.current.delete("");
+    setGenerating((prev) => ({ ...prev, "": false }));
+    activeSessionRef.current = "";
+    setActiveSession("");
+    setActiveView("chat");
+    setInput("");
+    followOutput.current = true;
+    setShowJumpToLatest(false);
+  }, []);
 
   const switchSession = useCallback(async (id: string) => {
     ++navigationVersion.current;
@@ -474,7 +468,7 @@ export default function Home() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ title: input.slice(0, 40) }),
+          body: JSON.stringify({ title: sessionTitle(input) }),
           signal: controller.signal,
         });
         const data = await res.json();
@@ -709,7 +703,7 @@ export default function Home() {
           <div className="wordmark sidebar-wordmark">EMOS</div>
           <button
             className="mt-7 w-full rounded-lg border border-line px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-white/5"
-            onClick={() => { void createSession(); setSidebarOpen(false); }}
+            onClick={() => { startNewChat(); setSidebarOpen(false); }}
           >
             新建对话
           </button>
@@ -752,7 +746,7 @@ export default function Home() {
                   }`}
                   onClick={() => { void switchSession(s.id); setSidebarOpen(false); }}
                 >
-                  <span className="flex-1 truncate text-sm">{s.title}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm" title={s.title}>{s.title}</span>
                   <button
                     aria-label={`删除会话 ${s.title}`} className="text-xs text-neutral-500 hover:text-red-300 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
                     onClick={(e) => deleteSession(s.id, e)}
