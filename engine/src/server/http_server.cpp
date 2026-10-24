@@ -98,7 +98,9 @@ void HttpServer::on_message(const muduo::net::TcpConnectionPtr& conn,
 }
 
 void HttpServer::handle_request(const muduo::net::TcpConnectionPtr& conn,
-                                 const HttpRequest& req) {
+                                 const HttpRequest& parsed_req) {
+    HttpRequest req = parsed_req;
+    req.peer_ip = conn->peerAddress().toIp();
     spdlog::info("{} {} from {}", req.method_string(), req.path,
                  conn->peerAddress().toIpPort());
 
