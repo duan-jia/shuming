@@ -101,5 +101,8 @@
     "link_ttl_seconds": 300,
     "timeout_seconds": 20,
     "max_concurrency": 2
+  },
+  "auth": {
+    "guest_enabled": false
   }
 }

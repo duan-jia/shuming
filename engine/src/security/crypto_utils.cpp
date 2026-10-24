@@ -156,19 +156,20 @@ bool CryptoUtils::verify_password(const std::string& password, const std::string
 
     int iterations = 0;
     try { iterations = std::stoi(parts[1]); } catch (...) { return false; }
-    if (iterations < 1000) return false;
+    if (iterations < 1000 || iterations > 1000000
+        || parts[1] != std::to_string(iterations)) return false;
 
     auto salt = base64_decode(parts[2]);
     auto expected = base64_decode(parts[3]);
-    if (salt.empty() || expected.empty()) return false;
+    if (salt.size() != 16 || expected.size() != 32) return false;
+    if (base64_encode(salt.data(), salt.size()) != parts[2]
+        || base64_encode(expected.data(), expected.size()) != parts[3]) return false;
 
     unsigned char hash[32];
-    PKCS5_PBKDF2_HMAC(password.c_str(), static_cast<int>(password.size()),
+    if (PKCS5_PBKDF2_HMAC(password.c_str(), static_cast<int>(password.size()),
                       salt.data(), static_cast<int>(salt.size()), iterations,
-                      EVP_sha256(), sizeof(hash), hash);
-
-    size_t cmp_len = std::min(sizeof(hash), expected.size());
-    return CRYPTO_memcmp(hash, expected.data(), cmp_len) == 0;
+                      EVP_sha256(), sizeof(hash), hash) != 1) return false;
+    return CRYPTO_memcmp(hash, expected.data(), sizeof(hash)) == 0;
 }
 
 KeyManager::KeyManager(const std::string& master_key) : master_key_(master_key) {}

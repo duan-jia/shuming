@@ -172,3 +172,35 @@ if(FASTLLM_BUILD_TESTS)
         httplib::httplib muduo_net muduo_base OpenSSL::SSL OpenSSL::Crypto pthread)
     target_compile_definitions(native-mcp-test-server PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
 endif()
+
+if(FASTLLM_BUILD_TESTS)
+    add_executable(auth-security-test
+        tests/auth_security_test.cpp
+        src/security/crypto_utils.cpp
+        src/security/rbac_manager.cpp
+        src/auth/jwt_handler.cpp
+    )
+    target_include_directories(auth-security-test PRIVATE include)
+    target_link_libraries(auth-security-test PRIVATE
+        spdlog::spdlog jwt-cpp::jwt-cpp OpenSSL::Crypto OpenSSL::SSL pthread)
+    # These tests deliberately use assertions, including in Release CI.
+    target_compile_options(auth-security-test PRIVATE -UNDEBUG)
+    add_test(NAME auth-security-test COMMAND auth-security-test)
+endif()
+
+if(FASTLLM_BUILD_TESTS)
+    add_executable(auth-service-test
+        tests/auth_service_test.cpp
+        src/services/auth_service.cpp
+        src/security/crypto_utils.cpp
+        src/security/rbac_manager.cpp
+        src/auth/jwt_handler.cpp
+        src/server/http_protocol.cpp
+    )
+    target_include_directories(auth-service-test PRIVATE include ${faiss_SOURCE_DIR})
+    target_link_libraries(auth-service-test PRIVATE
+        nlohmann_json::nlohmann_json spdlog::spdlog jwt-cpp::jwt-cpp
+        OpenSSL::Crypto OpenSSL::SSL pthread)
+    target_compile_options(auth-service-test PRIVATE -UNDEBUG)
+    add_test(NAME auth-service-test COMMAND auth-service-test)
+endif()

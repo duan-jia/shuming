@@ -28,6 +28,18 @@ bool TenantRepository::create_tenant(const std::string& name, int token_limit_da
     return ok;
 }
 
+bool TenantRepository::ensure_guest_tenant(int& tenant_id) {
+    auto conn = mysql_.acquire();
+    if (!conn || !conn->valid()) return false;
+    bool ok = conn->execute("INSERT IGNORE INTO tenants (name, token_limit_daily) VALUES ('__guest__', 3000)");
+    auto* res = ok ? conn->query("SELECT id FROM tenants WHERE name='__guest__' AND status='active' LIMIT 1") : nullptr;
+    auto* row = res ? mysql_fetch_row(res) : nullptr;
+    if (row && row[0]) tenant_id = std::stoi(row[0]);
+    if (res) mysql_free_result(res);
+    mysql_.release(conn);
+    return tenant_id > 0;
+}
+
 std::vector<TenantSummary> TenantRepository::list_tenants() {
     std::vector<TenantSummary> tenants;
     auto conn = mysql_.acquire();

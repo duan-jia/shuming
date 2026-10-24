@@ -8,7 +8,9 @@ namespace fastllm {
 
 enum class Role {
     ADMIN,
-    USER
+    USER,
+    GUEST,
+    UNKNOWN
 };
 
 struct UserInfo {
