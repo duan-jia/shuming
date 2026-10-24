@@ -135,3 +135,9 @@ textarea:focus-visible { outline: none; }
 .chat-header { gap: 12px; }
 
 .chat-navigation { min-height: 56px; padding-top: 12px; padding-bottom: 0; }
+
+.guest-entry { margin-top: 16px; text-align: center; }
+.guest-button { width: 100%; padding: 12px 20px; border: 1px solid #ffffff26; border-radius: 10px; color: #dedede; font-size: 14px; }
+.guest-button:hover:not(:disabled) { border-color: #b5c9e280; background: #b5c9e208; }
+.guest-button:disabled { opacity: .5; }
+.guest-entry p { margin-top: 12px; font-size: 11px; color: #a3a3a3; }

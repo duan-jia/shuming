@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 #include <jwt-cpp/jwt.h>
 #include <chrono>
+#include <algorithm>
 
 namespace fastllm {
 
@@ -13,7 +14,7 @@ std::string JwtHandler::generate_token(int user_id, int tenant_id,
                                         const std::string& username,
                                         const std::string& role) {
     auto now = std::chrono::system_clock::now();
-    auto exp = now + std::chrono::seconds(expire_seconds_);
+    auto exp = now + std::chrono::seconds(role == "guest" ? std::min(expire_seconds_, 900) : expire_seconds_);
 
     auto token = jwt::create()
         .set_issuer("fast-llm-reasoner")
@@ -40,10 +41,21 @@ JwtHandler::TokenClaims JwtHandler::verify_token(const std::string& token) {
 
         verifier.verify(decoded);
 
-        claims.user_id = std::stoi(decoded.get_payload_claim("user_id").as_string());
-        claims.tenant_id = std::stoi(decoded.get_payload_claim("tenant_id").as_string());
+        if (!decoded.has_expires_at() || !decoded.has_issued_at()) throw std::runtime_error("Required JWT times missing");
+        auto parse_id = [](const std::string& value) {
+            if (value.empty() || value.size() > 10 || value.find_first_not_of("0123456789") != std::string::npos)
+                throw std::runtime_error("Invalid identity ID");
+            const auto id = std::stoi(value);
+            if (id <= 0) throw std::runtime_error("Invalid identity ID");
+            return id;
+        };
+        claims.user_id = parse_id(decoded.get_payload_claim("user_id").as_string());
+        claims.tenant_id = parse_id(decoded.get_payload_claim("tenant_id").as_string());
         claims.username = decoded.get_payload_claim("username").as_string();
         claims.role = decoded.get_payload_claim("role").as_string();
+        if (claims.user_id <= 0 || claims.tenant_id <= 0 || claims.username.empty()
+            || (claims.role != "admin" && claims.role != "user" && claims.role != "guest"))
+            throw std::runtime_error("Invalid identity claims");
         claims.valid = true;
 
     } catch (const std::exception& e) {

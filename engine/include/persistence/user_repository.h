@@ -13,6 +13,7 @@ struct LoginUser {
     std::string username;
     std::string role = "user";
     std::string password_hash;
+    bool active = false;
 };
 
 struct UserSummary {
@@ -37,6 +38,7 @@ public:
     bool create_user(int tenant_id, const std::string& username,
                      const std::string& password_hash, const std::string& role,
                      int& user_id);
+    bool create_guest_user(int tenant_id, const std::string& username, int& user_id);
     std::vector<UserSummary> list_users();
     bool delete_user(int user_id);
 
