@@ -1,6 +1,9 @@
 # Guest login and authentication hardening — DRAFT
 
-**Not ready for deployment.** Implementation exists; full backend build/CI, browser acceptance, real MySQL migration/login integration and adversarial guest isolation/billing E2E remain outstanding. Do not enable anonymous access based solely on fixture tests.
+Guest access is opt-in and disabled by default. Local merge validation covers full builds,
+authentication tests, browser acceptance and isolated MySQL migration/login/session checks.
+Real-index public/private retrieval, real-model billing and production proxy acceptance remain
+outstanding. Keep guest access disabled until those deployment checks are complete.
 
 ## Implemented intent
 
@@ -30,6 +33,20 @@
 - `auth-security-test` and production AuthService with in-memory repository fixture passed when compiled directly. Fixtures do not validate MySQL SQL/migration behavior.
 - Both test executables are included in CMake. Existing CI has not been updated to run these new targets; that wiring is a remaining task.
 - Browser acceptance, guest-vs-member history isolation with real storage, public-only retrieval against real indexes, login cooldown interaction and real-model quotas still need verification.
+
+## Merge validation — 2026-10-24
+
+- CPU Release server, CLI, native MCP fixture and both authentication test targets built successfully.
+  The authentication and knowledge-search tests passed. CI now builds and runs both authentication targets.
+- Agent/MCP HTTP suite: 29 passed, one official SDK test skipped because no SDK command was supplied.
+- Frontend ESLint, production build, SSE/title tests and session-navigation browser regression passed.
+- An isolated MySQL 8.4 instance verified migration from the old role enum, password login,
+  disabled user/tenant checks, separate guest identities, cross-user session denial and blocked
+  document/admin/MCP access. Migration preserved the maximum daily quota and accumulated usage.
+- The merged frontend passed guest login against that isolated backend, deferred session creation,
+  first-question titles, desktop/mobile layout, logout and 429 cooldown checks. Model streams were
+  mocked; these checks made no paid model calls. Temporary test containers were removed afterward.
+- Existing local/production databases were not migrated, and their guest configuration was not enabled.
 
 ## Test commands
 

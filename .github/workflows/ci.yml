@@ -53,7 +53,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_NATIVE=OFF
 
       - name: Build focused test
-        run: cmake --build build --target knowledge-search-service-test mysql-pool-test native-mcp-test-server --parallel 2
+        run: cmake --build build --target knowledge-search-service-test mysql-pool-test native-mcp-test-server auth-security-test auth-service-test --parallel 2
 
       - name: Run focused backend tests
         env:
@@ -62,6 +62,8 @@ jobs:
         run: |
           ./build/bin/knowledge-search-service-test
           ./build/bin/mysql-pool-test
+          ./build/bin/auth-security-test
+          ./build/bin/auth-service-test
 
       - name: Set up Node.js for MCP interoperability
         uses: actions/setup-node@v4
@@ -155,6 +157,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: node --experimental-strip-types --test tests/session-title.spec.ts tests/sse.spec.ts
       - run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: '1'

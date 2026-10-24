@@ -303,6 +303,7 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     await send('自动创建并生成');
     await wait(`document.querySelector('textarea[aria-label="输入问题"]').disabled`);
     await click('退出');
+    await evaluate(`(() => { const input = document.querySelector('input[type="password"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'test-password'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     await click('登录');
     await wait(`document.body.innerText.includes('会话A')`);
     assert.equal(await evaluate('window.mock.created.length'), 2, 'Logging in again must not create another session');
