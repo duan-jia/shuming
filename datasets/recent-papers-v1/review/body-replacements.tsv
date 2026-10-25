@@ -1,0 +1,20 @@
+uccl	Where does UCCL sit in the communication stack, and how does its NCCL integration avoid most application changes?	UCCL位于集合通信库与网卡低层通信原语之间，主要利用NCCL网络插件和共享库集成；UD路径存在需修改库代码的例外。	libnccl-net.so	4
+swift	What kernel-version compatibility issue does Swift cite for the earlier KRCore approach?	论文举例KRCore可安装于4.15.0-46-generic，却不能运行于默认Ubuntu 18.04的4.15.0-213-generic，说明细微内核差异也可能造成兼容问题。	Compatibility issues	4
+sdr-rdma	How do SDR's streaming-send and one-shot-send APIs differ in granularity and intended use?	流式发送允许按偏移追加块，适合重传等细粒度操作；一次性发送面向大连续块并在注入完成后销毁消息上下文。两者均为异步。	Sender-side optimizations	4
+eunomia	What switch count, server count and link configuration are used in Eunomia's Fat-tree versus Jellyfish example?	对比等价的8-ary Fat-tree与Jellyfish，包含80台交换机和128台服务器；链路100G，传播延迟1微秒。	80 switches	4
+varuna	How does Varuna distinguish pre-failure from post-failure when both appear as a missing ACK to the requester?	发送阶段尚未执行的请求为pre-failure；响应端已执行但ACK未返回的为post-failure。请求端观测相同，但执行状态不同。	Send Stage	4
+shift	Why does the SHIFT proof treat retrying an RDMA FADD as unsafe for exactly-once execution?	同一加法重试可能使累计增量变成两倍；故障后备用网卡无法仅凭发送端超时判断是否已执行。	Retrying FADD	4
+pcm	Does PCM promise identical algorithm behavior on every backend, and when must a backend reject a handler?	目标是源代码兼容而非行为完全相同；反馈粒度和数值等差异仍需验证，缺少必需信号或无法执行必需控制时后端必须拒绝。	source compatibility	4
+gwtf	How does GWTF discover peers and choose which stage should receive a newly joining node?	通过DHT发现节点，数据节点选出的leader优先把高容量新节点加入当前容量最小的stage以缓解瓶颈。	Distributed Hash Table	4
+bytescale	In ByteScale's 8K-capacity example, why is a fixed CP degree of 128 wasteful for shorter sequences?	128个设备是为1M上下文设置的；低于8K的序列无需跨设备划分，16K序列只需两个CP rank，统一128路导致冗余通信。	128 individual devices	4
+dreamddp	Why can in-place model-parameter synchronization corrupt forward or backward computation in local SGD?	原地通信和平均会直接修改参数，而前向和反向都依赖参数，重叠时可能造成特征及梯度计算不正确。	in-place synchronization	4
+infinipipe	How does Concertina define batched, split and hybrid chunks, and why avoid packing two tail slices?	短序列组成batched chunk；长序列切成split chunk；短序列可与尾片组成hybrid chunk。避免打包两个尾片，因为会强制共同调度两条长序列并增加内存开销。	Batched Chunk	4
+flexpipe	Which built-in stage-placement strategies does the FlexPipe DSL provide?	内置一对一、环形、V形和双向stage放置策略；论文指出没有一种在所有指标上都占优。	bidirectional stage placement	4
+zorse	Why can equal batch allocation within a heterogeneous data-parallel stage create a bottleneck?	快GPU会等待慢GPU；只按GPU型号拆分又增加流水线阶段与气泡，因此需要stage内计算负载均衡。	uniform allocation	4
+hopper	How does Hopper estimate the rerouting delay needed to reduce out-of-order delivery?	以线性回归估计当前路径在途包的RTT趋势，估计末包延迟，并参考两条路径的RTT差设置保守的切换等待。	linear regression	4
+rdmacell	How do RDMACell's WQE-Token and WQE-Payload differ, and where is Global_Cell_ID carried?	Token使用WRITE_WITH_IMM，在32位Immediate Data中携带标识并产生接收端完成事件；Payload使用普通RDMA_WRITE传送剩余数据，避免增加接收端CQE压力。	WQE-Token uses	4
+spritz	What roles do EV1 and EV2 play in Spritz's source-guided routing?	分别控制ECMP1和ECMP2处的前两跳选择；到达中间位置后使用默认转发表沿最短路径到目的地。	ECMP1	4
+psp	How does PSP react when a path's actual bandwidth falls below its expected capacity?	排队积累经Band映射转化为较低调度权重，以概率方式抑制继续注入，趋向剩余带宽平衡。	negative-feedback control	4
+prime	How does PRIME distinguish the congestion severity of ECN marks and NACKs from loss or trimming?	对ECN对应路径施加短时惩罚；对丢包或裁剪触发的NACK视为更严重拥塞并惩罚更久。	ECN-marking	4
+host-flowlet	Where is the host-driven SRv6 flowlet algorithm implemented, and how is per-flow state stored?	实现为挂载在Linux tc hook的单个eBPF程序，以eBPF map保存每流状态和可用SID信息。	tc hook	4
+lcmp	Which components are fused in LCMP's integer path cost, and what information does each contain?	把路径质量与拥塞成本加权组合；路径分数编码传播延迟和配置容量，拥塞分数结合即时队列、短期趋势和持续性惩罚。	persistence penalty	4
