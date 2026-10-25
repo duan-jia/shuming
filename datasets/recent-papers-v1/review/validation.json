@@ -1,0 +1,31 @@
+{
+  "checked_at": "2026-10-25",
+  "runtime": {
+    "node": "v22.23.3",
+    "platform": "linux",
+    "arch": "x64",
+    "pdfjs_dist": "6.4.299",
+    "canvas": "1.0.13"
+  },
+  "checks": {
+    "clean_npm_ci_ignore_scripts": "passed",
+    "node_tests": {
+      "passed": 16,
+      "failed": 0
+    },
+    "jsonl_references_and_counts": "passed",
+    "pinned_pdf_hashes": 30,
+    "pdf_pages_reextracted_from_clean_install": 451,
+    "evidence_locations_reverified": 90,
+    "bytescale_page_4_rendered_and_visually_inspected": true,
+    "node_script_syntax": "passed"
+  },
+  "not_performed": [
+    "independent human review",
+    "real model agent execution",
+    "live RAG retrieval evaluation",
+    "database import",
+    "server deployment"
+  ],
+  "warning": "Unit tests and dataset checks are not method-effectiveness results."
+}

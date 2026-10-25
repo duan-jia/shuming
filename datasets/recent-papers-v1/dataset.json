@@ -1,0 +1,27 @@
+{
+  "name": "shuming-recent-papers-eval",
+  "version": "0.1.0",
+  "date": "2026-10-25",
+  "status": "assistant_reviewed_silver",
+  "independent_human_review": false,
+  "real_model_evaluation_performed": false,
+  "training_membership": "unknown",
+  "selection_window": {
+    "start": "2024-10-25",
+    "end": "2026-10-25",
+    "basis": "arxiv_first_submission_not_proven_earliest_release"
+  },
+  "counts": {
+    "papers": 30,
+    "family_groups": 28,
+    "rag_queries": 100,
+    "single_document_queries": 90,
+    "multi_document_queries": 10,
+    "rag_qrels": 110,
+    "evidence_locations": 90,
+    "agent_tasks": 30
+  },
+  "split_policy": "draft_unsplit; freeze grouped splits after contamination and relevance audit",
+  "corpus_fulltext_bundled": false,
+  "ci_or_deployment_changed": false
+}

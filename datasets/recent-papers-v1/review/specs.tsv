@@ -1,0 +1,90 @@
+uccl	UCCL把RDMA传输的控制路径放在哪里执行，这样做解决什么演进问题？	控制路径在主机CPU执行，与网卡数据路径分离，使传输策略可以由软件扩展。	control path
+uccl	不更换现有RDMA网卡，如何通过软件多路径缓解GPU集合通信中的流碰撞？找出对应系统。	UCCL在现有RDMA网卡上解耦数据与控制路径，通过主机软件实现多路径传输。	flow collisions
+uccl	Where does UCCL sit in the communication stack, and how does its NCCL integration avoid most application changes?	UCCL位于集合通信库与网卡低层通信原语之间，主要利用NCCL网络插件和共享库集成；UD路径存在需修改库代码的例外。	libnccl-net.so	4
+swift	Swift为什么认为RDMA连接建立不一定需要极端微秒级控制面优化？	通过用户态资源缓存和fork共享，可以改善弹性计算中的初始化和资源复用。	caching
+swift	Swift针对冷请求、热请求及fork请求分别利用了哪些机制？	冷、热请求使用缓存优化的libibverbs初始化，fork请求利用RDMA的fork能力。	fork requests
+swift	What kernel-version compatibility issue does Swift cite for the earlier KRCore approach?	论文举例KRCore可安装于4.15.0-46-generic，却不能运行于默认Ubuntu 18.04的4.15.0-213-generic，说明细微内核差异也可能造成兼容问题。	Compatibility issues	4
+sdr-rdma	在跨数据中心RDMA中，为什么Selective Repeat不一定优于纠删码？	丢包率、距离和带宽等长途链路特征会改变可靠性机制的成本，选择重传并非始终高效。	Selective Repeat
+sdr-rdma	SDR SDK如何让应用实现自定义RDMA可靠性方案？	向标准点对点RDMA语义加入接收缓冲区位图，支持部分消息完成并保留零拷贝。	partial message completion
+sdr-rdma	How do SDR's streaming-send and one-shot-send APIs differ in granularity and intended use?	流式发送允许按偏移追加块，适合重传等细粒度操作；一次性发送面向大连续块并在注入完成后销毁消息上下文。两者均为异步。	Sender-side optimizations	4
+eunomia	Eunomia使用什么结构在有限片上内存中跟踪乱序数据包？	采用混合动态位图，并配合定制内存控制器管理位图空间。	hybrid-dynamic bitmap
+eunomia	为什么RDMA的按序交付约束会妨碍细粒度负载均衡和Jellyfish拓扑？	这些技术容易产生包乱序，而传统RDMA的按序要求会使其性能恶化；Eunomia提供乱序处理层。	packet reordering
+eunomia	What switch count, server count and link configuration are used in Eunomia's Fat-tree versus Jellyfish example?	对比等价的8-ary Fat-tree与Jellyfish，包含80台交换机和128台服务器；链路100G，传播延迟1微秒。	80 switches	4
+varuna	Varuna为什么不在链路故障后无差别重传所有在途RDMA请求？	已经执行的请求再次重传会浪费带宽，非幂等操作还可能因重复执行破坏语义。	non-idempotent
+varuna	Varuna通过什么信息区分已执行和未执行的在途请求？	在RDMA操作上附带轻量完成日志，故障后据此决定重传或恢复返回值。	completion log
+varuna	How does Varuna distinguish pre-failure from post-failure when both appear as a missing ACK to the requester?	发送阶段尚未执行的请求为pre-failure；响应端已执行但ACK未返回的为post-failure。请求端观测相同，但执行状态不同。	Send Stage	4
+byteexpress	ByteExpress用于哪类生产系统，它如何同时处理缓冲区和连接扩展问题？	用于字节跳动参数服务器式推理与训练；组合RDMA感知内存分配、零拷贝、QP复用和流控等机制。	QP multiplexing
+byteexpress	ByteExpress为什么需要在传输层之上恢复服务可用性？	硬件卸载本身不能处理所有服务故障，系统使用RPC辅助恢复保障上层服务。	RPC-assisted recovery
+byteexpress	Compared with kernel TCP, what mean and P99 parameter-fetch latency reductions are reported for ByteExpress inference?	推理参数拉取平均延迟降低35.7%，P99降低43.7%。	35.7
+reimagining-rdma	Celeris为什么把丢包恢复移出RDMA网卡？	利用机器学习对部分或缺失数据的容忍度，去除网卡重传和按序交付，并由训练流水线承担恢复。	Celeris
+reimagining-rdma	哪项研究提出保留拥塞控制，却以自适应超时和数据优先级管理机器学习RDMA传输？	Reimagining RDMA Through the Lens of ML提出Celeris，并把恢复交给ML流水线。	adaptive timeouts
+reimagining-rdma	What coding transform is mentioned for loss recovery in the Celeris proposal?	Hadamard变换；不要据此推断其适用于任意无损通用RDMA应用。	Hadamard
+shift	SHIFT提出的跨网卡RDMA故障切换三难问题包括哪三个性质？	恰好一次执行、接收端网卡不透明性和零拷贝数据路径无法同时满足。	Trilemma
+shift	SHIFT利用训练框架的什么传输特性来放宽跨网卡切换限制？	主流训练框架中的幂等批量传输容忍放宽内存顺序，但仍需保持通知顺序。	idempotent
+shift	Why does the SHIFT proof treat retrying an RDMA FADD as unsafe for exactly-once execution?	同一加法重试可能使累计增量变成两倍；故障后备用网卡无法仅凭发送端超时判断是否已执行。	Retrying FADD	4
+optinic	OptiNIC与强调完整可靠交付的RDMA网卡相比改变了哪些保证？	去除网卡重传和按序交付，采用尽力而为、乱序传输，以自适应超时推进执行。	adaptive timeouts
+optinic	OptiNIC是否取消拥塞控制？它把损失恢复交给哪一层？	保留DCQCN、EQDS或Swift等拥塞控制机制，将恢复交给ML流水线。	congestion control
+optinic	Which two public test environments are named in the OptiNIC evaluation?	Hyperstack和CloudLab。	Hyperstack
+pcm	PCM如何降低拥塞管理策略对不同RDMA网卡厂商API的依赖？	把可移植的拥塞管理程序与平台集成分离，用厂商后端映射到原生网卡机制。	portable congestion management
+pcm	PCM如何通过signals和triggers支持不同粒度的反馈处理？	将流遥测作为signals，通过triggers支持逐事件响应和聚合反馈响应。	triggers
+pcm	Does PCM promise identical algorithm behavior on every backend, and when must a backend reject a handler?	目标是源代码兼容而非行为完全相同；反馈粒度和数值等差异仍需验证，缺少必需信号或无法执行必需控制时后端必须拒绝。	source compatibility	4
+gwtf	GWTF如何处理异构志愿节点随时加入、退出的去中心化大模型训练？	面向节点波动和不稳定网络，利用去中心化流算法安排微批次路由。	node churn
+gwtf	GWTF的核心路由算法希望优化哪两个训练目标？	增加可训练微批次数量，并尽量降低其延迟。	microbatches
+gwtf	How does GWTF discover peers and choose which stage should receive a newly joining node?	通过DHT发现节点，数据节点选出的leader优先把高容量新节点加入当前容量最小的stage以缓解瓶颈。	Distributed Hash Table	4
+bytescale	ByteScale的Hybrid Data Parallelism与静态二维设备网格有何区别？	HDP用动态网格统一数据间和数据内划分，适应混合长短序列。	dynamic mesh
+bytescale	哪项训练系统通过数据感知分片、动态通信和选择性卸载减少长短序列混训开销？	ByteScale；短序列减少冗余通信，长序列结合选择性卸载。	selective offloading
+bytescale	In ByteScale's 8K-capacity example, why is a fixed CP degree of 128 wasteful for shorter sequences?	128个设备是为1M上下文设置的；低于8K的序列无需跨设备划分，16K序列只需两个CP rank，统一128路导致冗余通信。	128 individual devices	4
+dreamddp	DreamDDP怎样改变Local SGD的整模型周期同步方式？	按层解耦同步，每轮仅同步部分层，以更好重叠通信和计算。	partial local SGD
+dreamddp	DreamDDP调度通信与计算时依赖什么粒度的性能信息？	依赖层级通信与计算时间的细粒度剖析。	fine-grained profiling
+dreamddp	Why can in-place model-parameter synchronization corrupt forward or backward computation in local SGD?	原地通信和平均会直接修改参数，而前向和反向都依赖参数，重叠时可能造成特征及梯度计算不正确。	in-place synchronization	4
+spantrain	DeepCEE如何为异构GPU和跨区域网络建立设备分组？	设备剖析器同时考虑网络和计算特征，再按分组推导并行策略。	device profiler
+spantrain	DeepCEE如何应对训练过程中的区域间网络波动？	使用动态环境适配器响应运行时网络变化。	dynamic environment adapter
+spantrain	What pipeline-parallel design is named in the DeepCEE abstract?	紧凑、零气泡流水线并行；该版本标题为DeepCEE，早期版本使用SpanTrain名称。	zero-bubble
+infinipipe	Concertina为何不能仅固定使用序列打包或序列切分一种流水线粒度？	长尾序列长度分布造成内存与算力利用率的权衡，固定粒度不能兼顾混合工作负载。	skewed
+infinipipe	Concertina把动态块调度与什么检查点机制联合优化？	与Stage-Aware Chunk-Level Adaptive Checkpointing联合优化。	Stage-Aware Chunk-Level Adaptive Checkpointing
+infinipipe	How does Concertina define batched, split and hybrid chunks, and why avoid packing two tail slices?	短序列组成batched chunk；长序列切成split chunk；短序列可与尾片组成hybrid chunk。避免打包两个尾片，因为会强制共同调度两条长序列并增加内存开销。	Batched Chunk	4
+flexpipe	FlexPipe由哪两个核心组件组成？	简洁的领域专用语言DSL和自动调度器。	domain-specific language
+flexpipe	FlexPipe如何帮助用户定制跨stage的微批计算顺序？	通过DSL表达和控制微批在不同stage上的流水线顺序，并允许加入新操作。	micro-batch computations
+flexpipe	Which built-in stage-placement strategies does the FlexPipe DSL provide?	内置一对一、环形、V形和双向stage放置策略；论文指出没有一种在所有指标上都占优。	bidirectional stage placement	4
+lemix	LeMix针对训练与推理分离部署的哪类资源浪费提出共置方案？	动态推理请求与异构训练工作负载造成GPU空闲和适配延迟，LeMix联合管理二者。	GPU idleness
+lemix	LeMix动态分配资源依赖哪些分析与调度组件？	离线剖析、执行预测和运行时调度，并考虑共享节点上的共同执行干扰。	offline profiling
+lemix	What maximum throughput improvement is reported for LeMix over separate setups?	最高3.53倍；不代表所有负载均有此增益。	3.53
+charllm	CharLLM-PPT研究为什么认为增加硬件容量不必然提升训练性能？	性能受并行策略、拓扑和通信瓶颈共同影响，scale-up与scale-out各有适用条件。	scale-up
+charllm	为什么把微批大小增大到一定程度可能加剧热降频？	更大的微批可造成突发执行和峰值功耗上升，进而恶化热降频。	thermal throttling
+charllm	Which NVIDIA and AMD accelerators are covered in the distributed-training power and thermal characterization?	NVIDIA H100/H200以及AMD MI250。	MI250
+scaling-pretraining	Scaling Performance of Large Language Model Pretraining所用TX-GAIN集群有多少计算节点？	316个HPE计算节点；每节点配备两块H100-NVL。	316
+scaling-pretraining	该预训练扩展实验的模型类型、数据领域及训练目标是什么？	BERT式编码器，以二进制代码数据进行掩码语言建模，随机遮盖15%的token。	binary code
+scaling-pretraining	What is the largest node and GPU count reported for the pretraining scaling runs?	128个节点，共256块GPU。	256 GPUs
+zorse	Zorse为什么需要把异构GPU放入同一数据并行组并允许不对称流水线stage？	为适应不同代GPU的计算、显存和网络差异，需要灵活组合流水线与数据并行。	asymmetric
+zorse	哪项系统用自动规划器配置异构GPU集群的通信和显存高效训练策略？	Zorse，结合灵活的流水线与数据并行规划。	planner
+zorse	Why can equal batch allocation within a heterogeneous data-parallel stage create a bottleneck?	快GPU会等待慢GPU；只按GPU型号拆分又增加流水线阶段与气泡，因此需要stage内计算负载均衡。	uniform allocation	4
+hopper	Hopper是否要求修改交换机或增加专用硬件？	不需要；它在主机侧运行，通过监测拥塞选择其他路径。	no specialized hardware
+hopper	Hopper为什么需要控制路径切换时机，而不是检测到拥塞就任意切换？	需要避免过量乱序包，并以轻量机制寻找候选路径。	out-of-order
+hopper	How does Hopper estimate the rerouting delay needed to reduce out-of-order delivery?	以线性回归估计当前路径在途包的RTT趋势，估计末包延迟，并参考两条路径的RTT差设置保守的切换等待。	linear regression	4
+rdmacell	RDMACell如何在没有天然flowlet间隙时实现更细粒度多路径传输？	主动将流划分为flowcell，再把它们分配到多条路径。	proactively splits
+rdmacell	RDMACell采用什么接收侧控制与反馈机制？	接收侧令牌控制，并利用原子双WQE实现实时反馈，无需修改网卡固件或交换机硬件。	Work Queue
+rdmacell	How do RDMACell's WQE-Token and WQE-Payload differ, and where is Global_Cell_ID carried?	Token使用WRITE_WITH_IMM，在32位Immediate Data中携带标识并产生接收端完成事件；Payload使用普通RDMA_WRITE传送剩余数据，避免增加接收端CQE压力。	WQE-Token uses	4
+spritz	Spritz为什么把低直径网络的拓扑感知路由移到发送端？	避免依赖专有交换机机制，同时利用Dragonfly、Slim Fly等拓扑的路径多样性。	standard Ethernet
+spritz	Spritz的两个算法使用哪些反馈探索或维护路径？	Spritz-Scout与Spritz-Spray使用ECN、包裁剪和超时反馈。	packet trimming
+spritz	What roles do EV1 and EV2 play in Spritz's source-guided routing?	分别控制ECMP1和ECMP2处的前两跳选择；到达中间位置后使用默认转发表沿最短路径到目的地。	ECMP1	4
+psp	PSP如何避免对所有端口状态进行全局排序？	使用Band离散状态表示和局部概率映射执行逐包分发。	local probability mapping
+psp	PSP为什么关注过期状态引起的herding和振荡？	旧状态可能使多个选择集中涌向同一端口，PSP用概率映射抑制这种不稳定行为。	herding
+psp	How does PSP react when a path's actual bandwidth falls below its expected capacity?	排队积累经Band映射转化为较低调度权重，以概率方式抑制继续注入，趋向剩余带宽平衡。	negative-feedback control	4
+prime	ACK合并为什么会给既有packet spraying方案带来问题？	它会导致反馈状态陈旧，随时间造成缓冲区膨胀和网络性能下降。	ACK coalescing
+prime	PRIME如何结合伪随机轮转与拥塞信号进行负载重平衡？	考虑网络拓扑、拥塞严重程度和信号衰减时间，调整负载以避免热点。	decay times
+prime	How does PRIME distinguish the congestion severity of ECN marks and NACKs from loss or trimming?	对ECN对应路径施加短时惩罚；对丢包或裁剪触发的NACK视为更严重拥塞并惩罚更久。	ECN-marking	4
+host-flowlet	基于SRv6的主机驱动flowlet均衡如何减少交换机每流状态？	主机识别flowlet并以SRv6指定路径，交换机作为无状态SRv6节点转发。	stateless
+host-flowlet	该SRv6 flowlet方案用什么指标估计各路径负载？	用简单模型估计每条路径的在途字节数。	in-flight bytes
+host-flowlet	Where is the host-driven SRv6 flowlet algorithm implemented, and how is per-flow state stored?	实现为挂载在Linux tc hook的单个eBPF程序，以eBPF map保存每流状态和可用SID信息。	tc hook	4
+ofan	Ofan为什么认为fat-tree中的destination-oblivious分发会产生结构性不平衡？	上行路径一旦确定，到目的地的下行路径就唯一，无法再消除先前造成的不平衡。	downward path
+ofan	Ofan与pOfan的关系是什么？	Ofan是目的地感知的交换机负载均衡方案，pOfan是适配现有交换机流水线架构的变体。	pipe-based
+ofan	Which training setup is used in Ofan's end-to-end evaluation?	FSDP2与Llama-3 405B参数模型。	405B
+lb-ai-training	Load Balancing for AI Training Workloads如何避免把负载均衡与拥塞控制及丢包恢复混为一谈？	系统评估时把负载均衡设计与具体拥塞控制、恢复栈解耦。	decoupling
+lb-ai-training	该研究在链路正常与链路故障时如何比较主机侧和交换机侧packet spraying？	正常时两者表现接近；故障时主机侧因更快感知端到端路径状态而占优，限于其评测条件。	link failure
+lb-ai-training	Which scheduling discipline is proposed to reach optimal constant queue scaling at maximum utilization?	目的地轮转Destination-based Rotation，简称DR，并提出Ofan作为交换机实现。	destination-based rotation
+lcmp	LCMP如何同时考虑跨数据中心路径不对称和拥塞反馈迟滞？	把控制面路径质量评分与紧凑的交换机拥塞信号结合，兼顾成本和响应速度。	path-quality
+lcmp	LCMP如何减少多条流同时选择同一路径的决策碰撞？	先过滤高成本候选，再在缩小的集合中采用保留多样性的哈希。	diversity-preserving
+lcmp	Which components are fused in LCMP's integer path cost, and what information does each contain?	把路径质量与拥塞成本加权组合；路径分数编码传播延迟和配置容量，拥塞分数结合即时队列、短期趋势和持续性惩罚。	persistence penalty	4
+dlb	DLB如何在大规模异构生成式AI服务中获得服务器容量信息？	采用可扩展分布式设计，通过点对点探测保持容量可见性。	peer-to-peer probing
+dlb	DLB如何把路由选择与不同硬件、模型的延迟影响联系起来？	持续学习延迟模型，估计路由决策的延迟影响，而不是只按请求数均分。	latency models
+dlb	What deployment duration and production latency reductions are reported for Google's DLB?	报告22个月部署，迁移分析中中位延迟降低17%、P95降低13%；它是服务请求级负载均衡而非逐包方案。	22-month
