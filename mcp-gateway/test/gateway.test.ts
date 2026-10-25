@@ -5,6 +5,74 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { createGateway } from '../src/app.js';
 import { sha256Token, type GatewayConfig } from '../src/config.js';
 
+test('native routes preserve RPC and protocol, authenticate and refresh JWT', async () => {
+  let logins = 0;
+  const paths: string[] = [];
+  const upstream = createServer((req, res) => {
+    let text = '';
+    req.on('data', chunk => { text += chunk; });
+    req.on('end', () => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/api/auth/login') {
+        res.end(JSON.stringify({ token: `jwt-${++logins}`, user: { tenant_id: 7 } }));
+        return;
+      }
+      assert.equal(req.headers['mcp-protocol-version'], '2025-11-25');
+      assert.equal(req.headers.origin, 'http://127.0.0.1');
+      paths.push(req.url!);
+      if (req.headers.authorization === 'Bearer jwt-1') {
+        res.statusCode = 401;
+        res.end('{}');
+        return;
+      }
+      assert.equal(req.headers.authorization, 'Bearer jwt-2');
+      const rpc = JSON.parse(text);
+      if (!('id' in rpc)) {
+        res.statusCode = 202;
+        res.end();
+        return;
+      }
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { tools: [
+        { name: req.url === '/mcp/web' ? 'search_web' : 'fetch_knowledge' }
+      ] } }));
+    });
+  });
+  await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  const address = upstream.address();
+  assert(address && typeof address !== 'string');
+  const gateway = createGateway({ host: '127.0.0.1', port: 0, allowedHosts: ['127.0.0.1'],
+    ragApiBaseUrl: `http://127.0.0.1:${address.port}`, ragTimeoutMs: 1000,
+    principals: [{ name: 'waku', tokenSha256: sha256Token('secret'), tenantId: 7,
+      upstreamUsername: 'service', upstreamPassword: 'password' }] });
+  const server = gateway.listen();
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const gw = server.address();
+  assert(gw && typeof gw !== 'string');
+  try {
+    for (const path of ['/mcp/knowledge', '/mcp/web']) {
+      const url: string = `http://127.0.0.1:${gw.port}${path}`;
+      assert.equal((await fetch(url, { method: 'POST' })).status, 401);
+      const headers = { authorization: 'Bearer secret', 'content-type': 'application/json',
+        'mcp-protocol-version': '2025-11-25', origin: 'http://127.0.0.1' };
+      const response = await fetch(url, { method: 'POST', headers,
+        body: JSON.stringify({ jsonrpc: '2.0', id: 42, method: 'tools/list' }) });
+      assert.equal(response.status, 200);
+      const rpc = await response.json();
+      assert.equal(rpc.id, 42);
+      assert.equal(rpc.result.tools[0].name, path === '/mcp/web' ? 'search_web' : 'fetch_knowledge');
+      assert.equal((await fetch(url, { method: 'POST', headers,
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) })).status, 202);
+      assert.equal((await fetch(url, { headers })).status, 405);
+    }
+    assert.equal(logins, 2);
+    assert.equal(paths.length, 5);
+  } finally {
+    server.close();
+    upstream.close();
+    await gateway.close();
+  }
+});
+
 test('search_knowledge forwards the tenant-bound upstream token', async () => {
   let receivedAuthorization = '';
   let receivedBody = '';
