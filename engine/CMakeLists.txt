@@ -204,3 +204,14 @@ if(FASTLLM_BUILD_TESTS)
     target_compile_options(auth-service-test PRIVATE -UNDEBUG)
     add_test(NAME auth-service-test COMMAND auth-service-test)
 endif()
+
+if(FASTLLM_BUILD_TESTS)
+    add_executable(rag-metadata-test
+        tests/rag_metadata_test.cpp
+        src/rag/chunker.cpp
+        src/rag/bm25_index.cpp
+    )
+    target_include_directories(rag-metadata-test PRIVATE include ${faiss_SOURCE_DIR})
+    target_link_libraries(rag-metadata-test PRIVATE nlohmann_json::nlohmann_json spdlog::spdlog)
+    add_test(NAME rag-metadata-test COMMAND rag-metadata-test)
+endif()

@@ -1,0 +1,64 @@
+{
+  "review_date": "2026-10-25",
+  "scope": "dataset_contract_and_corpus_alignment_audit; source_passage_spot_checks_not_exhaustive_relevance_judging",
+  "silver_dataset": {
+    "papers": 30,
+    "queries": 100,
+    "positive_qrels": 110,
+    "negative_qrels": 0,
+    "complete_qrels_queries": 0,
+    "evidence_spans": 90,
+    "agent_tasks": 30,
+    "body_single_document_queries": 21
+  },
+  "silver_dataset_hashes": {
+    "dataset.json": "8c0252c52e92f4ae678f6bcdd9c090c5e8faeecbb90f540e788d0e1c933be784",
+    "rag/queries.jsonl": "55253a58b9b86c3f35249dfd86327a3f2fa49fee6a94d497d565c2eca0385053",
+    "rag/qrels.jsonl": "f8d7bfd74b048179a57959045942a69f939f905c0371c7539eb632d2684c39d7",
+    "rag/evidence.jsonl": "aee40fffd8665cc7a9a55a05106097fe374526ada5e27c4846daa2c8b2b5a014",
+    "agent/tasks.jsonl": "db65ec1e0452d3fcc7b61930630565604e0c9c5ae6ef16f2ab69903ef094027e",
+    "scripts/grade.mjs": "00e213c7834c5119e033a7de4abffac236a38cde47946f85422a55e9bbe656ea"
+  },
+  "legacy_corpus_match": {
+    "backend": "http://127.0.0.1:9007",
+    "visible_documents": 31,
+    "expected_unique_paths": 19,
+    "matched_paths": 0
+  },
+  "reproduced_grader_issues": [
+    {
+      "probe": "errored_search_still_supplies_doc_id",
+      "expected_mechanical_pass": false,
+      "observed": {
+        "task_id": "agent-001",
+        "mechanical_pass": true,
+        "errors": [],
+        "semantic_review_required": true,
+        "semantic_rubric": [
+          "fetch_doc_id_must_come_from_successful_search",
+          "answer_cites_fetched_source"
+        ],
+        "warning": "Mechanical checks are not an overall agent pass; independently review correctness, citations, refusal and leakage. This scorer trusts normalized trace results and is not an audit-proof execution attestor."
+      }
+    },
+    {
+      "probe": "wrong_page_image_plus_page4_text",
+      "expected_mechanical_pass": false,
+      "observed": {
+        "task_id": "agent-012",
+        "mechanical_pass": true,
+        "errors": [],
+        "semantic_review_required": true,
+        "semantic_rubric": [
+          "fetch_representation_pages",
+          "fetch_page_4",
+          "visual_answer_requires_image_capable_model"
+        ],
+        "warning": "Mechanical checks are not an overall agent pass; independently review correctness, citations, refusal and leakage. This scorer trusts normalized trace results and is not an audit-proof execution attestor."
+      }
+    }
+  ],
+  "additional_positive_proposals": 1,
+  "human_independent_review": false,
+  "model_quality_evaluation_run": false
+}

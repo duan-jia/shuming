@@ -7,8 +7,7 @@ namespace fastllm {
 
 struct ChunkMetadata {
     std::string category;
-    std::string dish;
-    std::string difficulty;
+    std::string title;
 };
 
 struct DocumentChunk {
