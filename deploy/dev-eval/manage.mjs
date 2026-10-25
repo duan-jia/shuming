@@ -34,7 +34,7 @@ export function composeArgs(command) {
     stop: ['stop', '--timeout', '20'],
     status: ['ps'],
   };
-  if (!operations[command]) throw Error('Unsupported operation');
+  if (!Object.hasOwn(operations, command)) throw Error('Unsupported operation');
   return ['compose', '--project-name', PROJECT, '--env-file', `${ROOT}/.env`, '-f', `${REPO}/deploy/dev-eval/compose.json`, ...operations[command]];
 }
 export function assertSafeRoot(io = fs) {
@@ -45,8 +45,8 @@ export function assertSafeRoot(io = fs) {
     if (location === `${ROOT}/.env` || location === `${ROOT}/init.sql`) {
       const forbidden = location.endsWith('/.env') ? 0o077 : 0o022;
       if (!stat.isFile() || (stat.mode & forbidden)) throw Error(`Unsafe file permissions: ${location}`);
-    } else if (!stat.isDirectory() || (stat.mode & 0o022)) {
-      throw Error(`Non-writable-by-others directory required: ${location}`);
+    } else if (!stat.isDirectory() || (stat.mode & (location === ROOT ? 0o077 : 0o022))) {
+      throw Error(`Unsafe directory permissions (deployment root must be private): ${location}`);
     }
   }
 }

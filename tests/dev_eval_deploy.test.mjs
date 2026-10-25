@@ -35,6 +35,9 @@ test('credential generation is independent and parser rejects overrides/injectio
 test('commands pin target and cannot remove volumes or inherit external Docker context', () => {
   assert.throws(()=>composeArgs('down'));
   assert.throws(()=>composeArgs('rm'));
+  for (const command of ['constructor', 'toString', '__proto__', undefined]) {
+    assert.throws(()=>composeArgs(command), /Unsupported operation/);
+  }
   for(const command of ['up','stop','status','check']) {
     const a=composeArgs(command);
     assert.equal(a[a.indexOf('--project-name')+1],PROJECT);
@@ -57,7 +60,7 @@ test('preparation preserves existing credentials and refuses partial/missing rec
 function mockFs(bad, mode=0o600) {
   return {lstatSync: location=>{
     const file=location.endsWith('/.env')||location.endsWith('/init.sql');
-    return {isSymbolicLink:()=>location===bad,isFile:()=>file,isDirectory:()=>!file,mode:file?(location.endsWith('/init.sql')?0o644:mode):0o755};
+    return {isSymbolicLink:()=>location===bad,isFile:()=>file,isDirectory:()=>!file,mode:file?(location.endsWith('/init.sql')?0o644:mode):(location===ROOT?0o700:0o755)};
   }};
 }
 test('root and file symlinks, including dangling links, are rejected', () => {
@@ -66,4 +69,12 @@ test('root and file symlinks, including dangling links, are rejected', () => {
 test('credentials must be private but public schema remains readable by MySQL container UID', () => {
   assert.throws(()=>assertSafeRoot(mockFs('',0o644)),/permissions/);
   assert.doesNotThrow(()=>assertSafeRoot(mockFs('')));
+});
+test('deployment directory must be private and parent must not be writable by others', () => {
+  for (const [location, mode] of [[ROOT, 0o755], [ROOT, 0o770], ['/srv', 0o777]]) {
+    const io = mockFs('');
+    const lstat = io.lstatSync;
+    io.lstatSync = p => ({...lstat(p), ...(p === location ? {mode} : {})});
+    assert.throws(() => assertSafeRoot(io));
+  }
 });
