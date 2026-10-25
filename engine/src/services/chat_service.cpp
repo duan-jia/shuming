@@ -1,5 +1,6 @@
 #include "services/chat_service.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <random>
@@ -218,6 +219,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
 
         bool enable_rag = guest || body.value("enable_rag", use_agent);
         infer_params.system_prompt = guest ? "You are a research assistant for a public knowledge demo. Use only publicly available context and do not claim access to private laboratory data." : ctx_.system_prompt;
+        nlohmann::json fallback_source_files = nlohmann::json::array();
         if (!use_agent && enable_rag && ctx_.knowledge_search_service) {
             SearchKnowledgeRequest search_request;
             search_request.query = message;
@@ -236,6 +238,13 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
                     search_request, caller);
                 infer_params.system_prompt = RagPromptFormatter::format(
                     search_result, infer_params.system_prompt);
+                for (const auto& evidence : search_result.evidence) {
+                    const bool seen = std::any_of(fallback_source_files.begin(), fallback_source_files.end(),
+                        [&](const nlohmann::json& ref) { return ref["doc_id"] == evidence.document_id; });
+                    if (seen) continue;
+                    auto ref = tools_.download_reference(evidence.document_id, caller);
+                    if (ref.is_object()) fallback_source_files.push_back(std::move(ref));
+                }
             } catch (const KnowledgeSearchError& e) {
                 spdlog::warn("RAG search skipped for chat request {}: {}", request_id, e.what());
             }
@@ -321,7 +330,8 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             } catch (...) {}
         };
 
-        infer_req->on_done = [ctx, sse, utf8_buf, message, session_id, request_id, bill_tenant, bill_user, admission, active = active_, state](const InferResult& result) {
+        infer_req->on_done = [ctx, sse, utf8_buf, message, session_id, request_id, bill_tenant, bill_user, admission, active = active_, state, fallback_source_files](const InferResult& result) {
+            const auto& source_files = result.source_files.empty() ? fallback_source_files : result.source_files;
             // Settle all completed model rounds, including cancelled/failed runs.
             int total_tokens = result.prompt_tokens + result.completion_tokens;
             BillingService::ChargeResult charge_result;
@@ -333,7 +343,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             bool messages_saved = false;
             if (!result.text.empty()) {
                 messages_saved = ctx->message_repository && ctx->message_repository->insert_chat_pair(
-                    session_id, message, result.text, result.prompt_tokens, result.completion_tokens, result.reasoning);
+                    session_id, message, result.text, result.prompt_tokens, result.completion_tokens, result.reasoning, source_files.dump());
             }
             {
                 std::lock_guard<std::mutex> lock(active->mutex);
@@ -346,6 +356,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
                 if (sse->is_active()) {
                     nlohmann::json err;
                     err["type"] = "error";
+                    err["source_files"] = source_files;
                     err["error"] = result.error;
                     err["request_id"] = request_id;
                     err["stop_reason"] = result.stop_reason;
@@ -375,6 +386,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
 
             nlohmann::json j;
             j["type"] = "done";
+            j["source_files"] = source_files;
             j["finish_reason"] = result.finish_reason;
             j["truncated"] = result.finish_reason == "length";
             j["request_id"] = request_id;
