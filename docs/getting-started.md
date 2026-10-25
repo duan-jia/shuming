@@ -210,9 +210,15 @@ npm run build
 
 ```bash
 python3 -m unittest discover -s tests -p 'test_paper_card.py'
-# 需要可用的 CLI、模型和评测数据；不是无依赖单元测试
-python3 tests/rag_eval.py --gt tests/eval_queries.json
+python3 -m unittest discover -s tests -p 'test_evaluation.py'
+python3 -m unittest discover -s tests -p 'test_agent_model_eval.py'
+node tests/datasets/recent-papers-v1/scripts/validate.mjs
+node --test tests/datasets/recent-papers-v1/tests/dataset.test.mjs
+# 需要已导入的知识库、文档映射与 EMOS_EVAL_TOKEN
+python3 tests/rag_eval.py --base-url http://127.0.0.1:9007 --document-map /path/to/paper-doc-map.json --k 1 3 5 10
 ```
+
+Agent 工具契约、RAG 指标和数据集限制见 [评测指南](../tests/README.md)。
 
 [CI](../.github/workflows/ci.yml) 检查后端 CPU 构建/单元测试与 MCP 类型、测试、构建、安全审计。Staging E2E 另外验证真实 MySQL/后端/MCP 的服务账号认证、租户绑定与检索；它不等价于检索质量评测，也不覆盖完整 Web 问答链路。
 
