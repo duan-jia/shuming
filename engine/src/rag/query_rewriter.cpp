@@ -83,7 +83,7 @@ QueryRewriteResult QueryRewriter::rewrite(const std::string& query) const {
 
     try {
         nlohmann::json body;
-        body["model"] = model_.empty() ? "deepseek-chat" : model_;
+        body["model"] = model_.empty() ? "Qwen3.8-27B" : model_;
         body["temperature"] = 0;
         body["response_format"] = {{"type", "json_object"}};
         body["messages"] = nlohmann::json::array({

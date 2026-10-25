@@ -88,12 +88,19 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
     ctx.rag = std::make_unique<RagService>();
     ctx.rag->set_storage_dir(ctx.rag_dir);
     ctx.rag->set_mysql_pool(ctx.mysql_pool.get());
+    // OpenAI-compatible generation can run on this host, independently of the backend.
+    auto generation_endpoint = config.get_env_str("remote_engine.endpoint", "REMOTE_ENGINE_ENDPOINT");
+    if (generation_endpoint.empty()) generation_endpoint = "http://127.0.0.1:8010/v1";
+    auto generation_model = config.get_env_str("remote_engine.model", "REMOTE_ENGINE_MODEL");
+    if (generation_model.empty()) generation_model = "Qwen3.8-27B";
+    auto generation_key = config.get_env_str("remote_engine.api_key", "REMOTE_ENGINE_API_KEY");
+    if (generation_key.empty()) generation_key = config.get_env_str("remote_engine.api_key", "DEEPSEEK_API_KEY");
     ctx.rag->set_query_rewriter(std::make_unique<QueryRewriter>(
         config.get_bool("rag.query_rewrite.enabled", true),
-        config.get_str("remote_engine.endpoint", "https://api.deepseek.com/v1"),
+        generation_endpoint,
         config.get_str("rag.query_rewrite.model",
-            config.get_str("remote_engine.model", "deepseek-chat")),
-        config.get_env_str("remote_engine.api_key", "DEEPSEEK_API_KEY"),
+            generation_model),
+        generation_key,
         config.get_int("rag.query_rewrite.timeout_seconds", 10)
     ));
     ctx.knowledge_search_backend = std::make_unique<RagKnowledgeSearchBackend>(*ctx.rag);
@@ -112,14 +119,14 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
             spdlog::error("Failed to load model, chat will not work");
         }
     } else {
-        spdlog::warn("No model specified (--model <path>), chat will not work");
+        spdlog::info("No embedded model specified; generation uses the configured external API");
     }
 
     auto remote = std::make_unique<RemoteEngine>(
-        config.get_str("remote_engine.endpoint", "https://api.deepseek.com/v1"),
-        config.get_str("remote_engine.model", "deepseek-chat"),
-        config.get_env_str("remote_engine.api_key", "DEEPSEEK_API_KEY"),
-        config.get_int("remote_engine.context_window_tokens", 32768),
+        generation_endpoint,
+        generation_model,
+        generation_key,
+        config.get_int("remote_engine.context_window_tokens", 8192),
         config.get_bool("remote_engine.supports_images", false)
     );
     ctx.model_mgr->add_engine("remote", std::move(remote));
