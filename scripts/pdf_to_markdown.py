@@ -18,8 +18,8 @@ from typing import Any
 from paper_card import build_prompt, markdown_for, normalize_card
 
 
-DEFAULT_ENDPOINT = "https://api.deepseek.com/v1"
-DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_ENDPOINT = "http://127.0.0.1:8010/v1"
+DEFAULT_MODEL = "Qwen3.8-27B"
 
 
 def project_root() -> Path:
@@ -45,8 +45,8 @@ def load_remote_config(config_path: Path) -> tuple[str, str, str]:
     )
     api_key = (
         os.environ.get("REMOTE_ENGINE_API_KEY")
-        or os.environ.get("DEEPSEEK_API_KEY")
         or str(remote.get("api_key") or "")
+        or os.environ.get("DEEPSEEK_API_KEY")
     )
     return endpoint, model, api_key
 

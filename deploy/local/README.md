@@ -1,5 +1,7 @@
 # 本地 Docker 测试
 
+> 新安装默认生成服务改为Qwen3.8-27B，见[模型指南](../models/README.md)。本文件的已有Compose网络不自动迁移：容器里的127.0.0.1不是模型宿主机。下文DeepSeek说明仅为显式云服务替代方案，不能视为当前默认配置。
+
 从仓库根目录执行。需要 Docker Compose、Python 3；首次构建需要访问 Ubuntu、npm、GitHub 和 Hugging Face。
 
 ```bash

@@ -40,8 +40,8 @@
   "rag": {
     "storage_dir": "data/rag",
     "query_rewrite": {
-      "enabled": true,
-      "model": "deepseek-v4-flash",
+      "enabled": false,
+      "model": "Qwen3.8-27B",
       "timeout_seconds": 10
     }
   },
@@ -59,10 +59,10 @@
   },
   "http_threads": 2,
   "remote_engine": {
-    "endpoint": "https://api.deepseek.com/v1",
-    "model": "deepseek-chat",
-    "context_window_tokens": 32768,
-    "api_key": "",
+    "endpoint": "http://127.0.0.1:8010/v1",
+    "model": "Qwen3.8-27B",
+    "context_window_tokens": 8192,
+    "api_key": "local-no-auth",
     "supports_images": false
   },
   "web_search": {
@@ -88,9 +88,9 @@
     "enabled": true,
     "max_turns": 6,
     "max_total_tokens": 0,
-    "timeout_seconds": 90,
+    "timeout_seconds": 300,
     "max_tool_calls_per_turn": 4,
-    "max_tool_result_bytes": 24000,
+    "max_tool_result_bytes": 6000,
     "max_output_tokens": 0
   },
   "knowledge_fetch": {
