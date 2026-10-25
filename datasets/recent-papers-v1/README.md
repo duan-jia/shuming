@@ -1,4 +1,4 @@
-# 近期论文 Agent / RAG 测评数据 v0.1
+# 近期论文 Agent / RAG 测评数据 v0.1.1
 
 **状态：已由 Ncodex 二次核对的 silver 标注，不是独立人工审定的 gold，也不是“模型从未见过”的证明。**
 
@@ -11,7 +11,7 @@
 | 锁定版本的论文 | 30 篇：RDMA、分布式训练、网络/服务负载均衡各 10 篇 |
 | 研究家族 | 28 组；Celeris/OptiNIC、Ofan/Load Balancing for AI Training 不作为独立家族 |
 | RAG 问题 | 100 道：90 单篇、10 跨篇；70 中文、30 英文 |
-| 单篇题证据深度 | 70 道摘要/首页基础题，20 道正文细节题；不能称为全文深度题集 |
+| 单篇题证据深度 | 69 道摘要/首页基础题，21 道正文细节题；不能称为全文深度题集 |
 | 正相关标注 | 110 条 query–paper 对；未标注文档 **不是负样本** |
 | 证据定位 | 90 处，记录 PDF SHA-256、1-based PDF 页码、提取页哈希、文本范围哈希 |
 | Agent 场景 | 30 个，含工具选择/参数/依赖、跨文档、分页、图像、网页、权限、超时、注入、隐私 |
@@ -43,7 +43,7 @@ npm test
 npm run validate
 npm run download       # 只下载锁定版本；SHA 不一致即停止，不自动替换
 npm run extract        # PDF.js 6.4.299，逐页规范化提取
-npm run render         # 在本地渲染 ByteScale PDF 第4页，供 agent-012 图像夹具使用
+npm run render         # 在本地渲染 ByteScale PDF 第4–6页，供 agent-012 图像夹具使用
 npm run validate:cache # 校验全部PDF、逐页文本和90处证据范围
 ```
 
@@ -74,7 +74,7 @@ npm run score:rag -- /path/to/rankings.jsonl
 1. 先用固定 mock 检查工具决策与恢复行为，再单独接真实模型/后端做 E2E。
 2. 模型侧只提供任务的 `prompt`、身份/能力、可用工具的真实 schema，以及必要的 `fixture.setup`。**不要提供 required_tools、checks、参考答案、隐藏响应、qrels 或复核记录**。
 3. `mock.mjs` 按参数匹配合成响应；默认补齐读取参数，优先匹配更具体规则，找不到/歧义时报错。工具错误通过 `error` 返回，不伪装成功。
-4. 29 个夹具可使用自撰文本响应；`agent-012` 还需本地下载并渲染真实 PDF 页，图像输入模型由 harness 把本地 asset 编成图像消息。不能只把文件名给模型冒充视觉输入。
+4. 29 个夹具可使用自撰文本响应；`agent-012` 还需本地下载并渲染真实 PDF 第4–6页（支持默认 page_count=3 及显式1/2/3），图像输入模型由 harness 把本地 asset 编成图像消息。不能只把文件名给模型冒充视觉输入。
 5. 网页 mock 是固定快照，不随互联网变化；``.invalid`` 下载/攻击地址均为合成不可用地址，不是真实服务或密钥。
 
 归一化轨迹示例：

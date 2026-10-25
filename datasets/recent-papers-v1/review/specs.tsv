@@ -1,7 +1,7 @@
 uccl	UCCL把RDMA传输的控制路径放在哪里执行，这样做解决什么演进问题？	控制路径在主机CPU执行，与网卡数据路径分离，使传输策略可以由软件扩展。	control path
 uccl	不更换现有RDMA网卡，如何通过软件多路径缓解GPU集合通信中的流碰撞？找出对应系统。	UCCL在现有RDMA网卡上解耦数据与控制路径，通过主机软件实现多路径传输。	flow collisions
 uccl	Where does UCCL sit in the communication stack, and how does its NCCL integration avoid most application changes?	UCCL位于集合通信库与网卡低层通信原语之间，主要利用NCCL网络插件和共享库集成；UD路径存在需修改库代码的例外。	libnccl-net.so	4
-swift	Swift为什么认为RDMA连接建立不一定需要极端微秒级控制面优化？	通过用户态资源缓存和fork共享，可以改善弹性计算中的初始化和资源复用。	caching
+swift	Swift为什么认为RDMA连接建立不一定需要极端微秒级控制面优化？	应看控制面开销相对任务启动时间的占比，而非一律追求极端微秒级：冷启动较长，控制面开销可忽略；热启动允许数毫秒；fork启动仍需低于100微秒。将RDMA连接建立与代码环境初始化流水重叠，还可掩盖开销，因此“不必极端优化”有场景边界，并非所有启动都无需微秒级控制。	3.1 Revisiting Application Requirements	4
 swift	Swift针对冷请求、热请求及fork请求分别利用了哪些机制？	冷、热请求使用缓存优化的libibverbs初始化，fork请求利用RDMA的fork能力。	fork requests
 swift	What kernel-version compatibility issue does Swift cite for the earlier KRCore approach?	论文举例KRCore可安装于4.15.0-46-generic，却不能运行于默认Ubuntu 18.04的4.15.0-213-generic，说明细微内核差异也可能造成兼容问题。	Compatibility issues	4
 sdr-rdma	在跨数据中心RDMA中，为什么Selective Repeat不一定优于纠删码？	丢包率、距离和带宽等长途链路特征会改变可靠性机制的成本，选择重传并非始终高效。	Selective Repeat

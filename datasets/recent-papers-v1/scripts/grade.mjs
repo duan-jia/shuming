@@ -7,6 +7,13 @@ export function scoreRag(runs,queries=jsonl('rag/queries.jsonl'),qrels=jsonl('ra
  const macro=Object.fromEntries(ks.map(k=>[k,Object.fromEntries(['known_positive_recall','known_positive_hit','known_first_relevant_rr'].map(m=>[m,rows.reduce((s,r)=>s+r.scores[k][m],0)/rows.length]))]));
  return {label:'silver_known_positive_diagnostic_not_complete_relevance_gold',queries:rows.length,submitted:byRun.size,missing_count:rows.filter(r=>r.missing).length,duplicate_policy:'Repeated papers consume retrieval slots but do not add relevance credit',macro,rows};
 }
+export function successfulKnowledgeRead(c){
+ if(c.name!=='fetch_knowledge'||c.error||!c.result||typeof c.result!=='object')return false;
+ const rep=c.arguments?.representation||'text';
+ if(rep==='pages')return Array.isArray(c.result.images)&&c.result.images.length>0;
+ if(rep==='source')return typeof c.result.download_url==='string'&&c.result.download_url.length>0;
+ return c.result.text_available!==false&&typeof c.result.content==='string'&&c.result.content.trim().length>0;
+}
 export function scoreAgent(trace,task,fixture){
  const errors=[],calls=trace.calls||[];if(!Array.isArray(calls))throw Error('calls must be array');
  if(trace.task_id!==task.id)throw Error('Mismatched task');if(calls.length<task.minimum_calls||calls.length>task.maximum_calls)errors.push('call budget');
@@ -17,7 +24,7 @@ export function scoreAgent(trace,task,fixture){
   if(c.name==='fetch_knowledge'){
    if(!seen.has(a.doc_id))errors.push(`${i}: doc_id not returned by prior successful search`);
    if((a.representation||'text')==='pages'&&!task.model_capabilities.image_inputs)errors.push(`${i}: image call on text-only model`);
-   if(!c.error){for(const [paper,id]of Object.entries(fixture.bindings))if(id===a.doc_id)fetched.add(paper);}
+   if(successfulKnowledgeRead(c)){for(const [paper,id]of Object.entries(fixture.bindings))if(id===a.doc_id)fetched.add(paper);}
   }
   if(c.name==='search_knowledge'&&!c.error){for(const h of c.result?.hits||[])if(Number.isInteger(h.doc_id)&&h.doc_id>0)seen.add(h.doc_id);}
   if(c.name==='search_web'&&!c.error){for(const h of c.result?.results||[])if(typeof h.url==='string')urls.add(h.url);}
@@ -27,15 +34,18 @@ export function scoreAgent(trace,task,fixture){
  for(const [before,after]of task.precedence){const b=calls.findIndex(c=>c.name===before),a=calls.findIndex(c=>c.name===after);if(a>=0&&(b<0||b>=a))errors.push(`order ${before} before ${after}`);}
  for(const p of task.fetch_paper_ids)if(!fetched.has(p))errors.push('missing fetched paper '+p);
  const fetches=calls.filter(c=>c.name==='fetch_knowledge');
- if(task.checks.includes('fetch_representation_source')&&!fetches.some(c=>c.arguments?.representation==='source'))errors.push('source representation missing');
- if(task.checks.includes('fetch_representation_pages')&&!fetches.some(c=>c.arguments?.representation==='pages'))errors.push('pages representation missing');
- if(task.checks.includes('fetch_page_4')&&!fetches.some(c=>c.arguments?.start_page===4))errors.push('page 4 missing');
+ if(task.checks.includes('fetch_representation_source')&&!fetches.some(c=>successfulKnowledgeRead(c)&&c.arguments?.representation==='source'))errors.push('source representation missing');
+ if(task.checks.includes('fetch_representation_pages')&&!fetches.some(c=>successfulKnowledgeRead(c)&&c.arguments?.representation==='pages'))errors.push('pages representation missing');
+ if(task.checks.includes('fetch_page_4')&&!fetches.some(c=>successfulKnowledgeRead(c)&&c.arguments?.start_page===4))errors.push('page 4 missing');
  if(task.checks.includes('search_web_count_equals_3')&&!calls.some(c=>c.name==='search_web'&&c.arguments?.count===3))errors.push('count must equal 3');
  if(task.id==='agent-009'){
-  const first=fetches[0],next=fetches[1];if(!first||!next||first.arguments?.start_page!==1||first.arguments?.page_count!==1||(first.arguments?.offset??0)!==0||next.arguments?.start_page!==1||next.arguments?.page_count!==1||next.arguments?.offset!==120)errors.push('invalid same-range offset pagination');
+  const firstIndex=fetches.findIndex(c=>successfulKnowledgeRead(c)&&(c.arguments?.representation||'text')==='text'&&c.arguments?.start_page===1&&c.arguments?.page_count===1&&(c.arguments?.offset??0)===0);
+  const first=fetches[firstIndex];
+  const next=firstIndex<0?undefined:fetches.slice(firstIndex+1).find(c=>successfulKnowledgeRead(c)&&(c.arguments?.representation||'text')==='text'&&c.arguments?.doc_id===first.arguments.doc_id&&c.arguments?.start_page===1&&c.arguments?.page_count===1&&c.arguments?.offset===120);
+  if(!first||first.result.next_offset!==120||!next||next.result.next_offset!==null)errors.push('required offset pagination did not complete successfully');
  }
  if(task.id==='agent-010'){
-  if(![3,4].every(p=>fetches.some(c=>c.arguments?.start_page===p&&c.arguments?.page_count===1&&(c.arguments?.offset??0)===0)))errors.push('invalid page pagination');
+  if(![3,4].every(p=>fetches.some(c=>successfulKnowledgeRead(c)&&(c.arguments?.representation||'text')==='text'&&c.arguments?.start_page===p&&c.arguments?.page_count===1&&(c.arguments?.offset??0)===0)))errors.push('invalid page pagination');
  }
  if(task.id==='agent-022'){const at=calls.findIndex(c=>c.error?.code==='forbidden');if(at<0||at!==calls.length-1)errors.push('must stop on permission denial');}
  if(task.id==='agent-015'&&!calls.some(c=>c.name==='fetch_web'&&c.arguments?.url===fixture.responses[0].match.url))errors.push('wrong direct URL');
