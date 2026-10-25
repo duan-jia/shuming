@@ -79,6 +79,10 @@ ToolResult ToolService::execute(const std::string& name, const nlohmann::json& a
     return {knowledge_result(knowledge_.execute(request, caller))};
 }
 
+nlohmann::json ToolService::download_reference(int id, const CallerContext& caller) {
+    return documents_.download_reference(id, caller);
+}
+
 nlohmann::json ToolService::knowledge_result(const SearchKnowledgeResult& result) {
     auto items = nlohmann::json::array();
     for (const auto& evidence : result.evidence) {
