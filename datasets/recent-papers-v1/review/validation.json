@@ -1,0 +1,56 @@
+{
+  "checked_at": "2026-10-25",
+  "runtime": {
+    "node": "v22.23.3",
+    "platform": "linux",
+    "arch": "x64",
+    "pdfjs_dist": "6.4.299",
+    "canvas": "1.0.13"
+  },
+  "checks": {
+    "clean_npm_ci_ignore_scripts": "passed",
+    "node_tests": {
+      "passed": 30,
+      "failed": 0
+    },
+    "jsonl_references_and_counts": "passed",
+    "pinned_pdf_hashes": 30,
+    "pdf_pages_reextracted_from_clean_install": 451,
+    "evidence_locations_reverified": 90,
+    "bytescale_page_4_rendered_and_visually_inspected": true,
+    "node_script_syntax": "passed",
+    "followup_clean_install": "npm ci --ignore-scripts --offline --no-audit passed (cached dependencies; online retry interrupted after stalled optional download)",
+    "followup_evidence_ranges_reverified": 90,
+    "bytescale_pages_4_5_6_rendered": true,
+    "followup_regressions": [
+      "omitted/default and explicit image page ranges",
+      "offset timeout or missing result rejected",
+      "successful pagination retry accepted",
+      "required page read timeout rejected",
+      "ordinary missing evidence rejected",
+      "Swift section 3.1 synchronized annotation",
+      "expected text unavailable remains distinct"
+    ],
+    "followup2_clean_install": "npm ci --ignore-scripts --offline --no-audit passed",
+    "followup2_regressions": [
+      "all 6 pagination read permutations",
+      "failed premature page attempt still violates order",
+      "first and current-request retries",
+      "reversed page order",
+      "all 4 required webpage tasks failure matrix and wrong URL",
+      "web read retry recovery",
+      "expected search timeouts remain separate",
+      "invalid or contradictory cursors"
+    ],
+    "followup2_evidence_ranges_reverified": 90
+  },
+  "not_performed": [
+    "independent human review",
+    "real model agent execution",
+    "live RAG retrieval evaluation",
+    "database import",
+    "server deployment"
+  ],
+  "warning": "Unit tests and dataset checks are not method-effectiveness results.",
+  "dataset_version": "0.1.2"
+}
