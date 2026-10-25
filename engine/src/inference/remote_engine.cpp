@@ -16,7 +16,7 @@ namespace fastllm {
 RemoteEngine::RemoteEngine(const std::string& endpoint, const std::string& model,
                            const std::string& api_key, int context_window_tokens, bool supports_images)
     : endpoint_(endpoint), model_(model), api_key_(api_key),
-      context_window_tokens_(context_window_tokens > 0 ? context_window_tokens : 32768), supports_images_(supports_images) {}
+      context_window_tokens_(context_window_tokens > 0 ? context_window_tokens : 8192), supports_images_(supports_images) {}
 
 struct StreamCtx {
     std::function<void(const std::string&)> on_token;

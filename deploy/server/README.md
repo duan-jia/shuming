@@ -1,5 +1,7 @@
 # Single-server deployment
 
+> Default generation profile: [Qwen3.8-27B / RTX 3080](../models/README.md). This document describes the existing HTTPS/cloud deployment. No automatic model, container network or production-data migration is performed.
+
 The frontend extends the existing backend, MySQL and MCP deployment. Chat and
 PDF processing use a remote model; embeddings and retrieval run locally. Only
 Caddy exposes public ports 80 and 443. Frontend port 3000, backend port 9006 and
