@@ -6,6 +6,8 @@ import { createSseParser } from "../lib/sse";
 import { sessionTitle } from "../lib/session-title";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { SourceFiles } from "../components/source-files";
+import { downloadDocumentFile, normalizeSourceFiles, type SourceFile } from "../lib/source-files";
 
 interface Message {
   id: string;
@@ -16,6 +18,7 @@ interface Message {
   reasoning?: string;
   toolStatus?: string;
   notice?: string;
+  sourceFiles?: SourceFile[];
 }
 
 interface Session {
@@ -291,10 +294,11 @@ export default function Home() {
       const data = await res.json();
       if (data.messages && historyVersions.current.get(id) === version && !requests.current.has(id)) {
         const loaded: Message[] = data.messages.map(
-          (m: { id: number; role: string; content: string; reasoning?: string }) => ({
+          (m: { id: number; role: string; content: string; reasoning?: string; source_files?: unknown }) => ({
             id: String(m.id),
             role: m.role as "user" | "assistant",
             content: m.content || "",
+            sourceFiles: normalizeSourceFiles(m.source_files),
             reasoning: m.reasoning || "",
             isStreaming: false,
           })
@@ -412,22 +416,8 @@ export default function Home() {
 
   const downloadDocument = useCallback(async (document: DocumentItem, format: "pdf" | "md") => {
     try {
-      const response = await fetch(`/api/documents/${document.id}/download/${format}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "下载失败。");
-      }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const anchor = window.document.createElement("a");
-      anchor.href = url;
-      anchor.download = format === "pdf"
-        ? document.source_filename || `document-${document.id}.pdf`
-        : document.filename;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      await downloadDocumentFile(document.id, format === "pdf"
+        ? document.source_filename || `document-${document.id}.pdf` : document.filename, format, token);
     } catch (error) {
       setUploadNotice({
         type: "error",
@@ -595,6 +585,7 @@ export default function Home() {
                 ? {
                     ...message,
                     content: message.content,
+                    sourceFiles: normalizeSourceFiles(parsed.source_files),
                     notice: parsed.stop_reason === "cancelled" ? "已停止生成" : parsed.stop_reason === "output_limit" ? "本轮推理达到长度上限，请缩短问题或联系管理员调整输出上限。" : parsed.error || "生成失败",
                     toolStatus: undefined,
                     isStreaming: false,
@@ -638,7 +629,7 @@ export default function Home() {
           setMessages((prev) =>
             prev.map((message) =>
               message.id === msgId
-                ? { ...message, isStreaming: false, isReasoning: false, toolStatus: undefined, notice: parsed.truncated ? "回答已达到长度上限，可发送“继续”接着生成。" : message.notice }
+                ? { ...message, sourceFiles: normalizeSourceFiles(parsed.source_files), isStreaming: false, isReasoning: false, toolStatus: undefined, notice: parsed.truncated ? "回答已达到长度上限，可发送“继续”接着生成。" : message.notice }
                 : message
             )
           );
@@ -888,6 +879,7 @@ export default function Home() {
                     {msg.role === "assistant" ? <>
                       {msg.reasoning && <details className="reasoning-panel"><summary>{msg.isReasoning ? "正在思考…" : "思考过程"}</summary><div>{msg.reasoning}</div></details>}
                       <MarkdownContent content={msg.content} />
+                      {!msg.isStreaming && <SourceFiles files={msg.sourceFiles || []} token={token} />}
                       {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" aria-hidden="true" /><span className="sr-only">{msg.toolStatus || (msg.isReasoning ? "正在思考" : "正在生成回答")}</span></div>}
                       {msg.notice && <p role="status" className="message-notice">{msg.notice}</p>}
                     </> : <p className="user-content">{msg.content}</p>}

@@ -107,8 +107,8 @@ std::vector<MessageSummary> SessionRepository::list_messages(const std::string& 
 
     limit = std::max(1, limit);
     std::string sql =
-        "SELECT id, role, content, reasoning, tokens_in, tokens_out, created_at "
-        "FROM (SELECT id, role, content, reasoning, tokens_in, tokens_out, created_at "
+        "SELECT id, role, content, reasoning, tokens_in, tokens_out, created_at, rag_references "
+        "FROM (SELECT id, role, content, reasoning, tokens_in, tokens_out, created_at, rag_references "
         "FROM messages WHERE session_id='"
         + escape_sql(conn->raw(), session_id) + "' ORDER BY id DESC LIMIT "
         + std::to_string(limit) + ") AS recent_messages ORDER BY id ASC";
@@ -124,6 +124,7 @@ std::vector<MessageSummary> SessionRepository::list_messages(const std::string& 
             m.tokens_in = row[4] ? std::stoi(row[4]) : 0;
             m.tokens_out = row[5] ? std::stoi(row[5]) : 0;
             m.created_at = row[6] ? row[6] : "";
+            m.source_files = row[7] ? row[7] : "[]";
             msgs.push_back(m);
             row = mysql_fetch_row(res);
         }

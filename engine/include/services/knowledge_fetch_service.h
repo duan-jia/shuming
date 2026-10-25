@@ -30,6 +30,8 @@ public:
     static nlohmann::json input_schema();
     ToolResult execute(const nlohmann::json& args, const CallerContext& caller,
                        std::function<bool()> should_stop = nullptr);
+    // Stable reference only: no signed URL or storage path. Null if unavailable.
+    nlohmann::json download_reference(int id, const CallerContext& caller);
     void download(const HttpRequest& request, HttpResponse& response);
 
 private:
