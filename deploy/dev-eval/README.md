@@ -34,6 +34,8 @@ node deploy/dev-eval/manage.mjs stop
 
 prepare 自动生成独立的 root/应用数据库密码，写入 `/srv/shuming-dev-eval/.env`（0600），不打印密码；公开 SQL 初始化快照写入 `init.sql`（0644，供容器内 MySQL 用户读取）。应用数据库用户为 `shuming`，不是 root，权限仅针对新实例的 `llm_platform`。
 
+`up --wait` 会等待应用账号通过 TCP 登录并成功查询初始化后的 `tenants`、`users` 表；密码不匹配或初始化失败时不会报告健康。配置目录必须保持 0700。重复 prepare 保留 SQL 快照，不会向已有数据库应用后续 schema 变更；升级时需另行审阅迁移。
+
 重复 prepare 不覆盖现有凭据。发现数据库卷已存在但凭据丢失、初始化文件不成对、符号链接或不安全权限时会拒绝操作。请恢复原配置，不要通过生成新密码来“重置”旧卷。
 
 **不要运行 `down -v`、删除数据卷或提交 `.env`。** 备份数据库时使用操作者已有的受控备份方式；本变更不执行备份、迁移或清空数据。
