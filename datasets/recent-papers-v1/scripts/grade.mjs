@@ -8,11 +8,37 @@ export function scoreRag(runs,queries=jsonl('rag/queries.jsonl'),qrels=jsonl('ra
  return {label:'silver_known_positive_diagnostic_not_complete_relevance_gold',queries:rows.length,submitted:byRun.size,missing_count:rows.filter(r=>r.missing).length,duplicate_policy:'Repeated papers consume retrieval slots but do not add relevance credit',macro,rows};
 }
 export function successfulKnowledgeRead(c){
- if(c.name!=='fetch_knowledge'||c.error||!c.result||typeof c.result!=='object')return false;
+ if(c.name!=='fetch_knowledge'||c.error||c.is_error===true||!c.result||c.result.is_error===true||typeof c.result!=='object')return false;
  const rep=c.arguments?.representation||'text';
  if(rep==='pages')return Array.isArray(c.result.images)&&c.result.images.length>0;
  if(rep==='source')return typeof c.result.download_url==='string'&&c.result.download_url.length>0;
  return c.result.text_available!==false&&typeof c.result.content==='string'&&c.result.content.trim().length>0;
+}
+export function successfulWebRead(c){
+ return c.name==='fetch_web'&&!c.error&&c.is_error!==true&&c.result&&c.result.is_error!==true&&typeof c.result.content==='string'&&c.result.content.trim().length>0;
+}
+export function paginationErrors(fetches,fixture){
+ const steps=fixture.responses.filter(r=>r.name==='fetch_knowledge');
+ const normalize=a=>({doc_id:a?.doc_id,representation:a?.representation??'text',start_page:a?.start_page??1,page_count:a?.page_count??3,offset:a?.offset??0});
+ const same=(a,b)=>Object.keys(a).every(k=>a[k]===b[k]);
+ const errors=[];let expected=normalize(steps[0].match),completed=0;
+ for(let i=0;i<fetches.length;i++){
+  const c=fetches[i],args=normalize(c.arguments);
+  // An out-of-order attempt remains a violation even if it fails or later reads repair coverage.
+  if(!expected||!same(args,expected)){errors.push(i+': request violates current pagination cursor/range');continue;}
+  // Retrying the current failed request is permitted; failure never advances the cursor.
+  if(!successfulKnowledgeRead(c))continue;
+  const offset=c.result.next_offset??null,page=c.result.next_page??null;
+  if((offset!==null&&(!Number.isInteger(offset)||offset<=args.offset))||(page!==null&&(!Number.isInteger(page)||page<=args.start_page))){errors.push(i+': invalid pagination response cursor');continue;}
+  if(completed<steps.length){
+   const step=steps[completed];
+   if(!same(args,normalize(step.match))||offset!==(step.result.next_offset??null)||page!==(step.result.next_page??null)){errors.push(i+': response does not complete the required pagination step');continue;}
+   completed++;
+  }
+  expected=offset!==null?{...args,offset}:page!==null?{...args,start_page:page,offset:0}:null;
+ }
+ if(completed<steps.length)errors.push('required pagination did not complete successfully');
+ return errors;
 }
 export function scoreAgent(trace,task,fixture){
  const errors=[],calls=trace.calls||[];if(!Array.isArray(calls))throw Error('calls must be array');
@@ -28,9 +54,10 @@ export function scoreAgent(trace,task,fixture){
   }
   if(c.name==='search_knowledge'&&!c.error){for(const h of c.result?.hits||[])if(Number.isInteger(h.doc_id)&&h.doc_id>0)seen.add(h.doc_id);}
   if(c.name==='search_web'&&!c.error){for(const h of c.result?.results||[])if(typeof h.url==='string')urls.add(h.url);}
-  if(c.name==='fetch_web'&&task.checks.includes('fetch_url_from_search_result')&&!urls.has(a.url))errors.push(`${i}: URL not returned by prior search`);
+  if(c.name==='fetch_web'&&(task.checks.includes('fetch_url_from_search_result')||(task.required_tools.includes('search_web')&&task.required_tools.includes('fetch_web')))&&!urls.has(a.url))errors.push(`${i}: URL not returned by prior search`);
  }
  for(const name of task.required_tools)if(!calls.some(c=>c.name===name))errors.push('missing tool '+name);
+ if(task.required_tools.includes('fetch_web')&&!calls.some(successfulWebRead))errors.push('required webpage evidence did not return successfully with nonempty content');
  for(const [before,after]of task.precedence){const b=calls.findIndex(c=>c.name===before),a=calls.findIndex(c=>c.name===after);if(a>=0&&(b<0||b>=a))errors.push(`order ${before} before ${after}`);}
  for(const p of task.fetch_paper_ids)if(!fetched.has(p))errors.push('missing fetched paper '+p);
  const fetches=calls.filter(c=>c.name==='fetch_knowledge');
@@ -38,17 +65,9 @@ export function scoreAgent(trace,task,fixture){
  if(task.checks.includes('fetch_representation_pages')&&!fetches.some(c=>successfulKnowledgeRead(c)&&c.arguments?.representation==='pages'))errors.push('pages representation missing');
  if(task.checks.includes('fetch_page_4')&&!fetches.some(c=>successfulKnowledgeRead(c)&&c.arguments?.start_page===4))errors.push('page 4 missing');
  if(task.checks.includes('search_web_count_equals_3')&&!calls.some(c=>c.name==='search_web'&&c.arguments?.count===3))errors.push('count must equal 3');
- if(task.id==='agent-009'){
-  const firstIndex=fetches.findIndex(c=>successfulKnowledgeRead(c)&&(c.arguments?.representation||'text')==='text'&&c.arguments?.start_page===1&&c.arguments?.page_count===1&&(c.arguments?.offset??0)===0);
-  const first=fetches[firstIndex];
-  const next=firstIndex<0?undefined:fetches.slice(firstIndex+1).find(c=>successfulKnowledgeRead(c)&&(c.arguments?.representation||'text')==='text'&&c.arguments?.doc_id===first.arguments.doc_id&&c.arguments?.start_page===1&&c.arguments?.page_count===1&&c.arguments?.offset===120);
-  if(!first||first.result.next_offset!==120||!next||next.result.next_offset!==null)errors.push('required offset pagination did not complete successfully');
- }
- if(task.id==='agent-010'){
-  if(![3,4].every(p=>fetches.some(c=>successfulKnowledgeRead(c)&&(c.arguments?.representation||'text')==='text'&&c.arguments?.start_page===p&&c.arguments?.page_count===1&&(c.arguments?.offset??0)===0)))errors.push('invalid page pagination');
- }
+ if(['agent-009','agent-010'].includes(task.id))errors.push(...paginationErrors(fetches,fixture));
  if(task.id==='agent-022'){const at=calls.findIndex(c=>c.error?.code==='forbidden');if(at<0||at!==calls.length-1)errors.push('must stop on permission denial');}
- if(task.id==='agent-015'&&!calls.some(c=>c.name==='fetch_web'&&c.arguments?.url===fixture.responses[0].match.url))errors.push('wrong direct URL');
+ if(task.id==='agent-015'&&!calls.some(c=>successfulWebRead(c)&&c.arguments?.url===fixture.responses[0].match.url))errors.push('wrong direct URL');
  if(task.id==='agent-020'){const local=calls.find(c=>c.name==='search_knowledge');if(!local||local.error||!Array.isArray(local.result?.hits)||local.result.hits.length)errors.push('web fallback requires confirmed knowledge miss');}
  return {task_id:task.id,mechanical_pass:errors.length===0,errors,semantic_review_required:true,semantic_rubric:task.checks,warning:'Mechanical checks are not an overall agent pass; independently review correctness, citations, refusal and leakage. This scorer trusts normalized trace results and is not an audit-proof execution attestor.'};
 }
