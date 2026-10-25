@@ -276,15 +276,21 @@ npm run lint
 npm run build
 ```
 
-论文卡片单元测试与检索质量评测：
+评测分为两个独立维度，入口、指标及标注规则见 [tests/README.md](tests/README.md)：
 
 ```bash
+# 当前论文集：30 篇、100 条 RAG 查询、30 个 Agent 场景
+node --test tests/datasets/recent-papers-v1/tests/dataset.test.mjs
+python3 -m unittest discover -s tests -p 'test_evaluation.py'
+# 对含参数与结果的 Agent 归一化轨迹评分
+python3 tests/agent_eval.py --predictions /path/to/agent-traces.jsonl
+# 设置 EMOS_EVAL_TOKEN，并使用语料导入映射采集真实检索结果
+python3 tests/rag_eval.py --base-url http://127.0.0.1:9007 --document-map /path/to/paper-doc-map.json --k 1 3 5 10
+# 论文卡片单元测试
 python3 -m unittest discover -s tests -p 'test_paper_card.py'
-# 需要可用的 CLI、模型和评测数据；不是无依赖单元测试
-python3 tests/rag_eval.py --gt tests/eval_queries.json
 ```
 
-[CI](.github/workflows/ci.yml) 检查后端 CPU 构建/单元测试与 MCP 类型、测试、构建、安全审计。Staging E2E 另外验证真实 MySQL/后端/MCP 的服务账号认证、租户绑定与检索；它不等价于检索质量评测，也不覆盖完整 Web 问答链路。
+[CI](.github/workflows/ci.yml) 执行指标回归、后端单元测试、受控 MCP/Agent 集成测试、部署隔离检查以及前端检查。真实模型的工具选择与真实知识库的检索质量需要单独运行上述评测，不以受控夹具通过代替质量结论。
 
 
 ## 项目结构

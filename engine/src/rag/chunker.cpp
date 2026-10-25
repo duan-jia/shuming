@@ -16,22 +16,15 @@ std::vector<DocumentChunk> Chunker::chunk(int doc_id, const std::string& text,
     ChunkMetadata meta;
     meta.category = category;
 
-    static const std::regex dish_re(R"(^# (.+))");
-    static const std::regex diff_re(R"(^预估烹饪难度：(.*)$)");
-
+    static const std::regex title_re(R"(^# (.+))");
     std::istringstream pre_scan(text);
     std::string line;
     while (std::getline(pre_scan, line)) {
-        std::smatch m;
-        if (meta.dish.empty() && std::regex_match(line, m, dish_re)) {
-            std::string raw = m[1].str();
-            size_t pos = raw.rfind("的做法");
-            meta.dish = (pos != std::string::npos) ? raw.substr(0, pos) : raw;
+        std::smatch match;
+        if (std::regex_match(line, match, title_re)) {
+            meta.title = match[1].str();
+            break;
         }
-        if (meta.difficulty.empty() && std::regex_search(line, m, diff_re)) {
-            meta.difficulty = m[1].str();
-        }
-        if (!meta.dish.empty() && !meta.difficulty.empty()) break;
     }
 
     // --- Section parsing ---

@@ -1,0 +1,45 @@
+{
+  "name": "shuming-recent-papers-eval",
+  "version": "0.1.4",
+  "date": "2026-10-25",
+  "status": "assistant_reviewed_silver",
+  "independent_human_review": false,
+  "real_model_evaluation_performed": false,
+  "training_membership": "unknown",
+  "selection_window": {
+    "start": "2024-10-25",
+    "end": "2026-10-25",
+    "basis": "arxiv_first_submission_not_proven_earliest_release"
+  },
+  "counts": {
+    "papers": 30,
+    "family_groups": 28,
+    "rag_queries": 100,
+    "single_document_queries": 90,
+    "multi_document_queries": 10,
+    "rag_qrels": 3000,
+    "evidence_locations": 100,
+    "agent_tasks": 30,
+    "positive_qrels": 122,
+    "negative_qrels": 2878
+  },
+  "split_policy": "draft_unsplit; freeze grouped splits after contamination and relevance audit",
+  "corpus_fulltext_bundled": false,
+  "ci_or_deployment_changed": true,
+  "provenance": {
+    "source_commit": "e3611c616a9bf17edc43226d444a5634c2e09da6",
+    "source_dataset_version": "0.1.2",
+    "corpus_unchanged": true,
+    "revision": "0.1.4 closed-corpus answer-support judgments and disambiguated prompts; no real-model quality evaluation"
+  },
+  "relevance_review": {
+    "scope": "frozen_30_paper_database_corpus",
+    "pairs": 3000,
+    "queries_complete": 100,
+    "reviewer": "Codex",
+    "method": "all-page lexical screening, document profiles, and semantic candidate adjudication",
+    "independent_human_review": false,
+    "truth_guarantee": "assistant silver judgments under the declared answer-support rubric, not independently adjudicated gold",
+    "corpus_manifest_sha256": "1a3a98afb80d88f1b41290b891c9c2053f884e2f7b709244c4d5ad19def8b667"
+  }
+}

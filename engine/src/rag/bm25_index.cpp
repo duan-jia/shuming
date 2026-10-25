@@ -186,8 +186,7 @@ bool Bm25Index::save(const std::string& path) const {
             j["content"] = d.content;
             j["term_count"] = d.term_count;
             j["category"] = d.metadata.category;
-            j["dish"] = d.metadata.dish;
-            j["difficulty"] = d.metadata.difficulty;
+            j["title"] = d.metadata.title;
 
             nlohmann::json tf;
             for (const auto& [term, freq] : d.term_freq) {
@@ -230,8 +229,8 @@ bool Bm25Index::load(const std::string& path) {
             d.content = j["content"];
             d.term_count = j["term_count"];
             d.metadata.category = j.value("category", "");
-            d.metadata.dish = j.value("dish", "");
-            d.metadata.difficulty = j.value("difficulty", "");
+            // Read historical indexes without requiring a rebuild.
+            d.metadata.title = j.value("title", j.value("dish", ""));
 
             auto tf = j["term_freq"];
             for (auto& [term, freq] : tf.items()) {

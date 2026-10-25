@@ -1,0 +1,11 @@
+{
+  "provenance": {"repository":"duan-jia/shuming","commit":"0f07b284b9e4a6856d4764055dfd5a7c4d3a721e","files":["engine/src/services/tool_service.cpp","engine/src/services/knowledge_fetch_service.cpp","engine/src/services/web_search_service.cpp"],"checked_at":"2026-10-25"},
+  "tools": {
+    "search_knowledge":{"required":["query"],"properties":{"query":{"type":"string","min":1,"max":4000},"top_k":{"type":"integer","min":1,"max":20},"mode":{"enum":["chunks","parents"]}}},
+    "fetch_knowledge":{"required":["doc_id"],"properties":{"doc_id":{"type":"integer","min":1,"max":2147483647},"representation":{"enum":["source","text","pages"]},"start_page":{"type":"integer","min":1,"max":100000},"page_count":{"type":"integer","min":1,"max":3},"offset":{"type":"integer","min":0,"max":10000000}}},
+    "search_web":{"required":["query"],"properties":{"query":{"type":"string","min":1,"max":128},"count":{"type":"integer","min":1,"max":50},"need_content":{"type":"boolean"},"ori_question":{"type":"string","min":1,"max":128}}},
+    "fetch_web":{"required":["url"],"properties":{"url":{"type":"string","min":1,"max":8192}}}
+  },
+  "additional_properties":false,
+  "note":"Compact evaluation contract, not a replacement for backend authorization, URL security or native tool execution. Fixtures use normalized hits/results; an adapter must normalize actual backend payloads."
+}

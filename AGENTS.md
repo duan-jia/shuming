@@ -20,7 +20,7 @@ Follow the existing C++ style: 4-space indentation, `snake_case` file names, and
 
 ## Testing Guidelines
 
-There is no committed C++ unit-test target yet. Validate backend changes by building both relevant targets and exercising endpoints or the CLI. RAG quality checks use `python3 tests/rag_eval.py --gt tests/eval_queries.json`; set `BINDIR`, `MODEL`, or `EMBEDDING_MODEL` when using non-default paths. `tests/gt_gen.py` requires `DEEPSEEK_API_KEY` and rewrites generated evaluation data, so review outputs before committing.
+Focused C++ tests are enabled by `FASTLLM_BUILD_TESTS` (see `engine/CMakeLists.txt`). Validate backend changes by building relevant targets and exercising endpoints or the CLI. Evaluation has two independent tracks: `python3 tests/agent_eval.py --predictions <normalized-traces.jsonl>` checks tool arguments, dependencies and evidence contracts; `python3 tests/rag_eval.py --base-url <backend> --document-map <import-map.json>` retrieves the current 100-query paper dataset. RAG uses `EMOS_EVAL_TOKEN` from the environment and supports offline `--predictions`. Incomplete relevance judgments produce precision bounds and known-positive recall, never fabricated exact P/R. The authoritative data is `tests/datasets/recent-papers-v1/`. See `tests/README.md` for datasets, limitations, and commands. Run metric regression with `python3 -m unittest discover -s tests -p 'test_evaluation.py'`.
 
 ## Commit & Pull Request Guidelines
 
