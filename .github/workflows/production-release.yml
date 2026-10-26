@@ -14,7 +14,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/master'
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/master' &&
+      vars.ENABLE_PRIVATE_DEPLOYMENT == 'true'
     environment: production
     runs-on: [self-hosted, Linux, X64, staging]
     timeout-minutes: 20

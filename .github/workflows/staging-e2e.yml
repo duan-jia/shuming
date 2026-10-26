@@ -1,24 +1,8 @@
 name: Staging E2E
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - .github/workflows/staging-e2e.yml
-      - .dockerignore
-      - deploy/staging/**
-      - deploy/proxy/**
-      - deploy/server/**
-      - web/**
-      - CMakeLists.txt
-      - engine/**
-      - mcp-gateway/**
-      - sql/**
-      - tests/test_staging_isolation.py
   workflow_dispatch:
 permissions:
   contents: read
-  packages: write
-  actions: read
 concurrency:
   group: lab-server-release
   cancel-in-progress: false
@@ -30,8 +14,12 @@ jobs:
   build-images:
     name: Build staging images
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/master' &&
+      vars.ENABLE_PRIVATE_DEPLOYMENT == 'true'
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -90,6 +78,13 @@ jobs:
   deploy-and-test:
     name: Deploy and test staging MCP
     needs: build-images
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/master' &&
+      vars.ENABLE_PRIVATE_DEPLOYMENT == 'true'
+    permissions:
+      contents: read
+      actions: read
     environment: staging
     runs-on: [self-hosted, Linux, X64, staging]
     timeout-minutes: 30

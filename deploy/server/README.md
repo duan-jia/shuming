@@ -1,7 +1,8 @@
 # Single-server deployment
 
 > Public release is blocked on runner isolation. The existing workflows still
-> use persistent lab runners; this documentation change does not disable them.
+> use persistent lab runners. This branch gates jobs on manual/master/opt-in,
+> effective on master only after merge; guards do not isolate these runners.
 > Move privileged deployment to a private control repository before changing
 > visibility. See the [release checklist](../../docs/open-source-readiness.md).
 

@@ -29,6 +29,9 @@
 并在 PR 中明确未执行的部分：
 
 ```bash
+# 工作流边界与资料分发策略（Node.js 24，无额外依赖）
+node --test tests/public_repository_policy.test.mjs
+
 # 后端构建；依赖、测试环境及完整目标见开发指南和 CI
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_NATIVE=OFF
 cmake --build build --target fast-llm-reasoner fast-llm-cli --parallel 2
@@ -45,7 +48,7 @@ npm run lint --prefix web
 npm run build --prefix web
 ```
 
-当前普通 CI 使用 GitHub-hosted 环境，但同仓库 PR 仍可能触发旧 Staging
-工作流访问实验室服务器。公开前必须按[发布清单](docs/open-source-readiness.md)
-解除该依赖并移走持久化 runner；本分支尚未修改工作流。硬件推理、真实模型效果与生产验收需要
+本分支将 PR 检查限制为 GitHub-hosted 环境；合并前 master 仍可能触发旧
+Staging 工作流。不要为了让 PR 通过而启用私有部署开关。公开前必须按
+[发布清单](docs/open-source-readiness.md)移走持久化 runner。硬件推理、真实模型效果与生产验收需要
 单独记录环境与结果；构建通过不能代替这些验证。
