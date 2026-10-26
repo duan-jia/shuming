@@ -35,6 +35,8 @@ public:
 
     bool save(const std::string& path) const;
     bool load(const std::string& path);
+    // MySQL document scope is authoritative; cache permissions may be stale.
+    void synchronize_scopes(const std::unordered_map<int, std::pair<int, std::string>>& scopes);
 
     size_t size() const { std::lock_guard<std::mutex> lock(mutex_); return docs_.size(); }
 

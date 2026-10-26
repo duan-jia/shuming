@@ -9,6 +9,21 @@
 
 namespace fastllm {
 
+void Bm25Index::synchronize_scopes(const std::unordered_map<int, std::pair<int, std::string>>& scopes) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    docs_.erase(std::remove_if(docs_.begin(), docs_.end(), [&](const Bm25Doc& doc) {
+        return scopes.count(doc.doc_id) == 0;
+    }), docs_.end());
+    inv_.clear();
+    for (size_t i = 0; i < docs_.size(); ++i) {
+        auto& doc = docs_[i];
+        const auto& scope = scopes.at(doc.doc_id);
+        doc.tenant_id = scope.first;
+        doc.visibility = scope.second;
+        for (const auto& term : doc.term_freq) inv_[term.first].insert(static_cast<int>(i));
+    }
+}
+
 std::vector<std::string> Bm25Index::tokenize(const std::string& text) const {
     std::vector<std::string> tokens;
     if (text.empty()) return tokens;

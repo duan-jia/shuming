@@ -6,12 +6,16 @@ const nextConfig: NextConfig = {
   output: "standalone",
   async rewrites() {
     return {
-      // The dynamic documents/[id] route otherwise handles "search" and
+      // The dynamic documents/[id] route otherwise handles these actions and
       // returns 405 for POST before the fallback proxy can run.
       beforeFiles: [
         {
           source: "/api/documents/search",
           destination: `${backendBase}/api/documents/search`,
+        },
+        {
+          source: "/api/documents/deduplicate",
+          destination: `${backendBase}/api/documents/deduplicate`,
         },
       ],
       fallback: [

@@ -38,7 +38,7 @@ app         AppContext 与 AppBootstrap，负责启动期依赖装配
 数据库初始化脚本在 `sql/init.sql`。当前主要表包括：
 
 - `tenants`：实验室组/课题组，保存组级默认每日 token 限额。
-- `users`：用户，属于某个 tenant，角色为 `admin` 或 `user`。
+- `users`：用户，属于某个 tenant，角色为 `admin`、`user` 或 `guest`。
 - `sessions`：一次对话会话。
 - `messages`：会话消息，保存 user/assistant 内容、reasoning、RAG 引用和 token 统计。
 - `documents`：导入后的文档元信息与内容，当前 visibility 使用 `public` / `group`，其中 `group` 等价于业务语义中的 tenant 可见。
@@ -50,11 +50,13 @@ app         AppContext 与 AppBootstrap，负责启动期依赖装配
 文档权限模型应保持简单：
 
 ```text
-public：全系统用户可见
-tenant/group：仅同一 tenant 用户可见
+public：全实验室已登录用户可读，仅 admin 上传和删除
+tenant/group：本研究组成员可读、上传及删除（包括他人上传的组内文件）
 ```
 
-当前不设计 private 个人知识库。
+当前不设计 private 个人知识库。每个用户属于一个研究组；guest 统一归属测试实验组，令牌最长有效 15 分钟。公开文档保留原研究组与上传者信息，但写入权限由公开库规则决定。
+
+权限实现与角色矩阵见 [权限管理](docs/permissions.md)。受保护的 REST、聊天和 MCP 共用认证与接口权限策略，数据查询继续执行租户和所有者过滤。
 
 ## 4. 对话请求流程
 

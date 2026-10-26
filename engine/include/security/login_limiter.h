@@ -18,20 +18,6 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         return take("account:" + account, 10, 600, now);
     }
-    bool allow_guest_login(const std::string& peer, Clock::time_point now = Clock::now()) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return take("guest-login-global", 100, 3600, now) && take("guest-login-ip:" + peer, 8, 3600, now);
-    }
-    bool allow_guest_chat(int id, const std::string& peer, Clock::time_point now = Clock::now()) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return take("guest-chat-global", 100, 3600, now)
-            && take("guest-chat-ip:" + peer, 20, 3600, now)
-            && take("guest-chat-user:" + std::to_string(id), 5, 900, now);
-    }
-    bool allow_guest_session(int id, Clock::time_point now = Clock::now()) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return take("guest-session:" + std::to_string(id), 5, 900, now);
-    }
 private:
     struct Counter { Clock::time_point expires; int count = 0; };
     std::mutex mutex_;

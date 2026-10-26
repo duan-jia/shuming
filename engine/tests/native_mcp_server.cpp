@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
         if (token.rfind("Bearer ", 0) != 0) { resp.json_error(401, "Unauthorized"); return false; }
         auto claims = jwt.verify_token(token.substr(7));
         if (!claims.valid) { resp.json_error(401, "Unauthorized"); return false; }
-        user = {claims.user_id, claims.tenant_id, claims.username, claims.role == "admin" ? Role::ADMIN : Role::USER};
+        user = {claims.user_id, claims.tenant_id, claims.username, RbacManager::string_to_role(claims.role)};
         return true;
     };
     McpOptions mcp_options;
@@ -130,6 +130,7 @@ int main(int argc, char** argv) {
     });
     server.router().get("/healthz", [](const HttpRequest&, RouteParams, HttpResponse& resp) { resp.json("{}"); });
     std::cout << "ADMIN_TOKEN=" << jwt.generate_token(1, 7, "fixture", "admin") << '\n';
+    std::cout << "GUEST_TOKEN=" << jwt.generate_token(3, 9, "fixture-guest", "guest") << '\n';
     std::cout << "USER_TOKEN=" << jwt.generate_token(2, 8, "fixture-user", "user") << std::endl;
     server.start();
     loop.loop();

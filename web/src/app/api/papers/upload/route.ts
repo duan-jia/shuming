@@ -153,7 +153,8 @@ async function submitToRag(
   sourceSizeBytes: number,
   sourceSha256: string,
   needsReview: boolean,
-  reviewReason: string
+  reviewReason: string,
+  visibility: "public" | "group"
 ) {
   const backendBase = process.env.BACKEND_API_BASE || "http://127.0.0.1:9006";
   const response = await fetch(`${backendBase.replace(/\/$/, "")}/api/documents`, {
@@ -165,7 +166,7 @@ async function submitToRag(
     body: JSON.stringify({
       filename,
       content: markdown,
-      visibility: "group",
+      visibility,
       source_filename: sourceFilename,
       source_storage_name: sourceStorageName,
       source_size_bytes: sourceSizeBytes,
@@ -187,7 +188,7 @@ async function submitToRag(
   return data;
 }
 
-async function findDuplicate(authorization: string, sourceSha256: string) {
+async function findDuplicate(authorization: string, sourceSha256: string, visibility: "public" | "group") {
   const backendBase = process.env.BACKEND_API_BASE || "http://127.0.0.1:9006";
   const response = await fetch(
     `${backendBase.replace(/\/$/, "")}/api/documents/deduplicate`,
@@ -197,7 +198,7 @@ async function findDuplicate(authorization: string, sourceSha256: string) {
         Authorization: authorization,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ source_sha256: sourceSha256 }),
+      body: JSON.stringify({ source_sha256: sourceSha256, visibility }),
       cache: "no-store",
       signal: AbortSignal.timeout(30_000),
     }
@@ -228,6 +229,11 @@ export async function POST(request: Request) {
     return Response.json({ error: "无法读取上传内容。" }, { status: 400 });
   }
 
+  const visibility = formData.get("visibility") || "group";
+  if (visibility !== "public" && visibility !== "group") {
+    return Response.json({ error: "文档库范围无效。" }, { status: 400 });
+  }
+
   const file = formData.get("file");
   if (!(file instanceof File)) {
     return Response.json({ error: "请选择一个 PDF 文件。" }, { status: 400 });
@@ -251,7 +257,7 @@ export async function POST(request: Request) {
 
   const sourceSha256 = createHash("sha256").update(bytes).digest("hex");
   try {
-    const duplicate = await findDuplicate(authorization, sourceSha256);
+    const duplicate = await findDuplicate(authorization, sourceSha256, visibility);
     if (duplicate.duplicate) {
       return Response.json(
         {
@@ -335,7 +341,8 @@ export async function POST(request: Request) {
       file.size,
       sourceSha256,
       compression.needs_review === true,
-      compression.review_reason || ""
+      compression.review_reason || "",
+      visibility
     );
     return Response.json({
       filename: sourceFilename,

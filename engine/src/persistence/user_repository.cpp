@@ -1,4 +1,5 @@
 #include "persistence/user_repository.h"
+#include "persistence/tenant_repository.h"
 
 #include <mysql/mysql.h>
 
@@ -69,7 +70,7 @@ bool UserRepository::create_guest_user(int tenant_id, const std::string& usernam
     const std::string sql = "INSERT INTO users (tenant_id, username, password_hash, role) "
         "SELECT id, '" + escape_sql(conn->raw(), username)
         + "', '!guest-password-login-disabled', 'guest' FROM tenants WHERE id="
-        + std::to_string(tenant_id) + " AND name='__guest__' AND status='active'";
+        + std::to_string(tenant_id) + " AND name='" + kGuestTenantName + "' AND status='active'";
     const bool ok = conn->execute(sql) && mysql_affected_rows(conn->raw()) == 1;
     if (ok) user_id = static_cast<int>(mysql_insert_id(conn->raw()));
     mysql_.release(conn);

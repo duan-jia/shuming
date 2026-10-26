@@ -109,12 +109,14 @@ bool RagService::load_all() {
 
         int chunk_count = 0;
         for (const auto& chunk : document_repository_->load_ready_chunks()) {
+            const auto document = documents_.find(chunk.document_id);
+            if (document == documents_.end()) continue;
             VectorEntry entry;
             entry.doc_id = chunk.document_id;
-            entry.tenant_id = chunk.tenant_id;
+            entry.tenant_id = document->second.tenant_id;
             entry.chunk_index = chunk.chunk_index;
             entry.content = chunk.content;
-            entry.visibility = chunk.visibility;
+            entry.visibility = document->second.visibility;
             index_.restore_entry(static_cast<faiss::idx_t>(chunk.id), entry);
             chunk_count++;
         }
@@ -123,6 +125,11 @@ bool RagService::load_all() {
         if (std::filesystem::exists(bm25_path)) {
             bm25_.load(bm25_path);
         }
+        std::unordered_map<int, std::pair<int, std::string>> scopes;
+        for (const auto& item : documents_) {
+            scopes[item.first] = {item.second.tenant_id, item.second.visibility};
+        }
+        bm25_.synchronize_scopes(scopes);
 
         // If FAISS not loaded but we have chunks, rebuild by re-embedding
         if (!faiss_loaded && chunk_count > 0 && embedder_ && embedder_->is_loaded()) {

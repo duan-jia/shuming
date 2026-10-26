@@ -90,6 +90,7 @@ README顶部复用已有项目图标；它不改变GitHub账号头像、仓库�
 | CI/Staging（不含完整模型服务） | [Staging](deploy/staging/README.md) |
 | Agent / RAG 评测与结果 | [评测指南](tests/README.md) · [评测报告](tests/reports/README.md) |
 | 开发与评测环境隔离 | [共享开发评测环境](deploy/dev-eval/README.md) |
+| 角色、接口权限与数据隔离 | [权限管理](docs/permissions.md) |
 | 设计与开发约定 | [架构](ARCHITECTURE.md) · [AGENTS](AGENTS.md) |
 
 ## 配置说明

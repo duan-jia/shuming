@@ -46,6 +46,13 @@ int main() {
         auto again = reloaded.search("rdma", 1, 3);
         expect(again.size() == 1 && again[0].metadata.title == "Historical title", "round trip lost title");
         expect(reloaded.search("rdma", 1, 4).empty(), "tenant isolation changed");
+        reloaded.synchronize_scopes({{7, {3, "public"}}});
+        expect(!reloaded.search("rdma", 1, 4).empty(), "public migration did not update cached scope");
+        reloaded.synchronize_scopes({{7, {5, "group"}}});
+        expect(reloaded.search("rdma", 1, 4).empty(), "restricted scope leaked through old cache");
+        expect(!reloaded.search("rdma", 1, 5).empty(), "new group lost access");
+        reloaded.synchronize_scopes({});
+        expect(reloaded.search("rdma", 1, 5).empty(), "deleted document remained in cached index");
     } catch (...) {
         std::filesystem::remove(path);
         throw;

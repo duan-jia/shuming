@@ -3,7 +3,6 @@
 #include <nlohmann/json.hpp>
 
 #include "security/crypto_utils.h"
-#include "security/guest_policy.h"
 #include <openssl/rand.h>
 
 namespace fastllm {
@@ -32,25 +31,13 @@ bool AuthService::require_auth(const HttpRequest& req, HttpResponse& resp, UserI
         resp.json_error(401, "Unauthorized");
         return false;
     }
-    if (user.role == Role::UNKNOWN) { resp.json_error(403, "Forbidden"); return false; }
+    if (!RbacManager::check_route_permission(user.role, req.method_string(), req.path)) {
+        resp.json_error(403, "Forbidden"); return false;
+    }
     if (user.role == Role::GUEST) {
-        if (!ctx_.guest_enabled || user.tenant_id != ctx_.guest_tenant_id
-            || !guest_route_allowed(req.method_string(), req.path)) {
+        if (!ctx_.guest_enabled || user.tenant_id != ctx_.guest_tenant_id) {
             resp.json_error(403, "Guest access is restricted"); return false;
         }
-        if (req.method == HttpMethod::POST && req.path == "/api/sessions"
-            && !ctx_.guest_limiter.allow_guest_session(user.id)) {
-            resp.set_header("Retry-After", "900"); resp.json_error(429, "Guest session limit reached"); return false;
-        }
-    }
-    return true;
-}
-
-bool AuthService::require_permission(const UserInfo& user, const std::string& resource,
-                                     const std::string& action, HttpResponse& resp) const {
-    if (!ctx_.rbac->check_permission(user.role, resource, action)) {
-        resp.json_error(403, "Forbidden");
-        return false;
     }
     return true;
 }
@@ -65,8 +52,8 @@ void AuthService::guest_login(const HttpRequest& req, HttpResponse& resp) {
     if (!ctx_.guest_enabled || ctx_.guest_tenant_id <= 0) {
         resp.json_error(403, "Guest login is disabled"); return;
     }
-    if (!ctx_.guest_limiter.allow_guest_login(req.peer_ip)) {
-        resp.set_header("Retry-After", "3600"); resp.json_error(429, "Guest login limit reached"); return;
+    if (!login_limiter_.allow_source(req.peer_ip)) {
+        resp.set_header("Retry-After", "600"); resp.json_error(429, "Too many login attempts; try again later"); return;
     }
     // Client-supplied IDs, roles and quotas are never accepted.
     if (req.body.size() > 64 || (!req.body.empty() && req.body != "{}")) {
@@ -84,7 +71,7 @@ void AuthService::guest_login(const HttpRequest& req, HttpResponse& resp) {
         }
         auto token = ctx_.jwt->generate_token(id, ctx_.guest_tenant_id, name, "guest");
         resp.json(nlohmann::json{{"token", token}, {"expires_in", 900},
-            {"user", {{"id", id}, {"tenant_id", ctx_.guest_tenant_id}, {"username", name}, {"role", "guest"}}}}.dump());
+            {"user", {{"id", id}, {"tenant_id", ctx_.guest_tenant_id}, {"username", name}, {"role", "guest"}, {"tenant_name", kGuestTenantName}}}}.dump());
     } catch (...) { resp.json_error(503, "Guest account unavailable"); }
 }
 

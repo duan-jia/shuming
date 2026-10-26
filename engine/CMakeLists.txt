@@ -165,6 +165,7 @@ if(FASTLLM_BUILD_TESTS)
         src/server/router.cpp
         src/server/sse_connection.cpp
         src/server/worker_pool.cpp
+        src/security/rbac_manager.cpp
     )
     target_include_directories(native-mcp-test-server PRIVATE include ${muduo_SOURCE_DIR})
     target_link_libraries(native-mcp-test-server PRIVATE
@@ -214,4 +215,19 @@ if(FASTLLM_BUILD_TESTS)
     target_include_directories(rag-metadata-test PRIVATE include ${faiss_SOURCE_DIR})
     target_link_libraries(rag-metadata-test PRIVATE nlohmann_json::nlohmann_json spdlog::spdlog)
     add_test(NAME rag-metadata-test COMMAND rag-metadata-test)
+endif()
+
+if(FASTLLM_BUILD_TESTS)
+    add_executable(document-access-test
+        tests/document_access_test.cpp
+        src/services/document_service.cpp
+        src/services/knowledge_search_service.cpp
+        src/security/rbac_manager.cpp
+        src/server/http_protocol.cpp
+    )
+    target_include_directories(document-access-test PRIVATE include ${faiss_SOURCE_DIR})
+    target_link_libraries(document-access-test PRIVATE
+        nlohmann_json::nlohmann_json spdlog::spdlog pthread)
+    target_compile_options(document-access-test PRIVATE -UNDEBUG)
+    add_test(NAME document-access-test COMMAND document-access-test)
 endif()

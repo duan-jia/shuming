@@ -53,7 +53,6 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
         jwt_secret,
         config.get_int("jwt.expiry_seconds", 86400)
     );
-    ctx.rbac = std::make_unique<RbacManager>();
 
     ctx.rate_limiter = std::make_unique<RateLimiter>();
     if (config.raw().contains("rate_limiter") && config.raw()["rate_limiter"].contains("rules")) {

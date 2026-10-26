@@ -40,23 +40,21 @@ struct ChatService::ActiveRequests {
     std::unordered_map<std::string, std::shared_ptr<ChatRequestState>> sessions;
 };
 
-ChatService::ChatService(AppContext& ctx, ToolService& tools, AgentOptions options, bool allow_user_web_search)
+ChatService::ChatService(AppContext& ctx, ToolService& tools, AgentOptions options, bool allow_user_web_search, AuthRequired authenticate)
     : active_(std::make_shared<ActiveRequests>()), ctx_(ctx), tools_(tools), options_(options),
-      allow_user_web_search_(allow_user_web_search) {}
+      allow_user_web_search_(allow_user_web_search), authenticate_(std::move(authenticate)) {}
 
 void ChatService::cancel(const HttpRequest& req, HttpResponse& response) {
-    const auto authorization = req.header("Authorization");
-    if (authorization.rfind("Bearer ", 0) != 0) { response.json_error(401, "Unauthorized"); return; }
-    const auto claims = ctx_.jwt->verify_token(authorization.substr(7));
-    if (!claims.valid) { response.json_error(401, "Unauthorized"); return; }
+    UserInfo user{};
+    if (!authenticate_(req, response, user)) return;
     try {
         const auto body = nlohmann::json::parse(req.body);
         const auto session = body.at("session_id").get<std::string>();
         const auto request = body.at("request_id").get<std::string>();
         std::lock_guard<std::mutex> lock(active_->mutex);
         auto item = active_->sessions.find(session);
-        if (item == active_->sessions.end() || item->second->user_id != claims.user_id
-            || item->second->tenant_id != claims.tenant_id || item->second->request_id != request) {
+        if (item == active_->sessions.end() || item->second->user_id != user.id
+            || item->second->tenant_id != user.tenant_id || item->second->request_id != request) {
             response.json_error(404, "Active request not found"); return;
         }
         item->second->cancelled = true;
@@ -88,28 +86,17 @@ void ChatService::send_sse_error(const std::shared_ptr<SseContext>& sse_ctx, con
 }
 
 void ChatService::stream(const HttpRequest& req, const RouteParams& params, std::shared_ptr<SseContext> sse_ctx) {
-    auto auth = req.header("Authorization", "");
-    if (auth.substr(0, 7) != "Bearer ") {
-        send_sse_error(sse_ctx, "Unauthorized");
+    UserInfo user{};
+    HttpResponse authorization;
+    if (!authenticate_(req, authorization, user)) {
+        send_sse_error(sse_ctx, nlohmann::json::parse(authorization.body).value("error", "Unauthorized"));
         return;
     }
+    sse_ctx->user_id = user.id;
+    sse_ctx->tenant_id = user.tenant_id;
+    sse_ctx->role = RbacManager::role_to_string(user.role);
 
-    auto claims = ctx_.jwt->verify_token(auth.substr(7));
-    if (!claims.valid) {
-        send_sse_error(sse_ctx, "Invalid token");
-        return;
-    }
-
-    const bool guest = claims.role == "guest";
-    if (guest && (!ctx_.guest_enabled || claims.tenant_id != ctx_.guest_tenant_id
-        || !ctx_.guest_limiter.allow_guest_chat(claims.user_id, req.peer_ip))) {
-        send_sse_error(sse_ctx, "Guest chat limit reached or guest access disabled"); return;
-    }
-    sse_ctx->user_id = claims.user_id;
-    sse_ctx->tenant_id = claims.tenant_id;
-    sse_ctx->role = claims.role;
-
-    if (ctx_.rate_limiter && !ctx_.rate_limiter->allow(claims.user_id, "chat")) {
+    if (ctx_.rate_limiter && !ctx_.rate_limiter->allow(user.id, "chat")) {
         send_sse_error(sse_ctx, "Rate limited");
         return;
     }
@@ -127,7 +114,6 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             request_id = generate_uuid();
         }
 
-        if (guest && message.size() > 2048) { send_sse_error(sse_ctx, "Guest message is too long"); return; }
         if (!has_non_whitespace(message)) {
             send_sse_error(sse_ctx, "Message is required");
             return;
@@ -140,15 +126,15 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         SessionSummary session;
         if (!ctx_.session_repository
             || !ctx_.session_repository->get_session(
-                session_id, claims.tenant_id, claims.user_id, session)) {
+                session_id, user.tenant_id, user.id, session)) {
             send_sse_error(sse_ctx, "Session not found");
             return;
         }
 
         auto state = std::make_shared<ChatRequestState>();
         state->request_id = request_id;
-        state->user_id = claims.user_id;
-        state->tenant_id = claims.tenant_id;
+        state->user_id = user.id;
+        state->tenant_id = user.tenant_id;
         {
             std::lock_guard<std::mutex> lock(active_->mutex);
             if (active_->sessions.count(session_id)) {
@@ -174,7 +160,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         }
 
         if (ctx_.billing_service) {
-            auto quota = ctx_.billing_service->check_quota(claims.tenant_id, claims.user_id);
+            auto quota = ctx_.billing_service->check_quota(user.tenant_id, user.id);
             if (!quota.success) {
                 nlohmann::json err;
                 err["error"] = quota.failure_reason.empty() ? "Quota unavailable" : quota.failure_reason;
@@ -203,22 +189,21 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             return;
         }
 
-        const bool use_agent = !guest && options_.enabled && engine->supports_tools();
+        const bool use_agent = options_.enabled && engine->supports_tools();
         InferParams infer_params;
         infer_params.session_id = session_id;
-        const int default_max_tokens = guest ? 512 : use_agent ? options_.max_output_tokens : (engine->supports_tools() ? 0 : 512);
+        const int default_max_tokens = use_agent ? options_.max_output_tokens : (engine->supports_tools() ? 0 : 512);
         infer_params.max_tokens = body.value("max_tokens", default_max_tokens);
         if ((body.contains("max_tokens") && infer_params.max_tokens < 1)
             || infer_params.max_tokens < 0 || infer_params.max_tokens > 8192) {
             send_sse_error(sse_ctx, "max_tokens must be between 1 and 8192"); return;
         }
-        if (guest) infer_params.max_tokens = std::min(infer_params.max_tokens, 512);
         infer_params.temperature = body.value("temperature", 0.7f);
         infer_params.top_p = body.value("top_p", 0.9f);
         infer_params.history = std::move(history);
 
-        bool enable_rag = guest || body.value("enable_rag", use_agent);
-        infer_params.system_prompt = guest ? "You are a research assistant for a public knowledge demo. Use only publicly available context and do not claim access to private laboratory data." : ctx_.system_prompt;
+        bool enable_rag = body.value("enable_rag", use_agent);
+        infer_params.system_prompt = ctx_.system_prompt;
         nlohmann::json fallback_source_files = nlohmann::json::array();
         if (!use_agent && enable_rag && ctx_.knowledge_search_service) {
             SearchKnowledgeRequest search_request;
@@ -227,9 +212,8 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             search_request.mode = KnowledgeSearchMode::CHUNKS;
 
             CallerContext caller;
-            caller.public_only = guest;
-            caller.tenant_id = claims.tenant_id;
-            caller.principal_id = claims.user_id;
+            caller.tenant_id = user.tenant_id;
+            caller.principal_id = user.id;
             caller.principal_type = "user";
             caller.trace_id = request_id;
 
@@ -251,8 +235,8 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         }
 
         auto sse = sse_ctx;
-        int bill_tenant = claims.tenant_id;
-        int bill_user = claims.user_id;
+        int bill_tenant = user.tenant_id;
+        int bill_user = user.id;
         AppContext* ctx = &ctx_;
 
         auto infer_req = std::make_shared<InferRequest>();
@@ -269,12 +253,12 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         infer_req->deadline = std::chrono::steady_clock::now() + std::chrono::seconds(options_.timeout_seconds);
         if (use_agent) {
             CallerContext caller;
-            caller.tenant_id = claims.tenant_id;
-            caller.principal_id = claims.user_id;
+            caller.tenant_id = user.tenant_id;
+            caller.principal_id = user.id;
             caller.principal_type = "user";
             caller.trace_id = request_id;
             infer_req->owned_engine = std::make_shared<AgentRuntime>(*engine, tools_, *ctx_.rate_limiter,
-                caller, options_, enable_rag, claims.role == "admin" || allow_user_web_search_,
+                caller, options_, enable_rag, RbacManager::can_use_web(user.role, allow_user_web_search_),
                 [sse](const nlohmann::json& event) {
                     if (sse->is_active()) sse->send_event("message", event.dump());
                 }, [ctx, bill_tenant, bill_user]() -> long long {
