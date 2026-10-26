@@ -20,7 +20,7 @@ public:
 private:
     AppContext& ctx_;
 
-    static bool require_admin(const UserInfo& user, HttpResponse& resp);
+    static bool require_permission(const UserInfo& user, Permission permission, HttpResponse& resp);
 };
 
 }

@@ -7,6 +7,8 @@
 
 namespace fastllm {
 
+inline constexpr char kGuestTenantName[] = "测试实验组";
+
 struct TenantSummary {
     int id = 0;
     std::string name;

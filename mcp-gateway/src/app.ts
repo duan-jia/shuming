@@ -88,6 +88,29 @@ export function createGateway(config: GatewayConfig) {
   });
   app.all('/mcp', (req, res) => void nodeHandler(req, res, req.body));
 
+  for (const path of ['/mcp/knowledge', '/mcp/web'] as const) {
+    app.post(path, async (req, res) => {
+      const principal = req.auth ? principalByName.get(req.auth.clientId) : undefined;
+      if (!principal) {
+        res.status(401).json({ error: 'invalid_token' });
+        return;
+      }
+      try {
+        const response = await ragClient.nativeMcp(principal, path, req.body,
+          req.header('mcp-protocol-version'), req.header('origin'));
+        const body = await response.text();
+        for (const header of ['content-type', 'retry-after']) {
+          const value = response.headers.get(header);
+          if (value) res.setHeader(header, value);
+        }
+        res.status(response.status).send(body);
+      } catch {
+        res.status(502).json({ error: 'MCP upstream is unavailable' });
+      }
+    });
+    app.all(path, (_req, res) => res.status(405).set('Allow', 'POST').end());
+  }
+
   return {
     app,
     close: () => mcpHandler.close(),

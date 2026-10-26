@@ -8,8 +8,8 @@ namespace fastllm {
 
 AdminService::AdminService(AppContext& ctx) : ctx_(ctx) {}
 
-bool AdminService::require_admin(const UserInfo& user, HttpResponse& resp) {
-    if (user.role != Role::ADMIN) {
+bool AdminService::require_permission(const UserInfo& user, Permission permission, HttpResponse& resp) {
+    if (!RbacManager::check_permission(user.role, permission)) {
         resp.json_error(403, "Admin only");
         return false;
     }
@@ -17,7 +17,7 @@ bool AdminService::require_admin(const UserInfo& user, HttpResponse& resp) {
 }
 
 void AdminService::create_tenant(const HttpRequest& req, const UserInfo& user, HttpResponse& resp) {
-    if (!require_admin(user, resp)) return;
+    if (!require_permission(user, Permission::TENANT_MANAGE, resp)) return;
 
     try {
         auto body = nlohmann::json::parse(req.body);
@@ -43,7 +43,7 @@ void AdminService::create_tenant(const HttpRequest& req, const UserInfo& user, H
 }
 
 void AdminService::list_tenants(const UserInfo& user, HttpResponse& resp) {
-    if (!require_admin(user, resp)) return;
+    if (!require_permission(user, Permission::TENANT_MANAGE, resp)) return;
 
     nlohmann::json result = nlohmann::json::array();
     if (ctx_.tenant_repository) {
@@ -63,7 +63,7 @@ void AdminService::list_tenants(const UserInfo& user, HttpResponse& resp) {
 }
 
 void AdminService::create_user(const HttpRequest& req, const UserInfo& user, HttpResponse& resp) {
-    if (!require_admin(user, resp)) return;
+    if (!require_permission(user, Permission::USER_MANAGE, resp)) return;
 
     try {
         auto body = nlohmann::json::parse(req.body);
@@ -103,7 +103,7 @@ void AdminService::create_user(const HttpRequest& req, const UserInfo& user, Htt
 }
 
 void AdminService::list_users(const UserInfo& user, HttpResponse& resp) {
-    if (!require_admin(user, resp)) return;
+    if (!require_permission(user, Permission::USER_MANAGE, resp)) return;
 
     nlohmann::json result = nlohmann::json::array();
     if (ctx_.user_repository) {
@@ -123,7 +123,7 @@ void AdminService::list_users(const UserInfo& user, HttpResponse& resp) {
 }
 
 void AdminService::delete_user(const RouteParams& params, const UserInfo& user, HttpResponse& resp) {
-    if (!require_admin(user, resp)) return;
+    if (!require_permission(user, Permission::USER_MANAGE, resp)) return;
 
     std::string id_str = params.get("id");
     if (id_str.empty()) { resp.json_error(400, "User ID required"); return; }

@@ -6,6 +6,8 @@ import { createSseParser } from "../lib/sse";
 import { sessionTitle } from "../lib/session-title";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { SourceFiles } from "../components/source-files";
+import { downloadDocumentFile, normalizeSourceFiles, type SourceFile } from "../lib/source-files";
 
 interface Message {
   id: string;
@@ -16,6 +18,7 @@ interface Message {
   reasoning?: string;
   toolStatus?: string;
   notice?: string;
+  sourceFiles?: SourceFile[];
 }
 
 interface Session {
@@ -157,6 +160,7 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeView, setActiveView] = useState<"chat" | "documents">("chat");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [activeLibrary, setActiveLibrary] = useState<"public" | "group">("public");
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsError, setDocumentsError] = useState("");
   const [deletingDocument, setDeletingDocument] = useState<number | null>(null);
@@ -169,6 +173,8 @@ export default function Home() {
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const messagePaneRef = useRef<HTMLElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
+  const visibleDocuments = documents.filter(document => document.visibility === activeLibrary);
+  const canUploadToLibrary = activeLibrary === "group" || userRole === "admin";
 
   useLayoutEffect(() => {
     const pane = messagePaneRef.current;
@@ -291,10 +297,11 @@ export default function Home() {
       const data = await res.json();
       if (data.messages && historyVersions.current.get(id) === version && !requests.current.has(id)) {
         const loaded: Message[] = data.messages.map(
-          (m: { id: number; role: string; content: string; reasoning?: string }) => ({
+          (m: { id: number; role: string; content: string; reasoning?: string; source_files?: unknown }) => ({
             id: String(m.id),
             role: m.role as "user" | "assistant",
             content: m.content || "",
+            sourceFiles: normalizeSourceFiles(m.source_files),
             reasoning: m.reasoning || "",
             isStreaming: false,
           })
@@ -382,6 +389,7 @@ export default function Home() {
       try {
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("visibility", activeLibrary);
         const response = await fetch("/api/papers/upload", {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
@@ -407,27 +415,13 @@ export default function Home() {
         setUploading(false);
       }
     },
-    [token, uploading, fetchDocuments]
+    [token, uploading, fetchDocuments, activeLibrary]
   );
 
   const downloadDocument = useCallback(async (document: DocumentItem, format: "pdf" | "md") => {
     try {
-      const response = await fetch(`/api/documents/${document.id}/download/${format}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "下载失败。");
-      }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const anchor = window.document.createElement("a");
-      anchor.href = url;
-      anchor.download = format === "pdf"
-        ? document.source_filename || `document-${document.id}.pdf`
-        : document.filename;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      await downloadDocumentFile(document.id, format === "pdf"
+        ? document.source_filename || `document-${document.id}.pdf` : document.filename, format, token);
     } catch (error) {
       setUploadNotice({
         type: "error",
@@ -595,6 +589,7 @@ export default function Home() {
                 ? {
                     ...message,
                     content: message.content,
+                    sourceFiles: normalizeSourceFiles(parsed.source_files),
                     notice: parsed.stop_reason === "cancelled" ? "已停止生成" : parsed.stop_reason === "output_limit" ? "本轮推理达到长度上限，请缩短问题或联系管理员调整输出上限。" : parsed.error || "生成失败",
                     toolStatus: undefined,
                     isStreaming: false,
@@ -638,7 +633,7 @@ export default function Home() {
           setMessages((prev) =>
             prev.map((message) =>
               message.id === msgId
-                ? { ...message, isStreaming: false, isReasoning: false, toolStatus: undefined, notice: parsed.truncated ? "回答已达到长度上限，可发送“继续”接着生成。" : message.notice }
+                ? { ...message, sourceFiles: normalizeSourceFiles(parsed.source_files), isStreaming: false, isReasoning: false, toolStatus: undefined, notice: parsed.truncated ? "回答已达到长度上限，可发送“继续”接着生成。" : message.notice }
                 : message
             )
           );
@@ -722,7 +717,7 @@ export default function Home() {
           </form>
           {guestEnabled && <div className="guest-entry">
             <button type="button" className="guest-button" disabled={loginPending || loginCooldown > 0} onClick={() => void login("guest")}>游客体验</button>
-            <p>仅公开知识 · 15 分钟体验 · 无上传权限</p>
+            <p>普通用户权限 · 15 分钟有效</p>
           </div>}
           <SupportCredit className="login-support" />
         </section>
@@ -743,7 +738,7 @@ export default function Home() {
           >
             新建对话
           </button>
-          <div className={`mt-3 grid gap-2 ${userRole === "guest" ? "grid-cols-1" : "grid-cols-2"}`}>
+          <div className="mt-3 grid grid-cols-2 gap-2">
             <button
               className={`rounded-lg px-3 py-2 text-sm transition ${
                 activeView === "chat" ? "bg-white/10 text-foreground" : "text-neutral-500 hover:bg-white/5 hover:text-foreground"
@@ -756,7 +751,7 @@ export default function Home() {
             >
               对话
             </button>
-            {userRole !== "guest" && (            <button
+            <button
               className={`rounded-lg px-3 py-2 text-sm transition ${
                 activeView === "documents" ? "bg-white/10 text-foreground" : "text-neutral-500 hover:bg-white/5 hover:text-foreground"
               }`}
@@ -768,7 +763,7 @@ export default function Home() {
               }}
             >
               文档管理
-            </button>)}
+            </button>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-3">
@@ -795,7 +790,7 @@ export default function Home() {
           ) : null}
         </div>
         <div className="shrink-0 border-t border-line p-4">
-          {userRole === "guest" && <p className="mb-3 text-xs text-neutral-400">游客体验 · 仅公开知识</p>}
+          {userRole === "guest" && <p className="mb-3 text-xs text-neutral-400">游客体验 · 15 分钟有效</p>}
           <button
             className="text-sm text-neutral-500 transition hover:text-foreground"
             onClick={() => {
@@ -811,6 +806,7 @@ export default function Home() {
               setLoggedIn(false);
               setToken("");
               setUserRole("user");
+              setActiveLibrary("public");
             }}
           >
             退出
@@ -825,7 +821,7 @@ export default function Home() {
             <button className="rounded-lg border border-line px-2.5 py-1.5 text-neutral-300 md:hidden" aria-label="打开导航" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
             {activeView === "documents" && <h1 className="text-sm font-medium">文档管理</h1>}
           </div>
-          {activeView === "documents" && (
+          {activeView === "documents" && canUploadToLibrary && (
             <div>
               <input
                 ref={pdfInputRef}
@@ -888,6 +884,7 @@ export default function Home() {
                     {msg.role === "assistant" ? <>
                       {msg.reasoning && <details className="reasoning-panel"><summary>{msg.isReasoning ? "正在思考…" : "思考过程"}</summary><div>{msg.reasoning}</div></details>}
                       <MarkdownContent content={msg.content} />
+                      {!msg.isStreaming && <SourceFiles files={msg.sourceFiles || []} token={token} />}
                       {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" aria-hidden="true" /><span className="sr-only">{msg.toolStatus || (msg.isReasoning ? "正在思考" : "正在生成回答")}</span></div>}
                       {msg.notice && <p role="status" className="message-notice">{msg.notice}</p>}
                     </> : <p className="user-content">{msg.content}</p>}
@@ -898,8 +895,20 @@ export default function Home() {
             </>
           ) : (
             <section>
+              <div role="tablist" aria-label="文档库" className="mb-4 flex gap-2">
+                {(["public", "group"] as const).map(library => (
+                  <button key={library} type="button" role="tab" aria-selected={activeLibrary === library}
+                    disabled={uploading} onClick={() => { setActiveLibrary(library); setUploadNotice(null); }}
+                    className={`rounded-lg px-4 py-2 text-sm transition ${activeLibrary === library ? "bg-white/10 text-foreground" : "text-neutral-500 hover:bg-white/5 hover:text-foreground"}`}>
+                    {library === "public" ? "公开库" : "研究组库"}
+                  </button>
+                ))}
+              </div>
+              <p className="mb-4 text-xs text-neutral-500">
+                {activeLibrary === "public" ? "全实验室可读 · 仅管理员可上传、删除" : `${userRole === "guest" ? "测试实验组" : "本研究组"} · 组内成员可上传、删除组内文档`}
+              </p>
               <div className="mb-4 flex items-center justify-between">
-                <p className="text-sm text-neutral-400">共 {documents.length} 条可见文档</p>
+                <p className="text-sm text-neutral-400">共 {visibleDocuments.length} 条可见文档</p>
                 <button
                   className="text-sm font-medium text-neutral-400 transition hover:text-foreground disabled:opacity-50"
                   onClick={() => void fetchDocuments(true)}
@@ -915,11 +924,11 @@ export default function Home() {
                 </div>
               )}
 
-              {documentsLoading && documents.length === 0 ? (
+              {documentsLoading && visibleDocuments.length === 0 ? (
                 <div className="py-20 text-center text-sm text-neutral-500">
                   正在加载文档…
                 </div>
-              ) : documents.length === 0 ? (
+              ) : visibleDocuments.length === 0 ? (
                 <div className="py-20 text-center text-sm text-neutral-500">暂无文档</div>
               ) : (
                 <>
@@ -936,7 +945,7 @@ export default function Home() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-line">
-                        {documents.map((doc) => (
+                        {visibleDocuments.map((doc) => (
                           <tr key={doc.id} className="align-top hover:bg-white/5">
                             <td className="px-4 py-4">
                               <div className="min-w-0">
@@ -965,7 +974,7 @@ export default function Home() {
                                 </div>
                               )}
                             </td>
-                            <td className="px-4 py-4 text-neutral-400">{doc.visibility === "public" ? "公共" : "本课题组"}</td>
+                            <td className="px-4 py-4 text-neutral-400">{doc.visibility === "public" ? "公开库" : userRole === "guest" ? "测试实验组" : "本研究组"}</td>
                             <td className="truncate px-4 py-4 text-neutral-400" title={doc.uploader_username || "未知"}>
                               {doc.uploader_username || "未知"}
                             </td>
@@ -1008,7 +1017,7 @@ export default function Home() {
                   </div>
 
                   <div className="space-y-3 md:hidden">
-                    {documents.map((doc) => (
+                    {visibleDocuments.map((doc) => (
                       <article key={doc.id} className="rounded-xl border border-line bg-surface p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
@@ -1020,7 +1029,7 @@ export default function Home() {
                           </span>
                         </div>
                         <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-neutral-400">
-                          <span>{doc.visibility === "public" ? "公共" : "本课题组"}</span>
+                          <span>{doc.visibility === "public" ? "公开库" : userRole === "guest" ? "测试实验组" : "本研究组"}</span>
                           <span>{doc.chunk_count} 个分块</span>
                           <span>{doc.uploader_username || "未知上传者"}</span>
                           <span>{formatDate(doc.created_at)}</span>

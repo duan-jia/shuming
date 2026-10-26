@@ -43,6 +43,17 @@ class PaperCardTest(unittest.TestCase):
         self.assertEqual(card["page_count"], 12)
         self.assertFalse(card["needs_review"])
 
+    def test_missing_or_temporary_title_is_rejected(self) -> None:
+        for title in [None, "", " \n ", 42, "00000000-0000-0000-0000-000000000001"]:
+            with self.subTest(title=title):
+                raw = dict(self.raw, title=title)
+                with self.assertRaisesRegex(RuntimeError, "title could not be identified"):
+                    self.normalize(raw)
+
+    def test_multiline_title_is_joined_for_filename(self) -> None:
+        card = self.normalize(dict(self.raw, title="  A Useful\nPaper\tTitle  "))
+        self.assertEqual(card["title"], "A Useful Paper Title")
+
     def test_markdown_uses_concise_four_section_structure(self) -> None:
         markdown = markdown_for(self.normalize())
 

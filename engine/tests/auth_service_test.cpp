@@ -25,7 +25,6 @@ int main() {
     auto* ctx = new AppContext;
     auto* pool = new MysqlPool("", 0, "", "", "", 1);
     ctx->jwt = std::make_unique<JwtHandler>(std::string(48, 'x'));
-    ctx->rbac = std::make_unique<RbacManager>();
     ctx->user_repository = std::make_unique<UserRepository>(*pool);
     fixture.id = 1; fixture.tenant_id = 1; fixture.username = "Admin"; fixture.role = "admin";
     fixture.password_hash = CryptoUtils::hash_password("correct-password"); fixture.active = true;
@@ -67,13 +66,45 @@ int main() {
     HttpResponse spoof; auth.guest_login(guest_req, spoof); assert(spoof.status_code == 400);
     HttpRequest resource; resource.headers["Authorization"] = "Bearer " + guest_token;
     UserInfo user;
-    for (const auto& path : {"/api/users", "/api/documents", "/mcp"}) {
+    for (const auto& path : {"/api/users", "/api/tenants"}) {
         resource.path = path; resource.method = HttpMethod::GET;
         HttpResponse denied; assert(!auth.require_auth(resource, denied, user)); assert(denied.status_code == 403);
     }
     resource.path = "/api/sessions"; resource.method = HttpMethod::GET;
     HttpResponse allowed; assert(auth.require_auth(resource, allowed, user));
+    // Verify signed identities through the production authorization boundary.
+    const auto member_token = ctx->jwt->generate_token(1, 1, "member", "user");
+    resource.headers["Authorization"] = "Bearer " + member_token;
+    resource.body = R"({"role":"admin","tenant_id":2})";
+    for (const auto& path : {"/api/users", "/api/tenants", "/api/documents/1/approve"}) {
+        resource.path = path; resource.method = HttpMethod::POST;
+        HttpResponse denied; assert(!auth.require_auth(resource, denied, user)); assert(denied.status_code == 403);
+    }
+    resource.path = "/api/documents"; resource.method = HttpMethod::POST;
+    HttpResponse upload; assert(auth.require_auth(resource, upload, user));
+    assert(user.role == Role::USER && user.tenant_id == 1);
+    resource.headers["Authorization"] = "Bearer " + token;
+    resource.path = "/api/users"; resource.method = HttpMethod::GET;
+    HttpResponse administration; assert(auth.require_auth(resource, administration, user));
+    resource.path = "/api/new-unregistered-endpoint";
+    HttpResponse future; assert(!auth.require_auth(resource, future, user)); assert(future.status_code == 403);
+    resource.headers.erase("Authorization");
+    resource.path = "/api/sessions";
+    HttpResponse anonymous; assert(!auth.require_auth(resource, anonymous, user)); assert(anonymous.status_code == 401);
+    resource.headers["Authorization"] = "Bearer " + ctx->jwt->generate_token(101, 1, "wrong-tenant", "guest");
+    HttpResponse isolation; assert(!auth.require_auth(resource, isolation, user)); assert(isolation.status_code == 403);
+    resource.headers["Authorization"] = "Bearer " + guest_token;
+    resource.path = "/api/chat/stream"; resource.method = HttpMethod::POST; resource.peer_ip = "guest-chat-peer";
+    for (int n = 0; n < 20; ++n) { HttpResponse r; assert(auth.require_auth(resource, r, user)); }
+    resource.path = "/api/documents"; resource.method = HttpMethod::GET;
+    HttpResponse documents; assert(auth.require_auth(resource, documents, user));
+    resource.path = "/mcp"; resource.method = HttpMethod::POST;
+    HttpResponse mcp; assert(auth.require_auth(resource, mcp, user));
+    resource.path = "/api/documents";
+    HttpResponse guest_upload; assert(auth.require_auth(resource, guest_upload, user));
+    resource.path = "/api/chat/cancel";
+    HttpResponse cancel; assert(auth.require_auth(resource, cancel, user));
     ctx->guest_enabled = false;
-    HttpResponse revoked; assert(!auth.require_auth(resource, revoked, user));
+    HttpResponse revoked; assert(!auth.require_auth(resource, revoked, user)); assert(revoked.status_code == 403);
     std::cout << "auth service fixture tests passed\n";
 }

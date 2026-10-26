@@ -1,5 +1,7 @@
 # Single-server deployment
 
+> Default generation profile: [Qwen3.8-27B / RTX 3080](../models/README.md). This document describes the existing HTTPS/cloud deployment. No automatic model, container network or production-data migration is performed.
+
 The frontend extends the existing backend, MySQL and MCP deployment. Chat and
 PDF processing use a remote model; embeddings and retrieval run locally. Only
 Caddy exposes public ports 80 and 443. Frontend port 3000, backend port 9006 and
@@ -82,35 +84,35 @@ See [isolated staging](../staging/README.md) for the release workflow.
 
 ## Waku and HTTPS
 
-lab-web joins Caddy to the frontend. lab-knowledge joins Waku to MCP. The existing
-backend network connects the frontend and MCP to the C++ service and MySQL.
-Waku does not join the database network. The frontend uses username/password
-login and administrator-created accounts. MCP uses a separate bearer token
-bound to a tenant service account.
+Production shuming is https://emoslab.online; Waku is
+https://waku.emoslab.online. Caddy manages certificates and automatic renewal
+for both. The retired kb.emoslab.online route is removed; deleting its DNS
+record also removes the ability to redirect visitors from that hostname.
+The independent blog.emoslab.online route must be preserved.
 
-integrate-waku.py preserves existing MCP entries, creates backups, and writes
-network overrides. The current Waku override also selects waku-simple:lab-mcp,
-a derived image that completes SDK imports before starting its connection
-thread. Preserve that image selection if regenerating the overrides until the
-base image includes this fix.
+Caddy forwards `/mcp` and `/mcp/*` directly to the C++ backend on lab-web;
+these public endpoints require a backend JWT. Other requests go to web:3000.
+Set knowledge_fetch.public_base_url to https://emoslab.online so signed PDF
+links use the current domain. Keep the Waku hostname in
+/srv/waku-simple/accounts.json synchronized with its Caddy route.
 
-The frontend is https://kb.duanzhiwojing.site. Waku remains at
-https://duanzhiwojing.site. Preserve this additional Caddy route when regenerating
-Waku's Caddyfile:
+Waku connects privately through lab-knowledge to the compatibility gateway:
 
-```caddyfile
-kb.duanzhiwojing.site {
-    tls /certificates/knowledge/fullchain.pem /certificates/knowledge/privkey.pem
-    header X-Robots-Tag "noindex, nofollow"
-    reverse_proxy web:3000 {
-        flush_interval -1
-    }
-}
-```
+- lab_knowledge: http://mcp:3100/mcp/knowledge
+- lab_web: http://mcp:3100/mcp/web
 
-The frontend certificate expires January 2, 2027. Manual DNS validation does
-not renew automatically. Renew with Certbot, install the renewed files in
-/srv/waku-simple/tls/knowledge and reload Caddy.
+Both use LAB_KNOWLEDGE_MCP_TOKEN from lab-mcp.env. The gateway exchanges that
+service token for a tenant-checked backend JWT and refreshes it automatically.
+Each connection exposes its native search and fetch tools. The original
+/mcp gateway endpoint remains compatible with older clients. Existing unrelated
+MCP entries, including Treg, must be preserved.
+
+The deployment enables web_search.enabled and mcp.allow_user_web_search;
+the latter permits authenticated non-admin users to use the web tools as well.
+The backend's lab-web network attachment and the pinned gateway image are in
+/srv/lab-knowledge/backend.integration.json. Preserve these overrides when
+updating. integrate-waku.py is the legacy single-tool setup helper; do not run
+it over this configuration, as it does not prepare the native dual connection.
 
 ## Verify
 

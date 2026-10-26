@@ -51,6 +51,7 @@ struct InferResult {
     std::vector<ToolCall> tool_calls;
     std::string finish_reason;
     std::string stop_reason;
+    nlohmann::json source_files = nlohmann::json::array();
     bool usage_estimated = false;
 };
 

@@ -34,6 +34,7 @@ async function responseData(response: Response) {
     error?: string;
     source_storage_name?: string | null;
     status?: string;
+    source_cleanup_allowed?: boolean;
   };
 }
 
@@ -89,7 +90,7 @@ export async function DELETE(
 
   const storageName = detail.source_storage_name || "";
   const cleanupFailures: string[] = [];
-  if (STORAGE_NAME_PATTERN.test(storageName)) {
+  if (deleted.source_cleanup_allowed === true && STORAGE_NAME_PATTERN.test(storageName)) {
     const stem = path.parse(storageName).name;
     const artifacts = [
       path.join(pdfDirectory(), storageName),
@@ -108,13 +109,14 @@ export async function DELETE(
         }
       })
     );
-  } else if (storageName) {
+  } else if (storageName && !STORAGE_NAME_PATTERN.test(storageName)) {
     cleanupFailures.push("invalid-storage-name");
     console.error("Refused to remove document artifact with invalid storage name", storageName);
   }
 
   return Response.json({
     status: deleted.status || "deleted",
+    source_cleanup_allowed: deleted.source_cleanup_allowed === true,
     cleanup_warning: cleanupFailures.length > 0
       ? `文档已删除，但 ${cleanupFailures.length} 个磁盘文件清理失败。`
       : null,

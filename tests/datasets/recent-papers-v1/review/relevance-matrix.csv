@@ -1,0 +1,101 @@
+﻿query_id,query,uccl,swift,sdr-rdma,eunomia,varuna,byteexpress,reimagining-rdma,shift,optinic,pcm,gwtf,bytescale,dreamddp,spantrain,infinipipe,flexpipe,lemix,charllm,scaling-pretraining,zorse,hopper,rdmacell,spritz,psp,prime,host-flowlet,ofan,lb-ai-training,lcmp,dlb
+rag-001,UCCL把RDMA传输的控制路径放在哪里执行，这样做解决什么演进问题？,2,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-002,不更换现有RDMA网卡，如何通过软件多路径缓解GPU集合通信中的流碰撞？找出对应系统。,2,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-003,"Where does UCCL sit in the communication stack, and how does its NCCL integration avoid most application changes?",2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-004,Swift为什么认为RDMA连接建立不一定需要极端微秒级控制面优化？,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-005,Swift针对冷请求、热请求及fork请求分别利用了哪些机制？,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-006,What kernel-version compatibility issue does Swift cite for the earlier KRCore approach?,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-007,在跨数据中心RDMA中，为什么Selective Repeat不一定优于纠删码？,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-008,SDR SDK如何让应用实现自定义RDMA可靠性方案？,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-009,How do SDR's streaming-send and one-shot-send APIs differ in granularity and intended use?,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-010,Eunomia使用什么结构在有限片上内存中跟踪乱序数据包？,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-011,为什么RDMA的按序交付约束会妨碍细粒度负载均衡和Jellyfish拓扑？,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0
+rag-012,"What switch count, server count and link configuration are used in Eunomia's Fat-tree versus Jellyfish example?",0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-013,Varuna为什么不在链路故障后无差别重传所有在途RDMA请求？,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-014,Varuna通过什么信息区分已执行和未执行的在途请求？,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-015,How does Varuna distinguish pre-failure from post-failure when both appear as a missing ACK to the requester?,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-016,ByteExpress用于哪类生产系统，它如何同时处理缓冲区和连接扩展问题？,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-017,ByteExpress为什么需要在传输层之上恢复服务可用性？,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-018,"Compared with kernel TCP, what mean and P99 parameter-fetch latency reductions are reported for ByteExpress inference?",0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-019,Celeris为什么把丢包恢复移出RDMA网卡？,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-020,哪项研究提出保留拥塞控制，却以自适应超时和数据优先级管理机器学习RDMA传输？,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-021,What coding transform is mentioned for loss recovery in the Celeris proposal?,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-022,SHIFT提出的跨网卡RDMA故障切换三难问题包括哪三个性质？,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-023,SHIFT利用训练框架的什么传输特性来放宽跨网卡切换限制？,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-024,Why does the SHIFT proof treat retrying an RDMA FADD as unsafe for exactly-once execution?,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-025,OptiNIC与强调完整可靠交付的RDMA网卡相比改变了哪些保证？,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-026,OptiNIC是否取消拥塞控制？它把损失恢复交给哪一层？,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-027,Which two public test environments are named in the OptiNIC evaluation?,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-028,PCM如何降低拥塞管理策略对不同RDMA网卡厂商API的依赖？,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-029,PCM如何通过signals和triggers支持不同粒度的反馈处理？,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-030,"Does PCM promise identical algorithm behavior on every backend, and when must a backend reject a handler?",0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-031,GWTF如何处理异构志愿节点随时加入、退出的去中心化大模型训练？,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-032,GWTF的核心路由算法希望优化哪两个训练目标？,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-033,How does GWTF discover peers and choose which stage should receive a newly joining node?,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-034,ByteScale的Hybrid Data Parallelism与静态二维设备网格有何区别？,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-035,哪项训练系统通过数据感知分片、动态通信和选择性卸载减少长短序列混训开销？,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-036,"In ByteScale's 8K-capacity example, why is a fixed CP degree of 128 wasteful for shorter sequences?",0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-037,DreamDDP怎样改变Local SGD的整模型周期同步方式？,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-038,DreamDDP调度通信与计算时依赖什么粒度的性能信息？,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-039,Why can in-place model-parameter synchronization corrupt forward or backward computation in local SGD?,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-040,DeepCEE如何为异构GPU和跨区域网络建立设备分组？,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-041,DeepCEE如何应对训练过程中的区域间网络波动？,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-042,What pipeline-parallel design is named in the DeepCEE abstract?,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-043,Concertina为何不能仅固定使用序列打包或序列切分一种流水线粒度？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-044,Concertina把动态块调度与什么检查点机制联合优化？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-045,"How does Concertina define batched, split and hybrid chunks, and why avoid packing two tail slices?",0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-046,FlexPipe由哪两个核心组件组成？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-047,FlexPipe如何帮助用户定制跨stage的微批计算顺序？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-048,Which built-in stage-placement strategies does the FlexPipe DSL provide?,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-049,LeMix针对训练与推理分离部署的哪类资源浪费提出共置方案？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-050,LeMix动态分配资源依赖哪些分析与调度组件？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-051,What maximum throughput improvement is reported for LeMix over separate setups?,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-052,CharLLM-PPT研究为什么认为增加硬件容量不必然提升训练性能？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0
+rag-053,为什么把微批大小增大到一定程度可能加剧热降频？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0
+rag-054,Which NVIDIA and AMD accelerators are covered in the distributed-training power and thermal characterization?,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0
+rag-055,Scaling Performance of Large Language Model Pretraining所用TX-GAIN集群有多少计算节点？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0
+rag-056,Scaling Performance of Large Language Model Pretraining这篇论文的预训练扩展实验使用什么模型、数据领域及训练目标？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0
+rag-057,What is the largest node and GPU count reported for the pretraining scaling runs?,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0
+rag-058,Zorse为什么需要把异构GPU放入同一数据并行组并允许不对称流水线stage？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0
+rag-059,哪项系统用自动规划器配置异构GPU集群的通信和显存高效训练策略？,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0
+rag-060,Why can equal batch allocation within a heterogeneous data-parallel stage create a bottleneck?,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0
+rag-061,Hopper是否要求修改交换机或增加专用硬件？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0
+rag-062,Hopper为什么需要控制路径切换时机，而不是检测到拥塞就任意切换？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0
+rag-063,How does Hopper estimate the rerouting delay needed to reduce out-of-order delivery?,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0
+rag-064,RDMACell如何在没有天然flowlet间隙时实现更细粒度多路径传输？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0
+rag-065,RDMACell采用什么接收侧控制与反馈机制？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0
+rag-066,"How do RDMACell's WQE-Token and WQE-Payload differ, and where is Global_Cell_ID carried?",0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0
+rag-067,Spritz为什么把低直径网络的拓扑感知路由移到发送端？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0
+rag-068,Spritz的两个算法使用哪些反馈探索或维护路径？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0
+rag-069,What roles do EV1 and EV2 play in Spritz's source-guided routing?,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0
+rag-070,PSP如何避免对所有端口状态进行全局排序？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0
+rag-071,PSP为什么关注过期状态引起的herding和振荡？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0
+rag-072,How does PSP react when a path's actual bandwidth falls below its expected capacity?,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0
+rag-073,ACK合并为什么会给既有packet spraying方案带来问题？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,0,0,0
+rag-074,PRIME如何结合伪随机轮转与拥塞信号进行负载重平衡？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0
+rag-075,How does PRIME distinguish the congestion severity of ECN marks and NACKs from loss or trimming?,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0
+rag-076,基于SRv6的主机驱动flowlet均衡如何减少交换机每流状态？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0
+rag-077,该SRv6 flowlet方案用什么指标估计各路径负载？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0
+rag-078,"Where is the host-driven SRv6 flowlet algorithm implemented, and how is per-flow state stored?",0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0
+rag-079,Ofan为什么认为fat-tree中的destination-oblivious分发会产生结构性不平衡？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,1,0,0
+rag-080,Ofan与pOfan的关系是什么？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0
+rag-081,"In the pinned version of Ofan: Optimal Load Balancing for AI Training, what training framework and model are used in its end-to-end evaluation?",0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0
+rag-082,Load Balancing for AI Training Workloads如何避免把负载均衡与拥塞控制及丢包恢复混为一谈？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,0,0
+rag-083,Load Balancing for AI Training Workloads这篇论文在链路正常与链路故障时，如何比较主机侧和交换机侧packet spraying？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0
+rag-084,Which scheduling discipline is proposed to reach optimal constant queue scaling at maximum utilization?,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0
+rag-085,LCMP如何同时考虑跨数据中心路径不对称和拥塞反馈迟滞？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0
+rag-086,LCMP如何减少多条流同时选择同一路径的决策碰撞？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0
+rag-087,"Which components are fused in LCMP's integer path cost, and what information does each contain?",0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0
+rag-088,DLB如何在大规模异构生成式AI服务中获得服务器容量信息？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2
+rag-089,DLB如何把路由选择与不同硬件、模型的延迟影响联系起来？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2
+rag-090,What deployment duration and production latency reductions are reported for Google's DLB?,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2
+rag-091,比较UCCL与PCM：前者把控制路径放到哪里，后者如何解决跨厂商策略移植？,2,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-092,Celeris与OptiNIC在机器学习RDMA可靠性保证上有什么共同设计方向？,0,0,0,0,0,0,2,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-093,Varuna与SHIFT分别怎样面对故障恢复中的执行正确性问题？,0,0,0,0,2,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-094,SDR-RDMA与OptiNIC如何将RDMA丢包恢复的设计空间开放给上层？,0,0,2,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-095,GWTF与DeepCEE怎样分别应对志愿节点波动和跨区域网络变化？,0,0,0,0,0,0,0,0,0,0,2,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-096,比较ByteScale与Concertina处理长短序列混训的并行粒度设计。,0,0,0,0,0,0,0,0,0,0,0,2,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+rag-097,DreamDDP与Zorse分别从同步方式与异构并行布局解决什么训练瓶颈？,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0
+rag-098,Hopper与主机侧SRv6 flowlet方案如何感知负载并减少路径切换的负面影响？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,2,0,0,0,0
+rag-099,面对陈旧状态，PRIME和PSP各采取什么分发或映射机制？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0
+rag-100,LCMP与Spritz分别面向什么网络环境，路径决策主要依赖哪些信息？,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,2,0

@@ -44,7 +44,8 @@ void McpService::handle(const HttpRequest& req, HttpResponse& response, ToolSet 
         response.set_header("WWW-Authenticate", "Bearer realm=\"shuming-mcp\"");
         return;
     }
-    if (user.id <= 0 || user.tenant_id <= 0) {
+    if (user.id <= 0 || user.tenant_id <= 0
+        || !RbacManager::check_permission(user.role, Permission::MCP_ACCESS)) {
         response.json_error(403, "Valid tenant identity required");
         return;
     }
@@ -91,7 +92,7 @@ void McpService::handle(const HttpRequest& req, HttpResponse& response, ToolSet 
     }
     const auto id = message["id"];
     const auto params = message.value("params", Json::object());
-    const bool allow_web = user.role == Role::ADMIN || options_.allow_user_web_search;
+    const bool allow_web = RbacManager::can_use_web(user.role, options_.allow_user_web_search);
     Json result;
     try {
         if (method == "initialize") {
