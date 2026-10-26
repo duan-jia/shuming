@@ -15,8 +15,7 @@ jobs:
     name: Tencent staging runner smoke
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/master' &&
-      vars.ENABLE_PRIVATE_DEPLOYMENT == 'true'
+      github.ref == 'refs/heads/master'
     runs-on: [self-hosted, Linux, X64, staging]
     timeout-minutes: 10
 

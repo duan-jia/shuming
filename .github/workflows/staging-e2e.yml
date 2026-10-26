@@ -1,5 +1,39 @@
 name: Staging E2E
 on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/staging-e2e.yml
+      - .dockerignore
+      - deploy/staging/**
+      - deploy/proxy/**
+      - deploy/server/**
+      - web/**
+      - CMakeLists.txt
+      - engine/**
+      - mcp-gateway/**
+      - sql/**
+      - tests/test_staging_isolation.py
+      - tests/public_repository_policy.test.mjs
+      - '!**/*.md'
+      - '!**/*.mdx'
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/staging-e2e.yml
+      - .dockerignore
+      - deploy/staging/**
+      - deploy/proxy/**
+      - deploy/server/**
+      - web/**
+      - CMakeLists.txt
+      - engine/**
+      - mcp-gateway/**
+      - sql/**
+      - tests/test_staging_isolation.py
+      - tests/public_repository_policy.test.mjs
+      - '!**/*.md'
+      - '!**/*.mdx'
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,9 +48,11 @@ jobs:
   build-images:
     name: Build staging images
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/master' &&
-      vars.ENABLE_PRIVATE_DEPLOYMENT == 'true'
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.base.ref == 'master' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
     permissions:
       contents: read
       packages: write
@@ -79,9 +115,11 @@ jobs:
     name: Deploy and test staging MCP
     needs: build-images
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/master' &&
-      vars.ENABLE_PRIVATE_DEPLOYMENT == 'true'
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.base.ref == 'master' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
     permissions:
       contents: read
       actions: read

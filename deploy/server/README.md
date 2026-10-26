@@ -1,10 +1,10 @@
 # Single-server deployment
 
-> Public release is blocked on runner isolation. The existing workflows still
-> use persistent lab runners. This branch gates jobs on manual/master/opt-in,
-> effective on master only after merge; guards do not isolate these runners.
-> Move privileged deployment to a private control repository before changing
-> visibility. See the [release checklist](../../docs/open-source-readiness.md).
+> Current automation trusts same-repository PR branches from maintainers/agents.
+> Staging and production share a host-level trust boundary despite separate data
+> and Compose resources; this is not a sandbox for untrusted code. Review runner
+> isolation before accepting external contributions or changing visibility.
+> See the [release checklist](../../docs/open-source-readiness.md).
 
 
 > Default generation profile: [Qwen3.8-27B / RTX 3080](../models/README.md). This document describes the existing HTTPS/cloud deployment. No automatic model, container network or production-data migration is performed.

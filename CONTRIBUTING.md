@@ -48,7 +48,9 @@ npm run lint --prefix web
 npm run build --prefix web
 ```
 
-本分支将 PR 检查限制为 GitHub-hosted 环境；合并前 master 仍可能触发旧
-Staging 工作流。不要为了让 PR 通过而启用私有部署开关。公开前必须按
-[发布清单](docs/open-source-readiness.md)移走持久化 runner。硬件推理、真实模型效果与生产验收需要
+所有 PR 自动运行 GitHub-hosted CI；同仓库 PR 涉及相关代码时另跑服务器 staging，
+外部 fork PR 不运行 staging。相关改动进入 master 后也自动做 staging 验收。
+纯文档修改不触发部署；合并与创建 Release 均不会自动上线生产。
+当前信任你与 agent 的同仓库分支；扩大贡献者范围前先按
+[发布清单](docs/open-source-readiness.md)复查 runner 隔离。硬件推理、真实模型效果与生产验收需要
 单独记录环境与结果；构建通过不能代替这些验证。

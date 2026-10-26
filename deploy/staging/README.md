@@ -1,13 +1,14 @@
 # Isolated staging
 
-> Public release is blocked on runner isolation. The existing workflows still
-> use persistent lab runners. This branch gates jobs on manual/master/opt-in,
-> effective on master only after merge; guards do not isolate these runners.
-> Move privileged deployment to a private control repository before changing
-> visibility. See the [release checklist](../../docs/open-source-readiness.md).
+> Current automation trusts same-repository PR branches from maintainers/agents.
+> Staging and production share a host-level trust boundary despite separate data
+> and Compose resources; this is not a sandbox for untrusted code. Review runner
+> isolation before accepting external contributions or changing visibility.
+> See the [release checklist](../../docs/open-source-readiness.md).
 
 
-PRs from branches in this repository build immutable backend, MCP and frontend
+Relevant PRs from branches in this repository, relevant pushes to master, and
+manual runs on master build immutable backend, MCP and frontend
 images on GitHub-hosted runners. A serialized job tests backend login, document
 indexing and MCP retrieval on the Tencent server. The build job uploads a
 checksummed bundle containing the tracked source and backend/MCP/MySQL images.
@@ -18,8 +19,10 @@ explicit timeouts, and temporary bundles are removed after each run.
 The downloader uses parallel byte ranges with bounded retries and checks the
 artifact's SHA-256 digest. GitHub API credentials are never forwarded to the
 storage redirect URL. It needs only the workflow token's read access to Actions.
-Fork PRs run CI without
-executing code on that server. The frontend receives build and lint checks;
+Fork PRs run ordinary hosted CI; the staging jobs reject fork sources.
+Shared staging and production operations use the same concurrency group and do
+not cancel an active deployment. GitHub concurrency can replace an older pending
+run; it is not a FIFO guarantee or a separate preview environment for each PR. The frontend receives build and lint checks;
 staging does not yet test browser chat or PDF processing.
 
 | Resource | Production | CI staging |
@@ -48,7 +51,8 @@ separation prevent accidental overlap but do not provide a security boundary
 against malicious code. Only trusted repository members should execute PR
 code on this runner. Use a separate VM when accepting untrusted contributors.
 
-Production release runs only through workflow_dispatch on master. Run Staging
+Production release remains manual through workflow_dispatch on master; neither
+PRs, master pushes nor publishing a GitHub Release automatically deploy production. Run Staging
 E2E manually on master after merging, then use that successful run's full image
 SHA in Production release. PR image tags can name GitHub's synthetic merge
 commit, so do not infer an image tag from the PR head SHA. The release retains
