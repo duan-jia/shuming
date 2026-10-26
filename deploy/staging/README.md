@@ -1,5 +1,11 @@
 # Isolated staging
 
+> Public release is blocked on runner isolation. The existing workflows still
+> use persistent lab runners; this documentation change does not disable them.
+> Move privileged deployment to a private control repository before changing
+> visibility. See the [release checklist](../../docs/open-source-readiness.md).
+
+
 PRs from branches in this repository build immutable backend, MCP and frontend
 images on GitHub-hosted runners. A serialized job tests backend login, document
 indexing and MCP retrieval on the Tencent server. The build job uploads a

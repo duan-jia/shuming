@@ -1,5 +1,11 @@
 # Single-server deployment
 
+> Public release is blocked on runner isolation. The existing workflows still
+> use persistent lab runners; this documentation change does not disable them.
+> Move privileged deployment to a private control repository before changing
+> visibility. See the [release checklist](../../docs/open-source-readiness.md).
+
+
 > Default generation profile: [Qwen3.8-27B / RTX 3080](../models/README.md). This document describes the existing HTTPS/cloud deployment. No automatic model, container network or production-data migration is performed.
 
 The frontend extends the existing backend, MySQL and MCP deployment. Chat and
