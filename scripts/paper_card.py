@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,9 @@ def build_prompt(filename: str, context: str) -> list[dict[str, str]]:
             "content": (
                 f"Read the extracted text from {filename!r} and write the kind of concise summary "
                 "a careful reader would keep after finishing the paper. Follow these rules:\n"
+                "- Copy the complete original paper title from the paper text into title, joining "
+                "line breaks with spaces. Never use the upload filename, UUID, arXiv identifier, "
+                "or an invented title. Leave title empty if it cannot be identified.\n"
                 "- In problem_and_context, explain the specific problem, necessary context, why it "
                 "matters or is difficult, and the key gap in existing approaches. Avoid generic "
                 "textbook background and an exhaustive related-work survey.\n"
@@ -78,7 +82,13 @@ def _string_list(value: Any) -> list[str]:
 def normalize_card(raw: dict[str, Any], source: Path, source_hash: str, model: str,
                    page_count: int, extracted_chars: int) -> dict[str, Any]:
     """Normalize and validate a model response, adding generation provenance."""
-    title = str(raw.get("title") or source.stem).strip()
+    raw_title = raw.get("title")
+    title = " ".join(raw_title.split()) if isinstance(raw_title, str) else ""
+    if not title or re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\.pdf)?",
+        title, flags=re.IGNORECASE,
+    ):
+        raise RuntimeError("The paper title could not be identified; please retry with a readable paper PDF.")
     problem = str(raw.get("problem_and_context") or "").strip()
     idea = str(raw.get("core_idea_and_approach") or "").strip()
     scope = str(raw.get("scope_and_limitations") or "").strip()

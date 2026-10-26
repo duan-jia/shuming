@@ -11,6 +11,7 @@ import re
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -112,16 +113,18 @@ def extract_pdf(path: Path, max_chars: int) -> tuple[str, int, int]:
 def call_model(endpoint: str, model: str, api_key: str, messages: list[dict[str, str]], timeout: int) -> dict[str, Any]:
     if not api_key:
         raise RuntimeError("remote_engine.api_key or REMOTE_ENGINE_API_KEY is required")
-    payload = json.dumps(
-        {
-            "model": model,
-            "messages": messages,
-            "temperature": 0.1,
-            "max_tokens": 3500,
-            "response_format": {"type": "json_object"},
-        },
-        ensure_ascii=False,
-    ).encode("utf-8")
+    request_body = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.1,
+        "max_tokens": 3500,
+        "response_format": {"type": "json_object"},
+    }
+    # Paper cards need a bounded JSON answer. DeepSeek thinking can consume the
+    # entire output budget before producing content.
+    if urllib.parse.urlparse(endpoint).hostname == "api.deepseek.com":
+        request_body["thinking"] = {"type": "disabled"}
+    payload = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         chat_completions_url(endpoint),
         data=payload,

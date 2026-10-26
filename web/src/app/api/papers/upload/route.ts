@@ -290,6 +290,7 @@ export async function POST(request: Request) {
   }
 
   const generatedPaths = new Set<string>();
+  let submissionStarted = false;
   try {
     const compression = await compressPdf(destination);
     const markdownPath = path.resolve(/* turbopackIgnore: true */ compression.markdown_path || "");
@@ -332,6 +333,7 @@ export async function POST(request: Request) {
     metadata.source_pdf = sourceFilename;
     metadata.source_storage_name = sourceStorageName;
     await writeFile(titledJsonPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+    submissionStarted = true;
     const ragResult = await submitToRag(
       authorization,
       markdownFilename,
@@ -354,7 +356,12 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("PDF compression failed", error);
-    await Promise.all(
+    // A timeout can occur after the backend committed the document. Keep its
+    // source files unless rejection is definitive; a retry will deduplicate.
+    const safeToCleanup = !submissionStarted || (
+      error instanceof BackendRequestError && error.status >= 400 && error.status < 500
+    );
+    if (safeToCleanup) await Promise.all(
       [destination, ...generatedPaths].map((filePath) =>
         unlink(filePath).catch((cleanupError: NodeJS.ErrnoException) => {
           if (cleanupError.code !== "ENOENT") {

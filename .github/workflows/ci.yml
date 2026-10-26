@@ -150,6 +150,10 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p 'test_evaluation.py'
           python3 -m unittest discover -s tests -p 'test_agent_model_eval.py'
+      - name: Verify paper processing and title validation
+        run: |
+          python3 -m unittest discover -s tests -p 'test_paper_card.py'
+          python3 -m unittest discover -s tests -p 'test_pdf_model_request.py'
       - name: Run deployment tests
         run: python3 -m unittest discover -s tests -p 'test_*deploy*.py'
       - name: Test staging guard
@@ -174,7 +178,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: node --experimental-transform-types --test tests/session-title.spec.ts tests/sse.spec.ts tests/library-access.spec.ts
+      - run: node --experimental-transform-types --test tests/session-title.spec.ts tests/sse.spec.ts tests/library-access.spec.ts tests/paper-upload-naming.spec.ts
       - run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: '1'
