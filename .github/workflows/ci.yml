@@ -36,15 +36,23 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install native dependencies
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
+          # Keep downloads off the Azure archive endpoint that was slow in CI.
+          # Edit only this ephemeral runner; preserve suites, components and keys.
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            [ -f "$source" ] || continue
+            sudo sed -i -E 's#https?://azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$source"
+          done
+          apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends \
             build-essential \
             cmake \
             default-libmysqlclient-dev \
             git \
             gfortran \
-            libboost-all-dev \
+            libboost-dev \
             libopenblas-dev \
             libssl-dev \
             poppler-utils

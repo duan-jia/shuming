@@ -140,7 +140,7 @@ export default function Home() {
   const [token, setToken] = useState("");
   const [loggedIn, setLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState<"admin" | "user" | "guest">("user");
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [guestEnabled, setGuestEnabled] = useState(false);
