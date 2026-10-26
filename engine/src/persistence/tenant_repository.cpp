@@ -31,8 +31,11 @@ bool TenantRepository::create_tenant(const std::string& name, int token_limit_da
 bool TenantRepository::ensure_guest_tenant(int& tenant_id) {
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) return false;
-    bool ok = conn->execute("INSERT IGNORE INTO tenants (name, token_limit_daily) VALUES ('__guest__', 3000)");
-    auto* res = ok ? conn->query("SELECT id FROM tenants WHERE name='__guest__' AND status='active' LIMIT 1") : nullptr;
+    // Keep the legacy tenant ID so existing guest sessions remain isolated
+    // in the same group after its display name changes.
+    bool ok = conn->execute(std::string("UPDATE IGNORE tenants SET name='") + kGuestTenantName + "' WHERE name='__guest__'");
+    if (ok) ok = conn->execute(std::string("INSERT IGNORE INTO tenants (name) VALUES ('") + kGuestTenantName + "')");
+    auto* res = ok ? conn->query(std::string("SELECT id FROM tenants WHERE name='") + kGuestTenantName + "' AND status='active' LIMIT 1") : nullptr;
     auto* row = res ? mysql_fetch_row(res) : nullptr;
     if (row && row[0]) tenant_id = std::stoi(row[0]);
     if (res) mysql_free_result(res);

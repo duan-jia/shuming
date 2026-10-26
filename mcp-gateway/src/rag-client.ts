@@ -132,6 +132,27 @@ export class RagClient {
     });
   }
 
+  async nativeMcp(principal: ServicePrincipal, path: '/mcp/knowledge' | '/mcp/web',
+    body: unknown, protocolVersion?: string, origin?: string): Promise<Response> {
+    const send = (token: string) => this.fetchWithTimeout(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        ...(protocolVersion ? { 'mcp-protocol-version': protocolVersion } : {}),
+        ...(origin ? { origin } : {})
+      },
+      body: JSON.stringify(body)
+    });
+    let response = await send(await this.tokenFor(principal));
+    if (response.status === 401 && !hasStaticToken(principal)) {
+      await response.body?.cancel();
+      response = await send(await this.tokenFor(principal, true));
+    }
+    return response;
+  }
+
   async search(principal: ServicePrincipal, input: SearchKnowledgeInput): Promise<SearchKnowledgeResult> {
     const requestId = randomUUID();
     let token = await this.tokenFor(principal);

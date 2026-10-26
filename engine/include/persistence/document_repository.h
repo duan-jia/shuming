@@ -34,9 +34,11 @@ class DocumentRepository {
 public:
     explicit DocumentRepository(MysqlPool& mysql);
 
-    std::vector<DocumentSummary> list_visible_documents(int tenant_id);
-    bool find_visible_document(int doc_id, int tenant_id, DocumentDetails& document);
-    bool find_document_owner(int doc_id, int& tenant_id, int& uploaded_by);
+    std::vector<DocumentSummary> list_visible_documents(int tenant_id, bool include_public_pending = false);
+    bool find_visible_document(int doc_id, int tenant_id, DocumentDetails& document,
+                               bool include_public_pending = false);
+    bool can_cleanup_source(const std::string& storage_name);
+    bool find_document_scope(int doc_id, int& tenant_id, std::string& visibility);
     bool find_document_tenant(int doc_id, int& tenant_id);
     bool find_duplicate_document(int tenant_id, const std::string& source_sha256,
                                  DocumentSummary& document);

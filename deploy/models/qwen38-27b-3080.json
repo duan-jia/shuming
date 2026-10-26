@@ -1,0 +1,18 @@
+{
+  "model": "Qwen3.8-27B",
+  "source": "https://huggingface.co/Qwen/Qwen3.8-27B",
+  "gguf_source": "https://huggingface.co/ggml-org/Qwen3.8-27B-GGUF",
+  "quantization": "Q4_K_M",
+  "file": "models/Qwen3.8-27B-Q4_K_M.gguf",
+  "endpoint": "http://127.0.0.1:8010/v1",
+  "context_window_tokens": 8192,
+  "supports_images": false,
+  "gpu_layers": 8,
+  "parallel": 1,
+  "batch_size": 256,
+  "ubatch_size": 128,
+  "threads": 4,
+  "thinking": false,
+  "status": "interface_profile_only_not_gpu_validated",
+  "llama_cpp_reference_revision": "b3fa69955ea81c3b60e77e3c1e2224c4a826ffb9"
+}

@@ -10,8 +10,7 @@ namespace fastllm {
 namespace {
 
 bool can_delete_document(const DocumentSummary& doc, const UserInfo& user) {
-    return doc.tenant_id == user.tenant_id
-        && (user.role == Role::ADMIN || doc.uploaded_by == user.id);
+    return RbacManager::can_delete_document(user, doc.tenant_id, doc.visibility);
 }
 
 nlohmann::json summary_json(const DocumentSummary& doc, const UserInfo& user) {
@@ -74,6 +73,11 @@ void DocumentService::upload(const HttpRequest& req, const UserInfo& user, HttpR
 
         if (visibility != "group" && visibility != "public") {
             resp.json_error(400, "visibility must be 'group' or 'public'");
+            return;
+        }
+
+        if (!RbacManager::can_upload_document(user, visibility)) {
+            resp.json_error(403, "Only administrators can upload to the public library");
             return;
         }
 
@@ -163,6 +167,13 @@ void DocumentService::deduplicate(const HttpRequest& req, const UserInfo& user,
                                   HttpResponse& resp) {
     try {
         auto body = nlohmann::json::parse(req.body);
+        const std::string visibility = body.value("visibility", "group");
+        if (visibility != "public" && visibility != "group") {
+            resp.json_error(400, "visibility must be 'group' or 'public'"); return;
+        }
+        if (!RbacManager::can_upload_document(user, visibility)) {
+            resp.json_error(403, "Only administrators can upload to the public library"); return;
+        }
         std::string source_sha256 = body.value("source_sha256", "");
         static const std::regex sha256_pattern("^[0-9a-f]{64}$");
         if (!std::regex_match(source_sha256, sha256_pattern)) {
@@ -191,7 +202,7 @@ void DocumentService::deduplicate(const HttpRequest& req, const UserInfo& user,
 void DocumentService::list(const UserInfo& user, HttpResponse& resp) {
     nlohmann::json result = nlohmann::json::array();
     if (ctx_.document_repository) {
-        for (const auto& doc : ctx_.document_repository->list_visible_documents(user.tenant_id)) {
+        for (const auto& doc : ctx_.document_repository->list_visible_documents(user.tenant_id, user.role == Role::ADMIN)) {
             result.push_back(summary_json(doc, user));
         }
     }
@@ -210,7 +221,7 @@ void DocumentService::detail(const RouteParams& params, const UserInfo& user, Ht
 
     DocumentDetails document;
     if (!ctx_.document_repository
-        || !ctx_.document_repository->find_visible_document(doc_id, user.tenant_id, document)) {
+        || !ctx_.document_repository->find_visible_document(doc_id, user.tenant_id, document, user.role == Role::ADMIN)) {
         resp.json_error(404, "Document not found");
         return;
     }
@@ -224,7 +235,7 @@ void DocumentService::detail(const RouteParams& params, const UserInfo& user, Ht
 
 void DocumentService::approve(const RouteParams& params, const UserInfo& user,
                               HttpResponse& resp) {
-    if (user.role != Role::ADMIN) {
+    if (!RbacManager::check_permission(user.role, Permission::DOCUMENT_APPROVE)) {
         resp.json_error(403, "Admin only");
         return;
     }
@@ -238,8 +249,8 @@ void DocumentService::approve(const RouteParams& params, const UserInfo& user,
     DocumentDetails document;
     if (!ctx_.document_repository
         || !ctx_.document_repository->find_visible_document(
-            doc_id, user.tenant_id, document)
-        || document.tenant_id != user.tenant_id) {
+            doc_id, user.tenant_id, document, user.role == Role::ADMIN)
+        || !RbacManager::can_approve_document(user, document.tenant_id, document.visibility)) {
         resp.json_error(404, "Document not found");
         return;
     }
@@ -272,18 +283,22 @@ void DocumentService::remove(const RouteParams& params, const UserInfo& user, Ht
     }
 
     int doc_tenant_id = 0;
-    int uploaded_by = 0;
+    std::string visibility;
     if (!ctx_.document_repository
-        || !ctx_.document_repository->find_document_owner(doc_id, doc_tenant_id, uploaded_by)) {
+        || !ctx_.document_repository->find_document_scope(doc_id, doc_tenant_id, visibility)) {
         resp.json_error(404, "Document not found");
         return;
     }
-    if (doc_tenant_id != user.tenant_id
-        || (user.role != Role::ADMIN && uploaded_by != user.id)) {
+    if (!RbacManager::can_delete_document(user, doc_tenant_id, visibility)) {
         resp.json_error(403, "Forbidden");
         return;
     }
 
+    DocumentDetails document;
+    if (!ctx_.document_repository->find_visible_document(
+            doc_id, user.tenant_id, document, user.role == Role::ADMIN)) {
+        resp.json_error(404, "Document not found"); return;
+    }
     if (!ctx_.rag) {
         resp.json_error(503, "RAG service not available");
         return;
@@ -293,7 +308,8 @@ void DocumentService::remove(const RouteParams& params, const UserInfo& user, Ht
         return;
     }
 
-    resp.json(R"({"status":"deleted"})");
+    const bool cleanup = ctx_.document_repository->can_cleanup_source(document.source_storage_name);
+    resp.json(nlohmann::json{{"status", "deleted"}, {"source_cleanup_allowed", cleanup}}.dump());
 }
 
 void DocumentService::search(const HttpRequest& req, const UserInfo& user, HttpResponse& resp) {

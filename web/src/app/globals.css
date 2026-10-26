@@ -141,3 +141,15 @@ textarea:focus-visible { outline: none; }
 .guest-button:hover:not(:disabled) { border-color: #b5c9e280; background: #b5c9e208; }
 .guest-button:disabled { opacity: .5; }
 .guest-entry p { margin-top: 12px; font-size: 11px; color: #a3a3a3; }
+
+/* Quiet, bounded source references; no cards or extra conversation chrome. */
+.source-files { margin-top: .65rem; min-width: 0; font-size: .75rem; line-height: 1.5; }
+.source-files-row { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .65rem; min-width: 0; }
+.source-files-label { color: #a3a3a3; flex-shrink: 0; }
+.source-file-link { display: inline-flex; align-items: center; gap: .3rem; min-width: 0; max-width: min(13rem, 100%); color: #a3a3a3; text-align: left; cursor: pointer; }
+.source-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-files-toggle { color: #a3a3a3; cursor: pointer; white-space: nowrap; }
+.source-file-link:hover, .source-files-toggle:hover { color: var(--foreground); text-decoration: underline; }
+.source-file-link:focus-visible, .source-files-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 2px; }
+.source-file-link:disabled { opacity: .6; cursor: wait; }
+.source-files-error { margin-top: .3rem; color: #fbbf24; }

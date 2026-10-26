@@ -133,7 +133,7 @@ int main(int argc, char* argv[]) {
     agent_options.timeout_seconds = config.get_int("agent.timeout_seconds", 90);
     agent_options.max_tool_calls_per_turn = config.get_int("agent.max_tool_calls_per_turn", 4);
     agent_options.max_tool_result_bytes = config.get_int("agent.max_tool_result_bytes", 24000);
-    ChatService chat(ctx, tools, agent_options, mcp_options.allow_user_web_search);
+    ChatService chat(ctx, tools, agent_options, mcp_options.allow_user_web_search, require_auth);
 
     muduo::net::EventLoop loop;
     muduo::net::InetAddress addr(options.port);

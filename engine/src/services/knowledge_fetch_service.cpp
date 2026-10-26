@@ -150,6 +150,17 @@ Json KnowledgeFetchService::read_pdf(int fd, const Json& args, std::function<boo
     return result;
 }
 
+Json KnowledgeFetchService::download_reference(int id, const CallerContext& caller) {
+    try {
+        DocumentDetails document;
+        if (id < 1 || caller.tenant_id < 1 || !lookup_(id, caller.tenant_id, document)) return nullptr;
+        if (caller.public_only && document.visibility != "public") return nullptr;
+        File file{open_pdf(document)};
+        if (document.source_filename.empty()) return nullptr;
+        return {{"doc_id", id}, {"filename", document.source_filename}};
+    } catch (const std::exception&) { return nullptr; }
+}
+
 ToolResult KnowledgeFetchService::execute(const Json& args, const CallerContext& caller, std::function<bool()> should_stop) {
     if (!args.is_object() || !args.contains("doc_id") || !args["doc_id"].is_number_integer()
         || args["doc_id"] < 1 || args["doc_id"] > INT_MAX) throw std::invalid_argument("Valid doc_id required");

@@ -63,7 +63,7 @@ static void search_and_print(RagService& rag, const std::string& query, int top_
     for (size_t i = 0; i < results.size(); ++i) {
         auto& r = results[i];
         std::cout << "  [" << (i+1) << "] " << r.metadata.category << "/"
-                  << r.metadata.dish << " " << r.metadata.difficulty
+                  << r.metadata.title
                   << " score=" << r.score << " doc=" << r.doc_id << "\n  "
                   << r.content.substr(0, 120) << (r.content.size() > 120 ? "..." : "")
                   << std::endl;
@@ -83,7 +83,7 @@ static void vec_and_print(RagService& rag, const std::string& query, int top_k =
     for (size_t i = 0; i < results.size(); ++i) {
         auto& r = results[i];
         std::cout << "  [" << (i+1) << "] " << r.metadata.category << "/"
-                  << r.metadata.dish << " " << r.metadata.difficulty
+                  << r.metadata.title
                   << " score=" << r.score << " doc=" << r.doc_id << std::endl;
     }
 }
@@ -97,7 +97,7 @@ static void bm5_and_print(RagService& rag, const std::string& query, int top_k =
     for (size_t i = 0; i < results.size(); ++i) {
         auto& r = results[i];
         std::cout << "  [" << (i+1) << "] " << r.metadata.category << "/"
-                  << r.metadata.dish << " " << r.metadata.difficulty
+                  << r.metadata.title
                   << " score=" << r.score << " doc=" << r.doc_id << std::endl;
     }
 }
@@ -111,7 +111,7 @@ static void parents_and_print(RagService& rag, const std::string& query, int top
     for (size_t i = 0; i < results.size(); ++i) {
         auto& p = results[i];
         std::cout << "  [" << (i+1) << "] " << p.metadata.category << "/"
-                  << p.metadata.dish << " " << p.metadata.difficulty
+                  << p.metadata.title
                   << " matches=" << p.matched_chunks << " score=" << p.max_score
                   << " doc=" << p.doc_id << " " << p.filename << std::endl;
     }
@@ -124,7 +124,7 @@ static void bench_and_print(RagService& rag) {
     }
 
     const int warmup = 3, iters = 50;
-    const std::string query = "排骨汤怎么做";
+    const std::string query = "RDMA congestion control";
     std::vector<double> vec_us, bm5_us, hybrid_us;
 
     auto us = [](auto start, auto end) {

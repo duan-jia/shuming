@@ -6,7 +6,7 @@ namespace fastllm {
 
 DocumentRepository::DocumentRepository(MysqlPool& mysql) : mysql_(mysql) {}
 
-std::vector<DocumentSummary> DocumentRepository::list_visible_documents(int tenant_id) {
+std::vector<DocumentSummary> DocumentRepository::list_visible_documents(int tenant_id, bool include_public_pending) {
     std::vector<DocumentSummary> documents;
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) return documents;
@@ -19,7 +19,7 @@ std::vector<DocumentSummary> DocumentRepository::list_visible_documents(int tena
         "FROM documents d LEFT JOIN users u ON u.id=d.uploaded_by "
         "WHERE d.status<>'deleted' AND (d.tenant_id="
         + std::to_string(tenant_id)
-        + " OR (d.visibility='public' AND d.status='ready')) ORDER BY d.created_at DESC";
+        + " OR (d.visibility='public'" + (include_public_pending ? "" : " AND d.status='ready'") + ")) ORDER BY d.created_at DESC";
     auto* res = conn->query(sql);
     if (res) {
         auto* row = mysql_fetch_row(res);
@@ -49,7 +49,7 @@ std::vector<DocumentSummary> DocumentRepository::list_visible_documents(int tena
 }
 
 bool DocumentRepository::find_visible_document(int doc_id, int tenant_id,
-                                               DocumentDetails& document) {
+                                               DocumentDetails& document, bool include_public_pending) {
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) return false;
 
@@ -61,7 +61,7 @@ bool DocumentRepository::find_visible_document(int doc_id, int tenant_id,
         "FROM documents d LEFT JOIN users u ON u.id=d.uploaded_by "
         "WHERE d.id=" + std::to_string(doc_id)
         + " AND d.status<>'deleted' AND (d.tenant_id=" + std::to_string(tenant_id)
-        + " OR (d.visibility='public' AND d.status='ready')) LIMIT 1";
+        + " OR (d.visibility='public'" + (include_public_pending ? "" : " AND d.status='ready'") + ")) LIMIT 1";
     auto* res = conn->query(sql);
     if (!res) {
         mysql_.release(conn);
@@ -97,11 +97,26 @@ bool DocumentRepository::find_visible_document(int doc_id, int tenant_id,
     return true;
 }
 
-bool DocumentRepository::find_document_owner(int doc_id, int& tenant_id, int& uploaded_by) {
+bool DocumentRepository::can_cleanup_source(const std::string& storage_name) {
+    if (storage_name.empty()) return false;
+    auto conn = mysql_.acquire();
+    if (!conn || !conn->valid()) return false;
+    std::string escaped(storage_name.size() * 2 + 1, '\0');
+    const auto length = mysql_real_escape_string(conn->raw(), escaped.data(), storage_name.c_str(), storage_name.size());
+    escaped.resize(length);
+    auto* res = conn->query("SELECT COUNT(*) FROM documents WHERE status<>'deleted' AND source_storage_name='" + escaped + "'");
+    auto* row = res ? mysql_fetch_row(res) : nullptr;
+    const bool unused = row && row[0] && std::string(row[0]) == "0";
+    if (res) mysql_free_result(res);
+    mysql_.release(conn);
+    return unused;
+}
+
+bool DocumentRepository::find_document_scope(int doc_id, int& tenant_id, std::string& visibility) {
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) return false;
 
-    std::string sql = "SELECT tenant_id, uploaded_by FROM documents WHERE id="
+    std::string sql = "SELECT tenant_id, visibility FROM documents WHERE id="
         + std::to_string(doc_id) + " AND status<>'deleted' LIMIT 1";
     auto* res = conn->query(sql);
     if (!res) {
@@ -117,7 +132,7 @@ bool DocumentRepository::find_document_owner(int doc_id, int& tenant_id, int& up
     }
 
     tenant_id = row[0] ? std::stoi(row[0]) : 0;
-    uploaded_by = row[1] ? std::stoi(row[1]) : 0;
+    visibility = row[1] ? row[1] : "group";
     mysql_free_result(res);
     mysql_.release(conn);
     return true;

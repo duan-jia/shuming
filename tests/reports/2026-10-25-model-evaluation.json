@@ -1,0 +1,93 @@
+{
+  "dataset_version": "0.1.4",
+  "run": "2026-10-25",
+  "rag": {
+    "mode": "parents",
+    "queries": 100,
+    "errors": 0,
+    "rewrite_enabled": false,
+    "corpus_papers": 30,
+    "excluded_non_corpus_doc_ids": [
+      1
+    ],
+    "exclusion_occurrences": 39,
+    "macro": {
+      "1": {
+        "precision": 0.91,
+        "recall": 0.8266666666666665,
+        "known_positive_hit": 0.91
+      },
+      "3": {
+        "precision": 0.3499999999999996,
+        "recall": 0.9058333333333333,
+        "known_positive_hit": 0.96
+      },
+      "5": {
+        "precision": 0.22199999999999956,
+        "recall": 0.9433333333333332,
+        "known_positive_hit": 0.98
+      },
+      "10": {
+        "precision": 0.11299999999999978,
+        "recall": 0.9533333333333333,
+        "known_positive_hit": 0.98
+      }
+    },
+    "median_query_seconds": 0.060225559514947236,
+    "incomplete_recall_at_10": [
+      "rag-001",
+      "rag-011",
+      "rag-020",
+      "rag-035",
+      "rag-082",
+      "rag-091",
+      "rag-094",
+      "rag-096"
+    ]
+  },
+  "agent": {
+    "mode": "real_model_with_controlled_tool_fixtures_not_backend_e2e",
+    "requested_model": "deepseek-chat",
+    "provider_response_models": [
+      "deepseek-flash"
+    ],
+    "completed": 29,
+    "skipped": 1,
+    "mechanical_pass": 26,
+    "mechanical_pass_rate_executed": 0.896551724137931,
+    "mechanical_pass_rate_all_tasks": 0.8666666666666667,
+    "failed": [
+      {
+        "task_id": "agent-020",
+        "errors": [
+          "call budget"
+        ]
+      },
+      {
+        "task_id": "agent-021",
+        "errors": [
+          "call budget"
+        ]
+      },
+      {
+        "task_id": "agent-026",
+        "errors": [
+          "call budget"
+        ]
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 82763,
+      "completion_tokens": 15712
+    },
+    "tool_calls": 84,
+    "fixture_misses": 7,
+    "overall_answer_semantics_scored": false
+  },
+  "artifact_hashes": {
+    "rag-parents-closed-corpus.json": "4cdeaf8b262675a23961cb09a29f4bf3672c41cfdaaf5a639094294d96b46fa0",
+    "agent-mechanical.json": "35f056c379428d7f92ca07bc983f338a18702d314f2ad3f6f7c3a00d1a4ac873",
+    "agent/normalized-traces.jsonl": "a5eba79b30da670abf9564def167c372fa23fad2a95082a4c9ef208e5294cb08",
+    "agent/executions.json": "22731f9f0d1c69c7eb1e7847c95c29a59c9d7f2cdb607abcd590b53bdf88123b"
+  }
+}

@@ -53,7 +53,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_NATIVE=OFF
 
       - name: Build focused test
-        run: cmake --build build --target knowledge-search-service-test mysql-pool-test native-mcp-test-server auth-security-test auth-service-test --parallel 2
+        run: cmake --build build --target knowledge-search-service-test mysql-pool-test native-mcp-test-server auth-security-test auth-service-test document-access-test rag-metadata-test --parallel 2
 
       - name: Run focused backend tests
         env:
@@ -64,6 +64,8 @@ jobs:
           ./build/bin/mysql-pool-test
           ./build/bin/auth-security-test
           ./build/bin/auth-service-test
+          ./build/bin/document-access-test
+          ./build/bin/rag-metadata-test
 
       - name: Set up Node.js for MCP interoperability
         uses: actions/setup-node@v4
@@ -133,6 +135,25 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify paper dataset and graders
+        run: |
+          node tests/datasets/recent-papers-v1/scripts/validate.mjs
+          node --test tests/datasets/recent-papers-v1/tests/dataset.test.mjs
+          node tests/reviews/probe_recent_papers_grader.mjs
+      - name: Verify frozen paper dataset checksums
+        working-directory: tests/datasets/recent-papers-v1
+        run: sha256sum --check checksums.sha256
+      - name: Verify evaluation adapters and model harness
+        run: |
+          python3 -m unittest discover -s tests -p 'test_evaluation.py'
+          python3 -m unittest discover -s tests -p 'test_agent_model_eval.py'
+      - name: Verify paper processing and title validation
+        run: |
+          python3 -m unittest discover -s tests -p 'test_paper_card.py'
+          python3 -m unittest discover -s tests -p 'test_pdf_model_request.py'
       - name: Run deployment tests
         run: python3 -m unittest discover -s tests -p 'test_*deploy*.py'
       - name: Test staging guard
@@ -157,7 +178,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: node --experimental-strip-types --test tests/session-title.spec.ts tests/sse.spec.ts
+      - run: node --experimental-transform-types --test tests/session-title.spec.ts tests/sse.spec.ts tests/library-access.spec.ts tests/paper-upload-naming.spec.ts
       - run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: '1'

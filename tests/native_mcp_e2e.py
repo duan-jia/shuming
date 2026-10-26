@@ -129,12 +129,12 @@ class NativeMcpTest(unittest.TestCase):
         cls.addClassCleanup(cls.provider.server_close)
         cls.tokens = {}
         for line in cls.process.stdout:
-            for key in ('ADMIN_TOKEN', 'USER_TOKEN'):
+            for key in ('ADMIN_TOKEN', 'USER_TOKEN', 'GUEST_TOKEN'):
                 if line.startswith(key + '='):
                     cls.tokens[key] = line.strip().split('=', 1)[1]
-            if len(cls.tokens) == 2:
+            if len(cls.tokens) == 3:
                 break
-        if len(cls.tokens) != 2:
+        if len(cls.tokens) != 3:
             raise RuntimeError('Fixture failed to start')
         # Drain logs so pipe capacity cannot stall a worker in concurrency tests.
         cls.logs = []
@@ -209,17 +209,21 @@ class NativeMcpTest(unittest.TestCase):
     def test_auth_origin_and_permissions(self):
         self.assertEqual(self.rpc('tools/list', token=None)[0], 401)
         self.assertEqual(self.rpc('tools/list', token='invalid')[0], 401)
+        for path in ('/mcp', '/mcp/knowledge', '/mcp/web'):
+            self.assertEqual(self.rpc('tools/list', path=path, token='GUEST_TOKEN')[0], 200)
         self.assertEqual(self.rpc('tools/list', headers={'Origin': 'https://evil.example'})[0], 403)
         status, headers, _ = self.rpc('tools/list', headers={'Origin': 'https://allowed.example'})
         self.assertEqual(status, 200)
         self.assertEqual(headers['Access-Control-Allow-Origin'], 'https://allowed.example')
         self.assertEqual(self.rpc('tools/list', path='/mcp/web', token='USER_TOKEN')[2]['result']['tools'], [])
         self.assertEqual(self.call('search_web', {'query': 'test'}, token='USER_TOKEN')[2]['error']['code'], -32602)
+        self.assertEqual(self.rpc('tools/list', path='/mcp/web', token='GUEST_TOKEN')[2]['result']['tools'], [])
+        self.assertEqual(self.call('search_web', {'query': 'test'}, token='GUEST_TOKEN')[2]['error']['code'], -32602)
         self.assertEqual(self.request('OPTIONS', headers={'Origin': 'https://evil.example'})[0], 403)
         self.assertEqual(self.request('OPTIONS', token=None, headers={'Origin': 'https://allowed.example'})[0], 204)
 
     def test_tenant_and_shared_evidence(self):
-        for token, tenant in [('ADMIN_TOKEN', 7), ('USER_TOKEN', 8)]:
+        for token, tenant in [('ADMIN_TOKEN', 7), ('USER_TOKEN', 8), ('GUEST_TOKEN', 9)]:
             for mode in ('chunks', 'parents'):
                 body = self.call('search_knowledge', {'query': '论文', 'mode': mode}, token=token)[2]['result']
                 self.assertFalse(body['isError'])

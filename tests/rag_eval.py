@@ -1,202 +1,135 @@
 #!/usr/bin/env python3
-"""RAG evaluation: component recall + optional LLM-as-Judge via DeepSeek flash.
-Usage:
-  python3 rag_eval.py --gt eval_queries_full.json
-  python3 rag_eval.py --gt eval_queries_full.json --judge
-"""
+"""Retrieve and score the current 100-query paper dataset with honest unjudged bounds."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+import time
+from eval_common import Client, write_report
 
-import json, os, subprocess, sys, re, time, argparse, urllib.request
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CLI = os.path.join(os.environ.get("BINDIR", os.path.join(PROJECT_ROOT, "build/bin")), "fast-llm-cli")
-MODEL = os.environ.get("MODEL", os.path.join(PROJECT_ROOT, "models/qwen2.5-3b-instruct-q4_k_m.gguf"))
-EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", os.path.join(PROJECT_ROOT, "models/bge-small-zh-v1.5-q4_k_m.gguf"))
-TIMEOUT = int(os.environ.get("TIMEOUT", "300"))
-API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-API_BASE = os.environ.get("DEEPSEEK_API_BASE", "https://api.deepseek.com")
-JUDGE_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
+DATASET = Path(__file__).parent / 'datasets/recent-papers-v1'
 
 
-def p_at_k(retrieved, relevant, k):
-    hits = sum(1 for r in retrieved[:k] if r in relevant)
-    return hits / k if k > 0 else 0
+def jsonl(path):
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def run_cli(queries):
-    cmds = ""
-    for q in queries:
-        cmds += f"/vec {q['query']}\n/bm5 {q['query']}\n/search {q['query']}\n/parents {q['query']}\n"
-    cmds += "/quit\n"
-
-    print(f"Running {len(queries)} queries ...", end=" ", flush=True)
-    t0 = time.time()
-    proc = subprocess.run(
-        [CLI, "--model", MODEL, "--embedding-model", EMBED_MODEL],
-        input=cmds.encode("utf-8"), capture_output=True, timeout=TIMEOUT,
-        env={**os.environ, "LC_ALL": "en_US.UTF-8", "LANG": "en_US.UTF-8"}
-    )
-    output = proc.stdout.decode("utf-8", errors="replace") + proc.stderr.decode("utf-8", errors="replace")
-    print(f"done ({time.time()-t0:.1f}s)")
-    return output
-
-
-def parse_results(output):
-    search_re = re.compile(r"^\s{2}\[(\d+)\]\s+\S+/(.+?)\s+\S+\s+score=([0-9.]+)\s+doc=(\d+)")
-    parent_re = re.compile(r"^\s{2}\[(\d+)\]\s+\S+/(.+?)\s+\S+\s+matches=\d+\s+score=([0-9.]+)\s+doc=(\d+)")
-
-    qi, mode = 0, 0
-    rank1_seen = False
-    results = {"vec": {}, "bm5": {}, "hybrid": {}, "parents": {}}
-
-    for line in output.splitlines():
-        m = parent_re.match(line)
-        if m:
-            mode = 3
-            dish = m.group(2).strip()
-            results["parents"].setdefault(qi, []).append(dish)
-            continue
-        m = search_re.match(line)
-        if m:
-            if m.group(1) == "1":
-                if mode == 3:
-                    qi += 1; mode = 0; rank1_seen = True
-                elif not rank1_seen:
-                    rank1_seen = True
-                else:
-                    mode += 1
-            dish = m.group(2).strip()
-            if mode == 0: results["vec"].setdefault(qi, []).append(dish)
-            elif mode == 1: results["bm5"].setdefault(qi, []).append(dish)
-            elif mode == 2: results["hybrid"].setdefault(qi, []).append(dish)
-    return results
-
-
-def judge_retrieval(query, chunks, doc_map):
-    """Batch judge: send query + retrieved chunks to flash, get relevance labels."""
-    system = ("Determine which retrieved chunks are relevant to the query. "
-              "Output ONLY a JSON array of chunk numbers, e.g. [1, 3]. If none, output [].")
-
-    user = f"Query: {query}\n\nRetrieved chunks:\n"
-    for i, (dish, cat) in enumerate(chunks, 1):
-        info = doc_map.get(dish, {})
-        content = info.get("content", "")[:400]
-        user += f"[{i}] {dish} [{cat}]: {content}\n"
-
-    body = json.dumps({
-        "model": JUDGE_MODEL,
-        "messages": [{"role": "system", "content": system},
-                     {"role": "user", "content": user}],
-        "max_tokens": 16384, "temperature": 0
-    }).encode("utf-8")
-
-    try:
-        req = urllib.request.Request(f"{API_BASE.rstrip('/')}/chat/completions", data=body, headers={
-            "Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"
-        })
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            answer = json.loads(resp.read())["choices"][0]["message"]["content"]
-            m = re.search(r'\[[\d,\s]*\]', answer)
-            return json.loads(m.group()) if m else []
-    except Exception as e:
-        return None
+def load_mapping(path, manifest):
+    papers = json.loads(path.read_text())['papers']
+    expected = {d['id']: d['pdf_sha256'] for d in manifest}
+    if len(papers) != len(expected) or {p['paper_id'] for p in papers} != set(expected):
+        raise ValueError('Document map must bind each dataset paper exactly once')
+    mapping = {}
+    for paper in papers:
+        doc_id = paper['doc_id']
+        if type(doc_id) is not int or doc_id < 1 or doc_id in mapping:
+            raise ValueError('Document IDs must be unique positive integers')
+        if paper['pdf_sha256'] != expected[paper['paper_id']]:
+            raise ValueError('Document map PDF hash differs from pinned corpus')
+        mapping[doc_id] = paper['paper_id']
+    return mapping
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--gt", required=True, help="Ground truth JSON")
-    parser.add_argument("--judge", action="store_true", help="Run LLM-as-Judge")
-    parser.add_argument("--top-k", type=int, default=3)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--dataset', type=Path, default=DATASET)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument('--base-url', help='Backend URL, e.g. http://127.0.0.1:9007')
+    source.add_argument('--predictions', type=Path, help='JSONL: {query_id, doc_ids: [logical paper IDs]}')
+    parser.add_argument('--document-map', type=Path, help='Live runs require papers with paper_id, doc_id, pdf_sha256')
+    parser.add_argument('--k', nargs='+', type=int, default=[1, 3, 5, 10])
+    parser.add_argument('--mode', choices=['parents', 'chunks'], default='parents')
+    parser.add_argument('--timeout', type=float, default=120)
+    parser.add_argument('--interval', type=float, default=0, help='Minimum seconds between live queries')
+    parser.add_argument('--exclude-document-id', type=int, action='append', default=[], help='Explicit non-corpus distractor; exclusions and original ranks are recorded')
+    parser.add_argument('--output', default='.tmp/evaluation/rag.json')
+    parser.add_argument('--checkpoint', type=Path, help='Persist one query outcome per line during a live run')
+    parser.add_argument('--progress-every', type=int, default=0)
     args = parser.parse_args()
-
-    with open(args.gt) as f:
-        queries = json.load(f)
-
-    if not os.path.isfile(CLI):
-        print(f"ERROR: CLI not found at {CLI}"); sys.exit(1)
-
-    # Load doc map for judge
-    doc_map = {}
-    bm25_file = os.path.join(PROJECT_ROOT, "data", "rag", "bm25.json")
-    if os.path.isfile(bm25_file):
-        with open(bm25_file) as f:
-            for e in json.load(f):
-                dish = e.get("dish", "")
-                if dish and dish not in doc_map:
-                    doc_map[dish] = {"category": e.get("category", "?"), "content": e.get("content", "")}
-
-    output = run_cli(queries)
-    results = parse_results(output)
-
-    modes = ["vec", "bm5", "hybrid", "parents"]
-
-    # Recall report
-    H = f"{'Query':28s} {'Vec@3':>7s} {'BM25@3':>7s} {'Hyb@3':>7s} {'Par@3':>7s}"
-    print("\n" + "=" * len(H))
-    print(H)
-    print("=" * len(H))
-
-    sums = {m: 0.0 for m in modes}
-    judge_sums = {m: 0.0 for m in modes}
-    judge_total = 0
-
-    for qi, q in enumerate(queries):
-        rel = set(q["relevant_docs"])
-        qs = q["query"][:27]
-        parts = []
-        for m in modes:
-            ret = results[m].get(qi, [])[:args.top_k]
-            p = p_at_k(ret, rel, args.top_k)
-            sums[m] += p
-            parts.append(f"{p:7.4f}")
-        print(f"{qs:28s} {' '.join(parts)}")
-
-    n = len(queries)
-    print("=" * len(H))
-    avg_parts = [f"{sums[m]/n:7.4f}" for m in modes]
-    print(f"{'AVERAGE':28s} {' '.join(avg_parts)}")
-    print()
-
-    # Judge
-    if args.judge and API_KEY:
-        print("=== LLM-as-Judge (Hybrid@3) ===")
-        hdr = f"{'Query':28s} {'GT':>4s} {'Judge':>6s} {'Agree':>6s}"
-        print(hdr); print("-" * len(hdr))
-
-        gt_yes = judge_yes = agree = total = 0
-        for qi, q in enumerate(queries):
-            rel = set(q["relevant_docs"])
-            hyb = results["hybrid"].get(qi, [])[:args.top_k]
-            # Collect metadata for chunks
-            chunks = []
-            for dish in hyb:
-                cat = doc_map.get(dish, {}).get("category", "?")
-                chunks.append((dish, cat))
-
-            labels = judge_retrieval(q["query"], chunks, doc_map)
-            if labels is None:
-                continue
-
-            for i, (dish, _) in enumerate(chunks, 1):
-                gt = dish in rel
-                jd = i in labels
-                m = "✓" if gt == jd else "✗"
-                if gt: gt_yes += 1
-                if jd: judge_yes += 1
-                if gt == jd: agree += 1
-                total += 1
-
-            jd_count = sum(1 for i in range(1, len(chunks)+1) if i in labels)
-            jd_match = sum(1 for i, (d, _) in enumerate(chunks, 1)
-                          if (d in rel) == (i in labels))
-            print(f"{q['query'][:27]:28s} {len(rel & set(d for d,_ in chunks))}/{len(chunks):>3} "
-                  f"{jd_count}/{len(chunks):>3} {jd_match}/{len(chunks):>6}")
-
-        print("-" * len(hdr))
-        print(f"{'TOTAL':28s} {gt_yes}/{total:>3} {judge_yes}/{total:>3} {agree}/{total:>6}")
-        print()
-
-    print("Done.")
+    if any(k < 1 or k > 20 for k in args.k):
+        parser.error('k must be between 1 and 20')
+    if args.base_url and not args.document_map:
+        parser.error('Live evaluation requires --document-map from the pinned corpus import')
+    if args.interval < 0:
+        parser.error('interval must be nonnegative')
+    runs, errors, timings, raw_rankings, exclusions, retries = [], [], {}, [], [], []
+    if args.base_url:
+        mapping = load_mapping(args.document_map, jsonl(args.dataset / 'corpus/manifest.jsonl'))
+        excluded = set(args.exclude_document_id)
+        if excluded & set(mapping):
+            parser.error('Cannot exclude a document belonging to the pinned corpus')
+        request_k = min(20, max(args.k) + len(excluded))
+        client = Client(args.base_url, args.timeout)
+        previous_start = 0.0
+        if args.checkpoint:
+            args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
+            args.checkpoint.write_text('')
+        for query in jsonl(args.dataset / 'rag/queries.jsonl'):
+            delay = args.interval - (time.monotonic() - previous_start)
+            if delay > 0:
+                time.sleep(delay)
+            started = previous_start = time.monotonic()
+            try:
+                for attempt in range(7):
+                    rpc = client.json('/mcp/knowledge', {'jsonrpc': '2.0', 'id': query['id'], 'method': 'tools/call',
+                    'params': {'name': 'search_knowledge', 'arguments': {
+                        'query': query['query'], 'top_k': request_k, 'mode': args.mode}}},
+                    headers={'MCP-Protocol-Version': '2025-11-25', 'Accept': 'application/json, text/event-stream'})
+                    limited = rpc.get('result', {}).get('isError') is True and 'rate limit' in json.dumps(rpc['result'].get('content', [])).lower()
+                    if not limited or attempt == 6:
+                        break
+                    retries.append({'query_id': query['id'], 'reason': 'server_rate_limit', 'attempt': attempt+1})
+                    time.sleep(10)
+                if 'error' in rpc or rpc.get('result', {}).get('isError'):
+                    raise ValueError('MCP search returned an error')
+                items = rpc['result']['structuredContent']['results']
+                raw_rankings.append({'query_id': query['id'], 'document_ids': [item['doc_id'] for item in items]})
+                selected = []
+                for rank, item in enumerate(items, 1):
+                    if item['doc_id'] in excluded:
+                        exclusions.append({'query_id': query['id'], 'doc_id': item['doc_id'], 'original_rank': rank,
+                                           'reason': 'explicitly_outside_frozen_corpus'})
+                        continue
+                    selected.append(mapping[item['doc_id']])
+                # This is a declared closed-corpus ranking; unknown IDs still fail.
+                # Repeated chunks remain in their original relative rank slots.
+                doc_ids = selected[:max(args.k)]
+                runs.append({'query_id': query['id'], 'doc_ids': doc_ids})
+            except Exception as error:
+                errors.append({'query_id': query['id'], 'error': type(error).__name__})
+                runs.append({'query_id': query['id'], 'doc_ids': []})
+            timings[query['id']] = time.monotonic() - started
+            if args.checkpoint:
+                with args.checkpoint.open('a') as checkpoint:
+                    checkpoint.write(json.dumps({'ranking': runs[-1], 'elapsed_seconds': timings[query['id']],
+                        'errors': [e for e in errors if e['query_id'] == query['id']]}) + '\n')
+            if args.progress_every and len(runs) % args.progress_every == 0:
+                print('RAG progress', len(runs), 'errors', len(errors), flush=True)
+    with tempfile.TemporaryDirectory() as directory:
+        rankings = args.predictions.resolve() if args.predictions else Path(directory) / 'rankings.jsonl'
+        if not args.predictions:
+            rankings.write_text(''.join(json.dumps(row) + '\n' for row in runs))
+        result = subprocess.run(['node', str(args.dataset / 'scripts/score-rag.mjs'), str(rankings), *map(str, args.k)],
+                                check=True, capture_output=True, text=True)
+    report = json.loads(result.stdout)
+    report['rankings'] = jsonl(args.predictions) if args.predictions else runs
+    report.update({'source': 'live' if args.base_url else 'offline', 'mode': args.mode,
+        'dataset_version': json.loads((args.dataset / 'dataset.json').read_text())['version'],
+        'dataset_hashes': {name: hashlib.sha256((args.dataset / name).read_bytes()).hexdigest()
+                          for name in ('corpus/manifest.jsonl', 'rag/queries.jsonl', 'rag/qrels.jsonl')},
+        'errors': errors, 'elapsed_seconds': timings, 'raw_rankings': raw_rankings,
+        'excluded_document_ids': args.exclude_document_id, 'exclusions': exclusions, 'retries': retries,
+        'query_interval_seconds': args.interval,
+        'scope': 'pinned_corpus_with_explicit_logged_exclusions' if args.exclude_document_id else 'unfiltered_backend'})
+    if args.document_map:
+        report['document_map_sha256'] = hashlib.sha256(args.document_map.read_bytes()).hexdigest()
+    report['summary'] = {'queries': report['queries'], 'submitted': report['submitted'],
+                         'missing': report['missing_count'], 'errors': len(errors), 'macro': report['macro']}
+    write_report(args.output, report)
+    return 1 if errors or report['missing_count'] else 0
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    raise SystemExit(main())

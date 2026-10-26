@@ -13,8 +13,6 @@ public:
 
     UserInfo extract_user(const HttpRequest& req) const;
     bool require_auth(const HttpRequest& req, HttpResponse& resp, UserInfo& user) const;
-    bool require_permission(const UserInfo& user, const std::string& resource,
-                            const std::string& action, HttpResponse& resp) const;
     void guest_login(const HttpRequest& req, HttpResponse& resp);
     void guest_config(HttpResponse& resp) const;
     void login(const HttpRequest& req, HttpResponse& resp);
