@@ -85,20 +85,16 @@ jobs:
         run: |
           docker build --file deploy/server/web.Dockerfile --tag "$WEB_IMAGE" .
           docker push "$WEB_IMAGE"
-      - name: Package offline staging bundle
-        timeout-minutes: 10
+      - name: Package source-only staging bundle
+        timeout-minutes: 3
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .artifacts/staging-bundle
           git archive --format=tar HEAD | gzip -1 > .artifacts/staging-bundle/source.tar.gz
-          docker pull mysql:8.4
-          docker tag mysql:8.4 mirror.ccs.tencentyun.com/library/mysql:8.4
-          docker save "$BACKEND_IMAGE" "$MCP_IMAGE" mirror.ccs.tencentyun.com/library/mysql:8.4 \
-            | gzip -1 > .artifacts/staging-bundle/images.tar.gz
           cd .artifacts/staging-bundle
           printf '%s\n' "$GITHUB_SHA" > REVISION
-          sha256sum source.tar.gz images.tar.gz REVISION > SHA256SUMS
+          sha256sum source.tar.gz REVISION > SHA256SUMS
       - name: Upload staging bundle
         timeout-minutes: 10
         uses: actions/upload-artifact@v4
@@ -123,9 +119,10 @@ jobs:
     permissions:
       contents: read
       actions: read
+      packages: read
     environment: staging
     runs-on: [self-hosted, Linux, X64, staging]
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       STAGING_ROOT: /srv/fastllm-staging
       STAGING_OFFLINE: '1'
@@ -185,7 +182,7 @@ jobs:
               raise SystemExit(f'Artifact download failed. Transfer this run\'s staging-bundle ZIP to {bundle}, then retry the deployment job.')
           shutil.copyfile(bundle, target / 'bundle.zip')
           PY
-      - name: Verify and import staging bundle
+      - name: Verify source-only staging bundle
         id: import
         timeout-minutes: 8
         working-directory: ${{ github.workspace }}/.staging-${{ github.run_id }}-${{ github.run_attempt }}
@@ -195,7 +192,7 @@ jobs:
           python3 - <<'PY'
           import pathlib, shutil, zipfile
           with zipfile.ZipFile('bundle.zip') as archive:
-              names = {'SHA256SUMS', 'REVISION', 'source.tar.gz', 'images.tar.gz'}
+              names = {'SHA256SUMS', 'REVISION', 'source.tar.gz'}
               if set(archive.namelist()) != names:
                   raise SystemExit('Unexpected deployment bundle contents')
               for name in names:
@@ -207,7 +204,30 @@ jobs:
           mkdir source
           tar --extract --gzip --file source.tar.gz --directory source --no-same-owner
           python3 source/deploy/staging/guard.py
-          gzip -dc images.tar.gz | docker load
+      - name: Fetch private images with temporary registry credentials
+        timeout-minutes: 14
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          DOCKER_CONFIG: ${{ runner.temp }}/shuming-ghcr-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 deploy/staging/guard.py
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          cleanup_registry_auth() {
+            docker logout ghcr.io >/dev/null 2>&1 || true
+            rm -f -- "$DOCKER_CONFIG/config.json"
+            rmdir -- "$DOCKER_CONFIG" 2>/dev/null || true
+          }
+          trap cleanup_registry_auth EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          unset GHCR_TOKEN
+          source deploy/staging/pull-images.sh
+          export STAGING_OFFLINE=0
+          pull_image "$BACKEND_IMAGE"
+          pull_image "$MCP_IMAGE"
+          pull_image mirror.ccs.tencentyun.com/library/mysql:8.4
       - name: Deploy stack and run E2E
         timeout-minutes: 10
         run: ./deploy/staging/deploy.sh
@@ -230,6 +250,15 @@ jobs:
             export REPO_ROOT="$PWD"
             docker compose --env-file "$STAGING_ROOT/.env" --file deploy/staging/compose.json ps
           fi
+      - name: Remove temporary registry credentials
+        if: always()
+        working-directory: ${{ github.workspace }}
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/shuming-ghcr-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          rm -f -- "$DOCKER_CONFIG/config.json"
+          rmdir -- "$DOCKER_CONFIG" 2>/dev/null || true
       - name: Remove downloaded staging bundle
         if: always()
         working-directory: ${{ github.workspace }}

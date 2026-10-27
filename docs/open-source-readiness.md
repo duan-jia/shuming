@@ -21,8 +21,8 @@
 4. 需要正式版本时由维护者创建 Release；确认后手动部署已验收的准确镜像版本。
    **本分支不实现 Release 触发器、验收来源强制校验或自动生产发布。**
 
-工作流顶层只读；GHCR 写权限仅给 staging build job，下载制品的部署 job
-只读。生产发布和 runner smoke 保持手动/master，不要求新增全局部署变量。
+工作流顶层只读；GHCR 写权限仅给 staging build job；部署 job 只读源码、
+Actions 制品及包，使用临时认证从 GHCR 拉取镜像。生产发布和 runner smoke 保持手动/master，不要求新增全局部署变量。
 服务器相关工作流共用并发组，避免同时部署，但不保证所有 pending run 都排队执行。
 
 当前 staging 是临时后端/MCP/MySQL 集成测试，结束后停止容器，前端镜像仅构建，
@@ -58,6 +58,13 @@
   本分支没有修改仓库变量、runner 注册或 Environment 规则。
 
 ### 3. 历史、制品与敏感信息（复查后处置）
+
+- [ ] 核实三个 GHCR 应用包实际 visibility 和权限继承；保持预制部署镜像私有。
+  本分支不会修改包设置，不能把仓库 private 或 API 404 当作包权限证明。
+- [ ] 本分支合并后，新 staging-bundle 仅含源码、REVISION、SHA256SUMS，
+  不再含 images.tar.gz；先通过真实 runner 的认证拉镜像 E2E。旧包不自动脱敏。
+- [ ] 清理或私有备份仍含镜像的旧 Actions 包后再考虑公开；公开仓库对私有包
+  的 Actions 授权与外部 fork 工作流风险仍须核查，不能只靠同仓库 job 条件。
 
 - [ ] 对准备公开的所有 refs/history 运行专用秘密扫描器并人工复核。
   先前自定义正则扫描未发现已确认真实凭据，不等于完整无泄漏保证。
