@@ -7,23 +7,33 @@
 > See the [release checklist](../../docs/open-source-readiness.md).
 
 
-Relevant PRs from branches in this repository, relevant pushes to master, and
-manual runs on master build immutable backend, MCP and frontend
-images on GitHub-hosted runners. A serialized job tests backend login, document
-indexing and MCP retrieval on the Tencent server. The build job uploads a
-checksummed bundle containing the tracked source and backend/MCP/MySQL images.
-The server downloads that bundle, verifies its checksums and imports images
-locally; it does not clone from github.com or pull from GHCR during CI staging.
-Artifact-service connectivity is still required. Downloads and imports have
-explicit timeouts, and temporary bundles are removed after each run.
-The downloader uses parallel byte ranges with bounded retries and checks the
-artifact's SHA-256 digest. GitHub API credentials are never forwarded to the
-storage redirect URL. It needs only the workflow token's read access to Actions.
-Fork PRs run ordinary hosted CI; the staging jobs reject fork sources.
-Shared staging and production operations use the same concurrency group and do
-not cancel an active deployment. GitHub concurrency can replace an older pending
-run; it is not a FIFO guarantee or a separate preview environment for each PR. The frontend receives build and lint checks;
-staging does not yet test browser chat or PDF processing.
+Relevant same-repository PRs, relevant master pushes and manual master runs build
+backend, MCP and frontend images on GitHub-hosted runners. Only a source snapshot,
+REVISION and SHA256SUMS are uploaded as the staging-bundle Actions artifact.
+**Image archives must never be attached to that artifact.**
+
+The Tencent runner downloads and verifies the source-only bundle, then pulls the
+backend/MCP images from GHCR and MySQL from the Tencent mirror with bounded retries.
+Registry login uses this job's short-lived GITHUB_TOKEN in a per-run Docker config;
+the config is removed after pulls and again by an always-run cleanup step.
+The subsequent deploy runs offline from the cached images. Frontend is built but
+not started by staging. Existing production services and their image names do not change.
+
+GHCR package visibility/ACLs are separately managed; this workflow does not set
+packages private or prove their visibility. If package access is denied or registry
+pulls time out, staging fails without falling back to an image-bearing artifact.
+Validate this path on the real runner before merging. Public repository/fork
+workflow permissions still need a separate security review: job conditions are
+not a sandbox or a proof that private packages cannot be accessed by forks.
+
+The optional loopback proxy still applies to source-bundle downloads. The fallback
+transfer path accepts only a source-only bundle for the same run. Legacy bundles
+containing images are rejected by the exact file allowlist.
+
+Old Actions bundles can still contain images until they expire or are explicitly
+removed; a workflow change cannot retroactively redact them. Keep the repository
+private until legacy artifacts and actual GHCR visibility/access inheritance have
+been reviewed. This change neither deletes old bundles nor changes package settings.
 
 | Resource | Production | CI staging |
 |---|---|---|
@@ -84,3 +94,15 @@ uses explicit AVX2/FMA/F16C features instead of inheriting the build runner's
 instructions, including Intel AMX. Backend CI uses the same setting. The live
 staging retrieval check exercises an embedding on the deployment CPU and
 catches instruction incompatibility that build-runner-only tests cannot.
+
+### GHCR image transfer on this server
+
+Docker image pulls run in the daemon, so exporting a proxy in a CI shell does
+not change the shared daemon's network path. GHCR downloads therefore use the
+SHA256-pinned crane v0.22.1 client and the existing loopback proxy when available.
+The job's temporary Docker authentication is reused, with no permanent token or
+daemon reconfiguration. Each transfer has two bounded attempts and a per-image
+cache. A private temporary image archive is loaded locally, then deleted on
+exit; it is never included in an Actions artifact. The workflow's always-run
+cleanup also removes this run/attempt's temporary authentication and downloads.
+MySQL continues using the existing Tencent mirror and bounded Docker pull.
