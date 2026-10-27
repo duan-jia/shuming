@@ -122,7 +122,7 @@ jobs:
       packages: read
     environment: staging
     runs-on: [self-hosted, Linux, X64, staging]
-    timeout-minutes: 45
+    timeout-minutes: 75
     env:
       STAGING_ROOT: /srv/fastllm-staging
       STAGING_OFFLINE: '1'
@@ -205,7 +205,7 @@ jobs:
           tar --extract --gzip --file source.tar.gz --directory source --no-same-owner
           python3 source/deploy/staging/guard.py
       - name: Fetch private images with temporary registry credentials
-        timeout-minutes: 14
+        timeout-minutes: 50
         env:
           GHCR_TOKEN: ${{ github.token }}
           DOCKER_CONFIG: ${{ runner.temp }}/shuming-ghcr-${{ github.run_id }}-${{ github.run_attempt }}
@@ -217,12 +217,15 @@ jobs:
           mkdir -p "$DOCKER_CONFIG"
           cleanup_registry_auth() {
             docker logout ghcr.io >/dev/null 2>&1 || true
-            rm -f -- "$DOCKER_CONFIG/config.json"
+            rm -rf -- "$DOCKER_CONFIG"
             rmdir -- "$DOCKER_CONFIG" 2>/dev/null || true
           }
           trap cleanup_registry_auth EXIT
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           unset GHCR_TOKEN
+          # Docker pulls run inside dockerd: shell proxy variables do not reach it.
+          # The client-side GHCR downloader uses the existing loopback proxy,
+          # without restarting or reconfiguring the shared production daemon.
           source deploy/staging/pull-images.sh
           export STAGING_OFFLINE=0
           pull_image "$BACKEND_IMAGE"

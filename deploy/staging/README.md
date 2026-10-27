@@ -94,3 +94,15 @@ uses explicit AVX2/FMA/F16C features instead of inheriting the build runner's
 instructions, including Intel AMX. Backend CI uses the same setting. The live
 staging retrieval check exercises an embedding on the deployment CPU and
 catches instruction incompatibility that build-runner-only tests cannot.
+
+### GHCR image transfer on this server
+
+Docker image pulls run in the daemon, so exporting a proxy in a CI shell does
+not change the shared daemon's network path. GHCR downloads therefore use the
+SHA256-pinned crane v0.22.1 client and the existing loopback proxy when available.
+The job's temporary Docker authentication is reused, with no permanent token or
+daemon reconfiguration. Each transfer has two bounded attempts and a per-image
+cache. A private temporary image archive is loaded locally, then deleted on
+exit; it is never included in an Actions artifact. The workflow's always-run
+cleanup also removes this run/attempt's temporary authentication and downloads.
+MySQL continues using the existing Tencent mirror and bounded Docker pull.
