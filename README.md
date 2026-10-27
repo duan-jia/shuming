@@ -122,3 +122,7 @@ MCP 入口使用认证与调用方权限约束，不是匿名公开接口。协�
 | 认证与权限 | [权限管理](docs/permissions.md) |
 | 开发测试环境 | [共享开发评测数据库](deploy/dev-eval/README.md) · [Staging](deploy/staging/README.md) |
 | 设计与贡献 | [系统架构](ARCHITECTURE.md) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md) · [开发约定](AGENTS.md) |
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。第三方组件、字体、模型及其他资料保留各自的许可证和版权声明。
