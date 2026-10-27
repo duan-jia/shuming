@@ -146,6 +146,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: Verify public repository safety policy
+        run: node --test tests/public_repository_policy.test.mjs
       - name: Verify paper dataset and graders
         run: |
           node tests/datasets/recent-papers-v1/scripts/validate.mjs

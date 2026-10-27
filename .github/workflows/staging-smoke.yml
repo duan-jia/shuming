@@ -14,8 +14,8 @@ jobs:
   smoke:
     name: Tencent staging runner smoke
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/master'
     runs-on: [self-hosted, Linux, X64, staging]
     timeout-minutes: 10
 
