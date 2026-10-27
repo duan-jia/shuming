@@ -1,5 +1,12 @@
 # Single-server deployment
 
+> Current automation trusts same-repository PR branches from maintainers/agents.
+> Staging and production share a host-level trust boundary despite separate data
+> and Compose resources; this is not a sandbox for untrusted code. Review runner
+> isolation before accepting external contributions or changing visibility.
+> See the [release checklist](../../docs/open-source-readiness.md).
+
+
 > Default generation profile: [Qwen3.8-27B / RTX 3080](../models/README.md). This document describes the existing HTTPS/cloud deployment. No automatic model, container network or production-data migration is performed.
 
 The frontend extends the existing backend, MySQL and MCP deployment. Chat and

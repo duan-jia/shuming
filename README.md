@@ -121,4 +121,4 @@ MCP 入口使用认证与调用方权限约束，不是匿名公开接口。协�
 | 知识与对话 | [论文处理](docs/paper-uploads.md) · [Agent Runtime](docs/agent-runtime.md) · [来源文件](docs/chat-source-files.md) |
 | 认证与权限 | [权限管理](docs/permissions.md) |
 | 开发测试环境 | [共享开发评测数据库](deploy/dev-eval/README.md) · [Staging](deploy/staging/README.md) |
-| 设计与贡献 | [系统架构](ARCHITECTURE.md) · [开发约定](AGENTS.md) |
+| 设计与贡献 | [系统架构](ARCHITECTURE.md) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md) · [开发约定](AGENTS.md) |
