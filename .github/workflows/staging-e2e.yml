@@ -41,9 +41,9 @@ concurrency:
   group: lab-server-release
   cancel-in-progress: false
 env:
-  BACKEND_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-backend:${{ github.sha }}
-  MCP_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-mcp:${{ github.sha }}
-  WEB_IMAGE: ghcr.io/duan-jia/fast-llm-reasoner-web:${{ github.sha }}
+  BACKEND_IMAGE: ghcr.io/duan-jia/shuming-backend:${{ github.sha }}
+  MCP_IMAGE: ghcr.io/duan-jia/shuming-mcp:${{ github.sha }}
+  WEB_IMAGE: ghcr.io/duan-jia/shuming-web:${{ github.sha }}
 jobs:
   build-images:
     name: Build staging images

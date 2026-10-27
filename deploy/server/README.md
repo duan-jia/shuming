@@ -19,7 +19,7 @@ MCP port 3100 bind to loopback; MySQL publishes no host port.
 Build from the repository root:
 
 ```bash
-docker build -f deploy/server/web.Dockerfile -t fast-llm-reasoner-web:local .
+docker build -f deploy/server/web.Dockerfile -t shuming-web:local .
 ```
 
 On a small VM, compile the frontend on another Linux x86-64 machine first:
@@ -34,7 +34,7 @@ cp -a web/.next/standalone/. .artifacts/web/
 mkdir -p .artifacts/web/.next/static .artifacts/web/public
 cp -a web/.next/static/. .artifacts/web/.next/static/
 cp -a web/public/. .artifacts/web/public/
-docker build -f deploy/server/web-runtime.Dockerfile -t fast-llm-reasoner-web:local .
+docker build -f deploy/server/web-runtime.Dockerfile -t shuming-web:local .
 ```
 
 Transfer the artifacts before the last command if building the runtime image on
@@ -173,3 +173,20 @@ Install it through visudo with mode 0440 after explicitly approving this
 privilege. The wrapper clears inherited environment variables, isolates Python
 imports and accepts exactly one argument. The helper rejects non-SHA arguments
 before it reads production files or runs Docker.
+
+### Image naming migration
+
+New CI builds publish `ghcr.io/duan-jia/shuming-backend`,
+`ghcr.io/duan-jia/shuming-mcp`, and `ghcr.io/duan-jia/shuming-web`,
+with full commit-SHA tags. Old `fast-llm-reasoner-*` images remain available for
+rollback; no old tags or live containers are renamed or removed by this change.
+Existing Compose project names, container names, data paths and volumes stay
+unchanged deliberately. Updating source does not update the installed root-owned
+release helper: the operator must install the reviewed `release.py` using the
+procedure above before a future manual production release uses the new names.
+No production release is triggered by this migration.
+
+These are new GHCR packages, not renames of the old package records. Verify each
+new package remains Private, disable repository permission inheritance if source
+will be public, and retain the required Actions access before making the source
+repository public. Settings on old packages do not transfer to these new ones.

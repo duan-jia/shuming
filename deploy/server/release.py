@@ -20,7 +20,7 @@ SERVICES = {
 def images(revision):
     if not re.fullmatch(r'[a-f0-9]{40}', revision):
         raise ValueError('Image revision must be a full lowercase commit SHA')
-    return {service: f'ghcr.io/duan-jia/fast-llm-reasoner-{service}:{revision}'
+    return {service: f'ghcr.io/duan-jia/shuming-{service}:{revision}'
             for service in SERVICES}
 
 

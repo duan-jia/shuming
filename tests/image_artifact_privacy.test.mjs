@@ -120,3 +120,17 @@ test('cached and offline image paths never download tools or image layers', () =
   assert.notEqual(offline.status, 0);
   assert.doesNotMatch(offline.calls, /curl|crane/);
 });
+
+
+test('new builds and release preview share shuming image names without renaming live resources', () => {
+  for (const service of ['backend', 'mcp', 'web']) {
+    assert.ok(workflow.includes('ghcr.io/duan-jia/shuming-' + service + ':'));
+  }
+  assert.doesNotMatch(workflow, /ghcr\.io\/duan-jia\/fast-llm-reasoner-/);
+  const release = readFileSync(path.join(root, 'deploy/server/release.py'), 'utf8');
+  assert.ok(release.includes('ghcr.io/duan-jia/shuming-{service}:{revision}'));
+  assert.ok(release.includes("'web': 'fast-llm-reasoner-web-web-1'"));
+  const compose = JSON.parse(readFileSync(path.join(root, 'deploy/server/compose.json'), 'utf8'));
+  assert.equal(compose.services.web.image, 'shuming-web:local');
+  assert.equal(compose.name, 'fast-llm-reasoner-web');
+});
