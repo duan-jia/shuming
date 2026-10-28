@@ -25,8 +25,10 @@ pull_private_image() (
   tar --extract --gzip --file "$work/tool.tar.gz" --directory "$work" crane
   for attempt in 1 2; do
     echo "Downloading $image with client-side transport (attempt $attempt/2)"
+    # Keep the original compressed layers. An interrupted uncompressed cache
+    # can retain a zero-byte layer that later loads but cannot be unpacked.
     if timeout --kill-after=10s 600s "$work/crane" pull \
-      --platform linux/amd64 --format legacy --cache_path "$work/cache" \
+      --platform linux/amd64 --format tarball \
       "$image" "$work/image.tar"; then
       # This archive exists only in a private per-job directory on the server.
       # It is never uploaded as an Actions artifact and is removed by EXIT trap.

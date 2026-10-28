@@ -11,7 +11,7 @@ KEYS = {
     'HOST_UID': r'[0-9]+', 'HOST_GID': r'[0-9]+',
     'MYSQL_ROOT_PASSWORD': r'[a-f0-9]{48}',
     'JWT_SECRET': r'[a-f0-9]{64}', 'ADMIN_PASSWORD': r'[a-f0-9]{48}',
-    'SERVICE_ACCOUNT_PASSWORD': r'[a-f0-9]{48}',
+    'SERVICE_ACCOUNT_PASSWORD': r'(?:[a-f0-9]{16}|[a-f0-9]{48})',
     'MCP_BEARER_TOKEN': r'[a-f0-9]{64}',
     'MCP_BEARER_TOKEN_SHA256': r'[a-f0-9]{64}',
 }
