@@ -118,3 +118,57 @@ EVAL_CACHE_DIR=/path/to/eval-cache \
 原有 C++、原生 MCP、Agent runtime、部署隔离和论文卡片回归继续保留。受控回归通过不代表真实模型质量已经测出。原始复核记录见 [2026-10-25-review.md](reviews/2026-10-25-review.md)，其中 v0.1.2 的问题已在当前 v0.1.4 修复。
 
 真实检索可用 `--interval 1.15 --checkpoint /path/to/checkpoint.jsonl --progress-every 10` 控制速率并逐题记录。限流重试只检查服务错误，论文正文中的 rate limit 不触发重试。
+
+
+## 用户每日额度回归
+
+`user-quota-test` 使用真实 MySQL 验证租户继承、用户覆盖、超过 INT 上限的额度、
+跨日沿用、恢复继承、下调不清空用量、并发计费与修改额度。
+仅对已经执行 `sql/init.sql`（或旧库完成相关迁移）的隔离测试数据库运行：
+
+```bash
+cmake --build build --target user-quota-test auth-security-test
+MYSQL_TEST_HOST=127.0.0.1 MYSQL_TEST_PORT=3306 \
+  MYSQL_TEST_USER=root MYSQL_TEST_PASSWORD=... MYSQL_TEST_DATABASE=llm_platform \
+  ./build/bin/user-quota-test
+./build/bin/auth-security-test
+```
+
+未设置 `MYSQL_TEST_HOST` 时测试以退出码 77 跳过。测试会创建并删除独立租户和用户；
+管理路由的 admin/user/guest 权限矩阵由 `auth-security-test` 覆盖。
+
+管理接口端到端回归（不调用模型，要求管理员 token；会创建并清理一个临时用户）：
+
+```bash
+EMOS_EVAL_TOKEN=... python3 tests/user_quota_api.py --base-url http://127.0.0.1:3002
+```
+
+
+## 对话 PDF 附件回归
+
+```bash
+python3 -m unittest discover -s tests -p 'test_pdf*.py'
+EMOS_TEST_PASSWORD=... python3 tests/pdf_attachment_e2e.py \
+  --base-url http://127.0.0.1:13022 --fixture-directory /path/to/isolated-fixtures
+```
+
+端到端测试只针对独立 MySQL、独立数据目录和本地模拟模型运行。
+fixture-directory 包含模拟模型写入的 requests.jsonl 和共享 data 目录。
+覆盖上传去重、逐页缓存、模型请求包含完整原文、追问和附件持久化、
+数据库消息不保存正文、跨租户拒绝及无效 ID。不会调用外部模型。
+
+
+## 用户管理与认证会话
+
+```bash
+node --experimental-strip-types web/tests/auth-client.test.mjs
+cmake --build build --target auth-service-test auth-security-test
+./build/bin/auth-service-test
+./build/bin/auth-security-test
+EMOS_TEST_PASSWORD=... python3 tests/auth_sessions_e2e.py \
+  --base-url http://127.0.0.1:19028 --mysql-container isolated-mysql-container
+```
+
+HTTP 测试仅针对隔离数据库，配置 JWT 有效期为 4 秒；可选 mysql-container 用于强制会话绝对过期测试。
+覆盖管理员创建/重置、自主改密、密码版本撤销、真实 access token 到期续期、刷新重放及并发、刷新/退出竞争、
+删除用户、游客权限及 MCP 撤销；不会调用模型。前端单元回归验证并发只刷新一次、401 重试、断网保留身份和游客不续期。

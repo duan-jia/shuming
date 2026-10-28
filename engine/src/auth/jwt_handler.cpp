@@ -12,7 +12,7 @@ JwtHandler::JwtHandler(const std::string& secret, int expire_seconds)
 
 std::string JwtHandler::generate_token(int user_id, int tenant_id,
                                         const std::string& username,
-                                        const std::string& role) {
+                                        const std::string& role, int auth_version, const std::string& session_id) {
     auto now = std::chrono::system_clock::now();
     auto exp = now + std::chrono::seconds(role == "guest" ? std::min(expire_seconds_, 900) : expire_seconds_);
 
@@ -25,6 +25,8 @@ std::string JwtHandler::generate_token(int user_id, int tenant_id,
         .set_payload_claim("tenant_id", jwt::claim(std::to_string(tenant_id)))
         .set_payload_claim("username", jwt::claim(username))
         .set_payload_claim("role", jwt::claim(role))
+        .set_payload_claim("auth_version", jwt::claim(std::to_string(auth_version)))
+        .set_payload_claim("sid", jwt::claim(session_id))
         .sign(jwt::algorithm::hs256{secret_});
 
     return token;
@@ -56,6 +58,18 @@ JwtHandler::TokenClaims JwtHandler::verify_token(const std::string& token) {
         if (claims.user_id <= 0 || claims.tenant_id <= 0 || claims.username.empty()
             || (claims.role != "admin" && claims.role != "user" && claims.role != "guest"))
             throw std::runtime_error("Invalid identity claims");
+        if (decoded.has_payload_claim("auth_version")) {
+            const auto value = decoded.get_payload_claim("auth_version").as_string();
+            if (value.empty() || value.size() > 10 || value.find_first_not_of("0123456789") != std::string::npos)
+                throw std::runtime_error("Invalid credential version");
+            claims.auth_version = std::stoi(value);
+        }
+        if (decoded.has_payload_claim("sid")) {
+            claims.session_id = decoded.get_payload_claim("sid").as_string();
+            if (!claims.session_id.empty() && (claims.session_id.size() != 32
+                || claims.session_id.find_first_not_of("0123456789abcdef") != std::string::npos))
+                throw std::runtime_error("Invalid login session");
+        }
         claims.valid = true;
 
     } catch (const std::exception& e) {

@@ -15,11 +15,18 @@ public:
     bool require_auth(const HttpRequest& req, HttpResponse& resp, UserInfo& user) const;
     void guest_login(const HttpRequest& req, HttpResponse& resp);
     void guest_config(HttpResponse& resp) const;
+    void refresh(const HttpRequest& req, HttpResponse& resp);
+    void logout(const HttpRequest& req, HttpResponse& resp);
+    void change_password(const HttpRequest& req, HttpResponse& resp);
+    void me(const HttpRequest& req, HttpResponse& resp);
     void login(const HttpRequest& req, HttpResponse& resp);
 
 private:
     AppContext& ctx_;
     LoginLimiter login_limiter_;
+    LoginLimiter refresh_limiter_;
+    LoginLimiter password_limiter_;
+    void issue_login(const LoginUser& user, HttpResponse& resp);
     std::string dummy_password_hash_;
 };
 

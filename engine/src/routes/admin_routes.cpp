@@ -27,6 +27,17 @@ void register_admin_routes(HttpServer& server, AdminService& admin, AuthRequired
         admin.list_users(user, resp);
     });
 
+    server.router().post("/api/users/:id/password", [&admin, require_auth](const HttpRequest& req, RouteParams params, HttpResponse& resp) {
+        UserInfo user;
+        if (!require_auth(req,resp,user)) return;
+        admin.reset_user_password(req,params,user,resp);
+    });
+    server.router().post("/api/users/:id/quota", [&admin, require_auth](const HttpRequest& req, RouteParams params, HttpResponse& resp) {
+        UserInfo user;
+        if (!require_auth(req, resp, user)) return;
+        admin.set_user_quota(req, params, user, resp);
+    });
+
     server.router().del("/api/users/:id", [&admin, require_auth](const HttpRequest& req, RouteParams params, HttpResponse& resp) {
         UserInfo user;
         if (!require_auth(req, resp, user)) return;

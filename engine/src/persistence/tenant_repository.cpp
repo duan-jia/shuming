@@ -13,7 +13,7 @@ std::string TenantRepository::escape_sql(MYSQL* mysql, const std::string& input)
     return output;
 }
 
-bool TenantRepository::create_tenant(const std::string& name, int token_limit_daily, int& tenant_id) {
+bool TenantRepository::create_tenant(const std::string& name, long long token_limit_daily, int& tenant_id) {
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) return false;
 
@@ -55,7 +55,7 @@ std::vector<TenantSummary> TenantRepository::list_tenants() {
             TenantSummary tenant;
             tenant.id = row[0] ? std::stoi(row[0]) : 0;
             tenant.name = row[1] ? row[1] : "";
-            tenant.token_limit_daily = row[2] ? std::stoi(row[2]) : 0;
+            tenant.token_limit_daily = row[2] ? std::stoll(row[2]) : 0;
             tenant.status = row[3] ? row[3] : "active";
             tenant.created_at = row[4] ? row[4] : "";
             tenants.push_back(tenant);

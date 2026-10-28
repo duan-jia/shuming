@@ -5,7 +5,7 @@ USE llm_platform;
 CREATE TABLE IF NOT EXISTS tenants (
     id                INT PRIMARY KEY AUTO_INCREMENT,
     name              VARCHAR(64) NOT NULL UNIQUE,
-    token_limit_daily INT DEFAULT 100000,
+    token_limit_daily BIGINT DEFAULT 100000,
     status            ENUM('active','inactive') DEFAULT 'active',
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS users (
     tenant_id         INT NOT NULL,
     username          VARCHAR(64) NOT NULL,
     password_hash     VARCHAR(256) NOT NULL,
+    daily_token_quota BIGINT NULL DEFAULT NULL,
+    auth_version      INT NOT NULL DEFAULT 0,
+    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
     role              ENUM('admin','user','guest') DEFAULT 'user',
     status            ENUM('active','disabled') DEFAULT 'active',
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -23,6 +26,18 @@ CREATE TABLE IF NOT EXISTS users (
     FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
     UNIQUE KEY uk_tenant_user (tenant_id, username),
     INDEX idx_status (status)
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    user_id INT NOT NULL,
+    auth_version INT NOT NULL,
+    refresh_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user (user_id),
+    INDEX idx_expiry (expires_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- ========== 3. 对话会话 ==========
@@ -107,8 +122,8 @@ CREATE TABLE IF NOT EXISTS user_token_usage_daily (
     tenant_id         INT NOT NULL,
     user_id           INT NOT NULL,
     usage_date        DATE NOT NULL,
-    token_limit       INT NOT NULL,
-    tokens_used       INT NOT NULL DEFAULT 0,
+    token_limit       BIGINT NOT NULL,
+    tokens_used       BIGINT NOT NULL DEFAULT 0,
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_user_date (user_id, usage_date),

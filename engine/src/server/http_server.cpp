@@ -214,8 +214,19 @@ void HttpServer::handle_sse_request(const muduo::net::TcpConnectionPtr& conn,
         sse_mgr_.remove(id);
     });
 
-    if (!router_.dispatch_sse(req, sse_ctx)) {
-        sse->send_event("error", R"({"error":"No SSE handler"})");
+    // Authorization/history/PDF preparation can touch disk and launch a bounded
+    // extractor. Keep it off the socket EventLoop, like other tool requests.
+    if (!workers_.submit([this, req, sse, sse_ctx] {
+        if (!sse->is_active()) return;
+        try {
+            if (router_.dispatch_sse(req, sse_ctx)) return;
+            sse->send_event("error", R"({"error":"No SSE handler"})");
+        } catch (const std::exception&) {
+            sse->send_event("error", R"({"error":"Chat preparation failed"})");
+        }
+        sse->send_done();
+    })) {
+        sse->send_event("error", R"({"error":"Chat preparation queue is full; retry later"})");
         sse->send_done();
     }
 }

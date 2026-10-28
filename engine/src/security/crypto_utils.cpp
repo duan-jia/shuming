@@ -8,8 +8,31 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <stdexcept>
+#include <openssl/sha.h>
 
 namespace fastllm {
+
+bool CryptoUtils::valid_password(const std::string& password) {
+    const auto length = std::count_if(password.begin(), password.end(), [](unsigned char c) { return (c & 0xc0) != 0x80; });
+    return length >= 8 && length <= 16 && password.size() <= 64 && password.find('\0') == std::string::npos;
+}
+
+std::string CryptoUtils::random_hex(size_t bytes) {
+    std::vector<unsigned char> data(bytes);
+    if (RAND_bytes(data.data(), static_cast<int>(bytes)) != 1) throw std::runtime_error("Random generation failed");
+    std::ostringstream out;
+    for (auto c : data) out << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+    return out.str();
+}
+
+std::string CryptoUtils::sha256(const std::string& value) {
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(value.data()), value.size(), digest);
+    std::ostringstream out;
+    for (auto c : digest) out << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+    return out.str();
+}
 
 static const std::string BASE64_CHARS =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

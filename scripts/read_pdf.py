@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from pdf_text import extract_pages
 
 
 def run(*args):
@@ -24,6 +25,12 @@ def main():
     resource.setrlimit(resource.RLIMIT_FSIZE, (8 * 1024**2, 8 * 1024**2))
     args = json.loads(sys.argv[1])
     source = '/proc/self/fd/3'
+    if args.get('representation') == 'attachment':
+        extracted = extract_pages(source, args['cache_directory'], pass_fds=(3,))
+        if not extracted['text_chars']:
+            raise ValueError('PDF has no extractable text')
+        return {**{key: value for key, value in extracted.items() if key != 'pages'},
+                'content': '\n\n'.join(f"[PDF page {page['page']}]\n{page['text']}" for page in extracted['pages'])}
     info = run('pdfinfo', source).decode('utf-8', errors='replace')
     match = re.search(r'^Pages:\s+(\d+)', info, re.MULTILINE)
     if not match:

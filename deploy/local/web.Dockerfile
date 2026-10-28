@@ -12,7 +12,7 @@ RUN npm run build
 FROM node:24-slim AS runtime-base
 ARG DEBIAN_MIRROR=deb.debian.org
 RUN sed -i "s|deb.debian.org|${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
-    && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends python3 python3-pypdf ca-certificates \
+    && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends python3 python3-pypdf poppler-utils ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/web
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000 \

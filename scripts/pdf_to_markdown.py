@@ -16,6 +16,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from pdf_text import extract_pages
+
 from paper_card import build_prompt, markdown_for, normalize_card
 
 
@@ -85,14 +87,9 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-def extract_pdf(path: Path, max_chars: int) -> tuple[str, int, int]:
-    try:
-        from pypdf import PdfReader
-    except ImportError as exc:
-        raise RuntimeError("pypdf is required; install it with `python3 -m pip install pypdf`") from exc
-
-    reader = PdfReader(str(path))
-    pages = [clean_text(page.extract_text() or "") for page in reader.pages]
+def extract_pdf(path: Path, max_chars: int, cache_directory: Path | None = None) -> tuple[str, int, int]:
+    extracted = extract_pages(path, cache_directory or Path(os.environ.get("PDF_PROCESSED_DIR", str(project_root() / "data/processed"))) / "pdf-text")
+    pages = [clean_text(page["text"]) for page in extracted["pages"]]
     nonempty = [(index + 1, text) for index, text in enumerate(pages) if text]
     if not nonempty:
         raise RuntimeError("PDF contains no extractable text; scanned PDFs are not supported")
@@ -107,7 +104,7 @@ def extract_pdf(path: Path, max_chars: int) -> tuple[str, int, int]:
     context = "\n\n".join(
         f"--- Page {number} ---\n{text}" for number, text in selected
     )[:max_chars]
-    return context, len(reader.pages), full_length
+    return context, len(pages), full_length
 
 
 def call_model(endpoint: str, model: str, api_key: str, messages: list[dict[str, str]], timeout: int) -> dict[str, Any]:
@@ -195,7 +192,11 @@ def main() -> int:
     try:
         validate_pdf(source)
         source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
-        context, page_count, extracted_chars = extract_pdf(source, args.max_chars)
+        if args.dry_run:
+            with tempfile.TemporaryDirectory(prefix="pdf-text-dry-run-") as temporary:
+                context, page_count, extracted_chars = extract_pdf(source, args.max_chars, Path(temporary))
+        else:
+            context, page_count, extracted_chars = extract_pdf(source, args.max_chars, output_dir / "pdf-text")
         markdown_path = output_dir / f"{source.stem}.md"
         json_path = output_dir / f"{source.stem}.json"
 

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { downloadDocumentFile, type SourceFile } from "../lib/source-files";
 
-export function SourceFiles({ files, token }: { files: SourceFile[]; token: string }) {
+export function SourceFiles({ files, token, label = "来源文件" }: { files: SourceFile[]; token: string; label?: string }) {
   const [expanded, setExpanded] = useState(false);
   const [pending, setPending] = useState<number | null>(null);
   const [error, setError] = useState("");
@@ -21,9 +21,9 @@ export function SourceFiles({ files, token }: { files: SourceFile[]; token: stri
     }
   }
 
-  return <div className="source-files" aria-label="检索来源文件">
+  return <div className="source-files" aria-label={label === "附件" ? "消息附件" : "检索来源文件"}>
     <div className="source-files-row">
-      <span className="source-files-label">来源文件</span>
+      <span className="source-files-label">{label}</span>
       {(expanded ? files : files.slice(0, 2)).map(file => <button
         key={file.doc_id} type="button" className="source-file-link"
         title={file.filename} aria-label={`下载 ${file.filename}`}

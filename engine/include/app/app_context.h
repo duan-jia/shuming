@@ -24,6 +24,7 @@ namespace fastllm {
 
 struct AppContext {
     bool guest_enabled = false;
+    int refresh_expiry_seconds = 30 * 86400;
     int guest_tenant_id = 0;
     std::string rag_dir = "data/rag";
     std::string system_prompt = "You are a helpful AI assistant for enterprise internal use.";

@@ -3,6 +3,9 @@
 namespace fastllm {
 
 void register_chat_routes(HttpServer& server, ChatService& chat) {
+    server.router().worker_endpoint("/api/chat/attachments", [&chat](const HttpRequest& req, RouteParams, HttpResponse& resp) {
+        chat.prepare_attachment(req, resp);
+    });
     server.router().post("/api/chat/cancel", [&chat](const HttpRequest& req, RouteParams, HttpResponse& resp) {
         chat.cancel(req, resp);
     });

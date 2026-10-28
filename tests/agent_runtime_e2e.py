@@ -55,7 +55,7 @@ class Model(BaseHTTPRequestHandler):
             elif prompt == 'truncated-stream':
                 delta({'content': 'partial'})
                 return
-            elif prompt in ('direct', 'slow-model', 'disconnect', 'missing-usage', 'partial-timeout', 'resume', 'length-answer') or (tools and prompt != 'loop' and (prompt not in ('both', 'search-fetch') or len(tools) >= 2)):
+            elif prompt.startswith('long-context ') or prompt in ('direct', 'slow-model', 'disconnect', 'missing-usage', 'partial-timeout', 'resume', 'length-answer') or (tools and prompt != 'loop' and (prompt not in ('both', 'search-fetch') or len(tools) >= 2)):
                 if tools:
                     assistant = next(item for item in reversed(body['messages']) if item['role'] == 'assistant')
                     assert assistant['reasoning_content'] == 'fixture reasoning'
@@ -166,6 +166,13 @@ class AgentTest(native.NativeMcpTest):
         self.assertNotIn("max_tokens", Model.requests[-1])
         self.assertEqual(self.stream("direct", max_tokens=64)[-1]["type"], "done")
         self.assertEqual(Model.requests[-1]["max_tokens"], 64)
+
+    def test_agent_accepts_32k_configured_output_limit(self):
+        prompt = 'long-context ' + 'paper text ' * 16000
+        events = self.stream(prompt, max_output_tokens=32768)
+        self.assertEqual(events[-1]['type'], 'done', events)
+        self.assertEqual(Model.requests[-1]['max_tokens'], 32768)
+        self.assertEqual(Model.requests[-1]['messages'][-1]['content'], prompt)
 
     def test_agent_two_tool_rounds_and_reasoning_replay(self):
         events = self.stream('both')

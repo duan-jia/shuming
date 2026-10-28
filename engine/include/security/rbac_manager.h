@@ -16,6 +16,7 @@ struct UserInfo {
     int tenant_id;
     std::string username;
     Role role;
+    bool must_change_password = false;
 };
 
 enum class Permission {

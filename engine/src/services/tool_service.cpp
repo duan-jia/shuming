@@ -83,6 +83,10 @@ nlohmann::json ToolService::download_reference(int id, const CallerContext& call
     return documents_.download_reference(id, caller);
 }
 
+nlohmann::json ToolService::pdf_attachment(int id, const CallerContext& caller) {
+    return documents_.attachment(id, caller);
+}
+
 nlohmann::json ToolService::knowledge_result(const SearchKnowledgeResult& result) {
     auto items = nlohmann::json::array();
     for (const auto& evidence : result.evidence) {

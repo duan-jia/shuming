@@ -12,7 +12,7 @@ inline constexpr char kGuestTenantName[] = "测试实验组";
 struct TenantSummary {
     int id = 0;
     std::string name;
-    int token_limit_daily = 0;
+    long long token_limit_daily = 0;
     std::string status = "active";
     std::string created_at;
 };
@@ -21,7 +21,7 @@ class TenantRepository {
 public:
     explicit TenantRepository(MysqlPool& mysql);
 
-    bool create_tenant(const std::string& name, int token_limit_daily, int& tenant_id);
+    bool create_tenant(const std::string& name, long long token_limit_daily, int& tenant_id);
     std::vector<TenantSummary> list_tenants();
     bool ensure_guest_tenant(int& tenant_id);
 

@@ -1,3 +1,5 @@
+import { authFetch as fetch } from "./auth-client";
+
 export interface SourceFile {
   doc_id: number;
   filename: string;

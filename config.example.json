@@ -13,7 +13,7 @@
   },
   "jwt": {
     "secret": "change-this-to-a-random-string-in-production",
-    "expiry_seconds": 86400
+    "expiry_seconds": 900
   },
   "admin": {
     "username": "admin",
@@ -95,6 +95,7 @@
   },
   "knowledge_fetch": {
     "pdf_directory": "data/pdfs",
+    "text_cache_directory": "data/processed/pdf-text",
     "reader_script": "scripts/read_pdf.py",
     "python": "python3",
     "public_base_url": "",
@@ -103,6 +104,7 @@
     "max_concurrency": 2
   },
   "auth": {
-    "guest_enabled": false
+    "guest_enabled": false,
+    "refresh_expiry_seconds": 2592000
   }
 }

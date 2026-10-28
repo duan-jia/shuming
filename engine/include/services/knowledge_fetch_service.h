@@ -12,6 +12,7 @@ namespace fastllm {
 
 struct KnowledgeFetchOptions {
     std::string pdf_directory = "data/pdfs";
+    std::string text_cache_directory;
     std::string reader_script = "scripts/read_pdf.py";
     std::string python = "python3";
     std::string public_base_url;
@@ -32,6 +33,7 @@ public:
                        std::function<bool()> should_stop = nullptr);
     // Stable reference only: no signed URL or storage path. Null if unavailable.
     nlohmann::json download_reference(int id, const CallerContext& caller);
+    nlohmann::json attachment(int id, const CallerContext& caller);
     void download(const HttpRequest& request, HttpResponse& response);
 
 private:
