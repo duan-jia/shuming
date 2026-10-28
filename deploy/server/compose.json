@@ -2,7 +2,7 @@
   "name": "fast-llm-reasoner-web",
   "services": {
     "web": {
-      "image": "fast-llm-reasoner-web:local",
+      "image": "shuming-web:local",
       "restart": "unless-stopped",
       "init": true,
       "environment": {
