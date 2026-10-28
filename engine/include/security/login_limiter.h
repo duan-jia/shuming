@@ -18,6 +18,12 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         return take("account:" + account, 10, 600, now);
     }
+    bool allow_refresh(const std::string& session, Clock::time_point now = Clock::now()) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // Browser requests share a reverse-proxy address. Renew per session,
+        // rather than exhausting one proxy-wide login-attempt allowance.
+        return take("refresh-global", 3000, 60, now) && take("refresh:" + session, 60, 60, now);
+    }
 private:
     struct Counter { Clock::time_point expires; int count = 0; };
     std::mutex mutex_;

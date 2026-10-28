@@ -15,6 +15,8 @@ public:
     void list_tenants(const UserInfo& user, HttpResponse& resp);
     void create_user(const HttpRequest& req, const UserInfo& user, HttpResponse& resp);
     void list_users(const UserInfo& user, HttpResponse& resp);
+    void reset_user_password(const HttpRequest& req, const RouteParams& params, const UserInfo& user, HttpResponse& resp);
+    void set_user_quota(const HttpRequest& req, const RouteParams& params, const UserInfo& user, HttpResponse& resp);
     void delete_user(const RouteParams& params, const UserInfo& user, HttpResponse& resp);
 
 private:

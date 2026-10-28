@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
     WorkerPool agent_workers(2, 4);
     std::unique_ptr<RemoteEngine> model;
     std::unique_ptr<RemoteEngine> text_model;
-    if (argc == 4) model = std::make_unique<RemoteEngine>(argv[3], "fixture-model", "fixture-model-key", 32768, true);
+    if (argc == 4) model = std::make_unique<RemoteEngine>(argv[3], "fixture-model", "fixture-model-key", 1000000, true);
     if (argc == 4) text_model = std::make_unique<RemoteEngine>(argv[3], "fixture-model", "fixture-model-key");
     muduo::net::EventLoop loop;
     HttpServer server(&loop, muduo::net::InetAddress(std::atoi(argv[1]), true), "native-mcp-fixture", 1, 2, 2);
@@ -105,6 +105,7 @@ int main(int argc, char** argv) {
             limits.max_turns = body.value("max_turns", 6);
             limits.max_total_tokens = body.value("max_total_tokens", limits.max_total_tokens);
             limits.timeout_seconds = body.value("timeout_seconds", 5);
+            limits.max_output_tokens = body.value("max_output_tokens", limits.max_output_tokens);
             InferParams params;
             params.max_tokens = body.value("max_tokens", limits.max_output_tokens);
             params.should_stop = [sse] { return !sse->is_active(); };

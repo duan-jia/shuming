@@ -15,6 +15,7 @@ namespace fastllm {
 class ChatService {
 public:
     ChatService(AppContext& ctx, ToolService& tools, AgentOptions options, bool allow_user_web_search, AuthRequired authenticate);
+    void prepare_attachment(const HttpRequest& req, HttpResponse& response);
     void cancel(const HttpRequest& req, HttpResponse& response);
 
     void stream(const HttpRequest& req, const RouteParams& params, std::shared_ptr<SseContext> sse_ctx);

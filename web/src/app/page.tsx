@@ -6,6 +6,10 @@ import { createSseParser } from "../lib/sse";
 import { sessionTitle } from "../lib/session-title";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { UserManagement } from "../components/user-quotas";
+import { SettingsMenu } from "../components/settings-menu";
+import { PasswordSettings } from "../components/password-settings";
+import { authFetch as fetch, acceptAuth, subscribeAuth, refreshAuth, logoutAuth } from "../lib/auth-client";
 import { SourceFiles } from "../components/source-files";
 import { downloadDocumentFile, normalizeSourceFiles, type SourceFile } from "../lib/source-files";
 
@@ -19,6 +23,7 @@ interface Message {
   toolStatus?: string;
   notice?: string;
   sourceFiles?: SourceFile[];
+  attachments?: SourceFile[];
 }
 
 interface Session {
@@ -52,10 +57,17 @@ function SupportCredit({ className = "" }: { className?: string }) {
   return (
     <p className={`support-credit ${className}`}>
       <span>Supported by</span>
-      <span className="support-brand">
+      <a
+        className="support-brand"
+        href="https://github.com/duan-jia/shuming"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="查看 shuming GitHub 项目（在新标签页打开）"
+        title="查看 GitHub 项目（在新标签页打开）"
+      >
         <Image src="/shuming-icon.png" alt="" width={18} height={18} className="support-logo" />
-        <span>shuming</span>
-      </span>
+        <span>shuming · GitHub</span>
+      </a>
     </p>
   );
 }
@@ -139,6 +151,7 @@ export default function Home() {
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
   const [token, setToken] = useState("");
   const [loggedIn, setLoggedIn] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(0);
   const [userRole, setUserRole] = useState<"admin" | "user" | "guest">("user");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -158,7 +171,7 @@ export default function Home() {
   const historySequence = useRef(0);
   const activeSessionRef = useRef(activeSession);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeView, setActiveView] = useState<"chat" | "documents">("chat");
+  const [activeView, setActiveView] = useState<"chat" | "documents" | "quotas" | "password">("chat");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [activeLibrary, setActiveLibrary] = useState<"public" | "group">("public");
   const [documentsLoading, setDocumentsLoading] = useState(false);
@@ -173,8 +186,41 @@ export default function Home() {
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const messagePaneRef = useRef<HTMLElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
+  const chatPdfInputRef = useRef<HTMLInputElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentController = useRef<AbortController | null>(null);
+  const [attachments, setAttachments] = useState<SourceFile[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const [attachmentError, setAttachmentError] = useState("");
   const visibleDocuments = documents.filter(document => document.visibility === activeLibrary);
   const canUploadToLibrary = activeLibrary === "group" || userRole === "admin";
+  const libraryLabels = { public: "EMOS group", group: userRole === "guest" ? "测试实验组库" : "RMDA group" };
+
+  useEffect(() => {
+    const unsubscribe = subscribeAuth(auth => {
+      if (auth) {
+        setToken(auth.token); setLoggedIn(true); setUserRole(auth.user.role); setCurrentUserId(auth.user.id); setPassword("");
+      } else {
+        ++navigationVersion.current;
+        for (const controller of requests.current.values()) controller.abort();
+        requests.current.clear(); attachmentController.current?.abort();
+        historyVersions.current.clear(); activeSessionRef.current = "";
+        setToken(""); setLoggedIn(false); setUserRole("user"); setCurrentUserId(0);
+        setActiveSession(""); setSessionMessages({}); setSessions([]); setGenerating({}); setInput("");
+        setDocuments([]); setDocumentsError(""); setUploadNotice(null); setActiveLibrary("public"); setPassword("");
+        setAttachments([]); setAttaching(false); setAttachmentError(""); setActiveView("chat"); setSidebarOpen(false);
+      }
+    });
+    void refreshAuth().catch(() => {});
+    return unsubscribe;
+  }, []);
+
+  useLayoutEffect(() => {
+    const field = composerInputRef.current;
+    if (!field) return;
+    field.style.height = "0px";
+    field.style.height = `${Math.min(field.scrollHeight, 160)}px`;
+  }, [input, activeView, loggedIn]);
 
   useLayoutEffect(() => {
     const pane = messagePaneRef.current;
@@ -188,6 +234,7 @@ export default function Home() {
     return () => {
       for (const controller of pending.values()) controller.abort();
       pending.clear();
+      attachmentController.current?.abort();
     };
   }, []);
 
@@ -266,6 +313,8 @@ export default function Home() {
 
   const startNewChat = useCallback(() => {
     ++navigationVersion.current;
+    attachmentController.current?.abort();
+    setAttachments([]); setAttaching(false); setAttachmentError("");
     // A new chat is a local draft until the first question is submitted.
     // Keep replies in existing sessions running in the background.
     requests.current.get("")?.abort();
@@ -281,6 +330,8 @@ export default function Home() {
 
   const switchSession = useCallback(async (id: string) => {
     ++navigationVersion.current;
+    attachmentController.current?.abort();
+    setAttachments([]); setAttaching(false); setAttachmentError("");
     activeSessionRef.current = id;
     setActiveView("chat");
     setActiveSession(id);
@@ -297,11 +348,12 @@ export default function Home() {
       const data = await res.json();
       if (data.messages && historyVersions.current.get(id) === version && !requests.current.has(id)) {
         const loaded: Message[] = data.messages.map(
-          (m: { id: number; role: string; content: string; reasoning?: string; source_files?: unknown }) => ({
+          (m: { id: number; role: string; content: string; reasoning?: string; source_files?: unknown; attachments?: unknown }) => ({
             id: String(m.id),
             role: m.role as "user" | "assistant",
             content: m.content || "",
             sourceFiles: normalizeSourceFiles(m.source_files),
+            attachments: normalizeSourceFiles(m.attachments),
             reasoning: m.reasoning || "",
             isStreaming: false,
           })
@@ -352,6 +404,7 @@ export default function Home() {
       });
       const data = await res.json();
       if (res.ok && typeof data.token === "string" && data.token) {
+        acceptAuth({ token: data.token, user: data.user });
         setToken(data.token);
         setUserRole(data.user?.role === "admin" ? "admin" : data.user?.role === "guest" ? "guest" : "user");
         setActiveView("chat");
@@ -418,6 +471,41 @@ export default function Home() {
     [token, uploading, fetchDocuments, activeLibrary]
   );
 
+  const uploadChatPdf = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || attaching || loading) return;
+    if (attachments.length >= 4) { setAttachmentError("每条消息最多附加 4 个 PDF。"); return; }
+    if (!file.name.toLowerCase().endsWith(".pdf") || file.size === 0 || file.size > 30 * 1024 * 1024) {
+      setAttachmentError("请选择一个小于 30 MB 的 PDF 文件。"); return;
+    }
+    const controller = new AbortController();
+    attachmentController.current = controller;
+    setAttaching(true); setAttachmentError("");
+    try {
+      const form = new FormData(); form.append("file", file); form.append("visibility", "group");
+      const response = await fetch("/api/papers/upload", {
+        method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form, signal: controller.signal,
+      });
+      const uploaded = await response.json();
+      if ((!response.ok && response.status !== 409) || !Number.isSafeInteger(uploaded.document_id))
+        throw new Error(uploaded.error || "PDF 上传失败。");
+      const ready = await fetch("/api/chat/attachments", {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ doc_id: uploaded.document_id }), signal: controller.signal,
+      });
+      const data = await ready.json();
+      if (!ready.ok) throw new Error(data.error || "无法提取 PDF 正文。扫描件需要先进行 OCR。");
+      const files = normalizeSourceFiles([data]);
+      if (!files.length) throw new Error("无法读取 PDF 附件。");
+      if (!controller.signal.aborted) setAttachments(previous => normalizeSourceFiles([...previous, ...files]).slice(0, 4));
+    } catch (error) {
+      if (!controller.signal.aborted) setAttachmentError(error instanceof Error ? error.message : "PDF 附件处理失败。");
+    } finally {
+      if (attachmentController.current === controller) { setAttaching(false); attachmentController.current = null; }
+    }
+  };
+
   const downloadDocument = useCallback(async (document: DocumentItem, format: "pdf" | "md") => {
     try {
       await downloadDocumentFile(document.id, format === "pdf"
@@ -478,7 +566,9 @@ export default function Home() {
   }, [token]);
 
   const sendMessage = useCallback(async () => {
-    if (!input.trim() || requests.current.has(activeSession)) return;
+    if ((!input.trim() && !attachments.length) || attaching || requests.current.has(activeSession)) return;
+    const sentAttachments = attachments;
+    const userContent = input.trim() ? input : "请分析附加的 PDF 文档。";
     const controller = new AbortController();
     const navigation = navigationVersion.current;
     requests.current.set(activeSession, controller);
@@ -493,7 +583,7 @@ export default function Home() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ title: sessionTitle(input) }),
+          body: JSON.stringify({ title: sessionTitle(input.trim() || attachments[0]?.filename || "PDF 分析") }),
           signal: controller.signal,
         });
         const data = await res.json();
@@ -540,7 +630,8 @@ export default function Home() {
     const userMsg: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: input,
+      content: userContent,
+      attachments: sentAttachments,
       isStreaming: false,
     };
     setMessages((prev) => [...prev, userMsg]);
@@ -553,7 +644,7 @@ export default function Home() {
       isStreaming: true,
     };
     setMessages((prev) => [...prev, assistantMsg]);
-    if (navigation === navigationVersion.current) setInput("");
+    if (navigation === navigationVersion.current) { setInput(""); setAttachments([]); }
 
     followOutput.current = true;
     setShowJumpToLatest(false);
@@ -567,7 +658,7 @@ export default function Home() {
           Authorization: `Bearer ${token}`,
           "X-Request-Id": requestId,
         },
-        body: JSON.stringify({ message: userMsg.content, session_id: sid }),
+        body: JSON.stringify({ message: userMsg.content, session_id: sid, attachments: sentAttachments.map(file => file.doc_id) }),
         signal: controller.signal,
       });
 
@@ -582,6 +673,7 @@ export default function Home() {
         if (data === "[DONE]") { finished = true; return; }
         const parsed = JSON.parse(data);
         if (event === "error" || parsed.type === "error" || parsed.error) {
+          if (parsed.error === "Unauthorized") acceptAuth(null);
           finished = true;
           setMessages((prev) =>
             prev.map((message) =>
@@ -682,7 +774,7 @@ export default function Home() {
         setGenerating((prev) => ({ ...prev, [sid]: false }));
       }
     }
-  }, [input, token, activeSession, fetchSessions]);
+  }, [input, token, activeSession, fetchSessions, attachments, attaching]);
 
   const stopGeneration = useCallback(async () => {
     const controller = requests.current.get(activeSession);
@@ -717,7 +809,6 @@ export default function Home() {
           </form>
           {guestEnabled && <div className="guest-entry">
             <button type="button" className="guest-button" disabled={loginPending || loginCooldown > 0} onClick={() => void login("guest")}>游客体验</button>
-            <p>普通用户权限 · 15 分钟有效</p>
           </div>}
           <SupportCredit className="login-support" />
         </section>
@@ -791,26 +882,12 @@ export default function Home() {
         </div>
         <div className="shrink-0 border-t border-line p-4">
           {userRole === "guest" && <p className="mb-3 text-xs text-neutral-400">游客体验 · 15 分钟有效</p>}
-          <button
-            className="text-sm text-neutral-500 transition hover:text-foreground"
-            onClick={() => {
-              ++navigationVersion.current;
-              for (const controller of requests.current.values()) controller.abort();
-              requests.current.clear();
-              historyVersions.current.clear();
-              activeSessionRef.current = "";
-              setActiveSession("");
-              setSessionMessages({});
-              setGenerating({});
-              setInput("");
-              setLoggedIn(false);
-              setToken("");
-              setUserRole("user");
-              setActiveLibrary("public");
-            }}
-          >
-            退出
-          </button>
+          <SettingsMenu role={userRole}
+            onNavigate={view => { setActiveView(view); setSidebarOpen(false); setUploadNotice(null); }}
+            onLogout={async () => {
+              try { await logoutAuth(); }
+              catch (err) { setUploadNotice({ type: "error", message: err instanceof Error ? err.message : "退出登录失败。" }); }
+            }} />
           <SupportCredit className="sidebar-support" />
         </div>
       </aside>
@@ -820,6 +897,8 @@ export default function Home() {
           <div className="flex items-center gap-3">
             <button className="rounded-lg border border-line px-2.5 py-1.5 text-neutral-300 md:hidden" aria-label="打开导航" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
             {activeView === "documents" && <h1 className="text-sm font-medium">文档管理</h1>}
+            {activeView === "quotas" && <h1 className="text-sm font-medium">用户管理</h1>}
+            {activeView === "password" && <h1 className="text-sm font-medium">修改密码</h1>}
           </div>
           {activeView === "documents" && canUploadToLibrary && (
             <div>
@@ -856,7 +935,7 @@ export default function Home() {
               {uploadNotice.message}
             </div>
           )}
-          {activeView === "chat" ? (
+          {activeView === "password" ? <PasswordSettings onChanged={() => setLoginError("密码已修改，请使用新密码登录。")} /> : activeView === "quotas" && userRole === "admin" ? <UserManagement token={token} currentUserId={currentUserId} /> : activeView === "chat" ? (
             <>
               {messages.length === 0 && (
                 <div className="chat-welcome">
@@ -887,7 +966,8 @@ export default function Home() {
                       {!msg.isStreaming && <SourceFiles files={msg.sourceFiles || []} token={token} />}
                       {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" aria-hidden="true" /><span className="sr-only">{msg.toolStatus || (msg.isReasoning ? "正在思考" : "正在生成回答")}</span></div>}
                       {msg.notice && <p role="status" className="message-notice">{msg.notice}</p>}
-                    </> : <p className="user-content">{msg.content}</p>}
+                    </> : <><p className="user-content">{msg.content}</p>
+                      {!!msg.attachments?.length && <SourceFiles files={msg.attachments} token={token} label="附件" />}</>}
                     {!msg.isStreaming && msg.content && <CopyMessageButton content={msg.content} role={msg.role} />}
                   </div>
                 </article>
@@ -900,13 +980,10 @@ export default function Home() {
                   <button key={library} type="button" role="tab" aria-selected={activeLibrary === library}
                     disabled={uploading} onClick={() => { setActiveLibrary(library); setUploadNotice(null); }}
                     className={`rounded-lg px-4 py-2 text-sm transition ${activeLibrary === library ? "bg-white/10 text-foreground" : "text-neutral-500 hover:bg-white/5 hover:text-foreground"}`}>
-                    {library === "public" ? "公开库" : "研究组库"}
+                    {libraryLabels[library]}
                   </button>
                 ))}
               </div>
-              <p className="mb-4 text-xs text-neutral-500">
-                {activeLibrary === "public" ? "全实验室可读 · 仅管理员可上传、删除" : `${userRole === "guest" ? "测试实验组" : "本研究组"} · 组内成员可上传、删除组内文档`}
-              </p>
               <div className="mb-4 flex items-center justify-between">
                 <p className="text-sm text-neutral-400">共 {visibleDocuments.length} 条可见文档</p>
                 <button
@@ -974,7 +1051,7 @@ export default function Home() {
                                 </div>
                               )}
                             </td>
-                            <td className="px-4 py-4 text-neutral-400">{doc.visibility === "public" ? "公开库" : userRole === "guest" ? "测试实验组" : "本研究组"}</td>
+                            <td className="px-4 py-4 text-neutral-400">{libraryLabels[doc.visibility]}</td>
                             <td className="truncate px-4 py-4 text-neutral-400" title={doc.uploader_username || "未知"}>
                               {doc.uploader_username || "未知"}
                             </td>
@@ -1029,7 +1106,7 @@ export default function Home() {
                           </span>
                         </div>
                         <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-neutral-400">
-                          <span>{doc.visibility === "public" ? "公开库" : userRole === "guest" ? "测试实验组" : "本研究组"}</span>
+                          <span>{libraryLabels[doc.visibility]}</span>
                           <span>{doc.chunk_count} 个分块</span>
                           <span>{doc.uploader_username || "未知上传者"}</span>
                           <span>{formatDate(doc.created_at)}</span>
@@ -1059,25 +1136,43 @@ export default function Home() {
         </main>
 
         {activeView === "chat" && (
-          <div className="composer-area shrink-0 px-4 pb-6 pt-3">
-            {showJumpToLatest && messages.length > 0 && <button className="jump-to-latest" onClick={() => { followOutput.current = true; const pane = messagePaneRef.current; if (pane) pane.scrollTop = pane.scrollHeight; setShowJumpToLatest(false); }}>查看最新回答 ↓</button>}
-            <div className="composer mx-auto flex gap-2">
-              <textarea
-                rows={2}
-                aria-label="输入问题" className="min-w-0 flex-1 bg-transparent px-3 py-2.5 outline-none"
-                placeholder="Ask anything…"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void sendMessage(); } }}
-                disabled={loading}
-              />
-              <button
-                className="rounded-lg bg-foreground px-5 py-2.5 font-medium text-background transition hover:bg-white disabled:opacity-50"
-                onClick={loading ? stopGeneration : sendMessage}
-                disabled={!loading && !input.trim()}
-              >
-                {loading ? "停止生成" : "发送"}
-              </button>
+          <div className="composer-area shrink-0 px-4 pb-4 pt-2">
+            {showJumpToLatest && messages.length > 0 && <button className="jump-to-latest" aria-label="查看最新回答" onClick={() => { followOutput.current = true; const pane = messagePaneRef.current; if (pane) pane.scrollTop = pane.scrollHeight; setShowJumpToLatest(false); }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14m-7-7 7 7 7-7" /></svg></button>}
+            <div className="composer mx-auto">
+              {(attachments.length > 0 || attaching) && <div className="composer-attachments" aria-label="待发送的 PDF 附件">
+                {attachments.map(file => <div key={file.doc_id} className="composer-attachment">
+                  <span className="min-w-0 truncate" title={file.filename}>{file.filename}</span>
+                  <button type="button" className="composer-attachment-remove" aria-label={`移除附件 ${file.filename}`} disabled={loading || attaching}
+                    onClick={() => setAttachments(previous => previous.filter(item => item.doc_id !== file.doc_id))}>×</button>
+                </div>)}
+                {attaching && <p role="status" className="composer-upload-status">正在上传并准备 PDF 正文…</p>}
+              </div>}
+              {attachmentError && <p role="alert" className="composer-error">{attachmentError}</p>}
+              <div className="composer-row">
+                <input ref={chatPdfInputRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={uploadChatPdf} />
+                <button type="button" aria-label="添加 PDF 附件" title="添加 PDF 附件，保存到组库并用于对话"
+                  className="attachment-add disabled:opacity-40"
+                  disabled={loading || attaching || attachments.length >= 4} onClick={() => chatPdfInputRef.current?.click()}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                </button>
+                <textarea
+                  ref={composerInputRef}
+                  rows={1}
+                  aria-label="输入问题"
+                  placeholder="Ask anything…"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void sendMessage(); } }}
+                  disabled={loading}
+                />
+                <button
+                  className="composer-send disabled:opacity-50"
+                  onClick={loading ? stopGeneration : sendMessage}
+                  disabled={!loading && (attaching || (!input.trim() && !attachments.length))}
+                >
+                  {loading ? "停止生成" : "发送"}
+                </button>
+              </div>
             </div>
           </div>
         )}

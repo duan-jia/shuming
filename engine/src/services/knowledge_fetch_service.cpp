@@ -7,6 +7,7 @@
 #include <csignal>
 #include <ctime>
 #include <fcntl.h>
+#include <filesystem>
 #include <iomanip>
 #include <poll.h>
 #include <regex>
@@ -159,6 +160,26 @@ Json KnowledgeFetchService::download_reference(int id, const CallerContext& call
         if (document.source_filename.empty()) return nullptr;
         return {{"doc_id", id}, {"filename", document.source_filename}};
     } catch (const std::exception&) { return nullptr; }
+}
+
+Json KnowledgeFetchService::attachment(int id, const CallerContext& caller) {
+    DocumentDetails document;
+    if (id < 1 || caller.tenant_id < 1 || !lookup_(id, caller.tenant_id, document)
+        || (caller.public_only && document.visibility != "public"))
+        throw std::runtime_error("PDF attachment is unavailable or not accessible");
+    File file{open_pdf(document)};
+    const int previous = active_.fetch_add(1);
+    struct Release { std::atomic<int>& active; ~Release() { --active; } } release{active_};
+    if (previous >= options_.max_concurrency) throw std::runtime_error("PDF reader busy; retry later");
+    const auto directory = options_.text_cache_directory.empty()
+        ? (std::filesystem::path(options_.pdf_directory).parent_path() / "processed" / "pdf-text").string()
+        : options_.text_cache_directory;
+    auto result = read_pdf(file.fd, {{"representation", "attachment"}, {"cache_directory", directory}}, nullptr);
+    if (result.contains("error") || !result.contains("content") || result.value("text_chars", 0) == 0)
+        throw std::runtime_error("PDF has no usable text; scanned PDFs require OCR");
+    result["doc_id"] = id;
+    result["filename"] = document.source_filename;
+    return result;
 }
 
 ToolResult KnowledgeFetchService::execute(const Json& args, const CallerContext& caller, std::function<bool()> should_stop) {

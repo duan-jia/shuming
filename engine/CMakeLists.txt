@@ -125,6 +125,19 @@ target_compile_definitions(fast-llm-cli PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
 option(FASTLLM_BUILD_TESTS "Build focused backend unit tests" ON)
 if(FASTLLM_BUILD_TESTS)
     enable_testing()
+    add_executable(user-quota-test
+        tests/user_quota_test.cpp
+        src/persistence/mysql_pool.cpp
+        src/persistence/user_repository.cpp
+        src/persistence/tenant_repository.cpp
+        src/persistence/token_usage_repository.cpp
+        src/persistence/billing_service.cpp
+    )
+    target_include_directories(user-quota-test PRIVATE include)
+    target_link_libraries(user-quota-test PRIVATE spdlog::spdlog mysqlclient pthread)
+    add_test(NAME user-quota-test COMMAND user-quota-test)
+    set_tests_properties(user-quota-test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+
     add_executable(knowledge-search-service-test
         tests/knowledge_search_service_test.cpp
         src/services/knowledge_search_service.cpp

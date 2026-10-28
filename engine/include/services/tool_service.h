@@ -17,6 +17,7 @@ public:
     ToolResult execute(const std::string& name, const nlohmann::json& arguments,
                            const CallerContext& caller, std::function<bool()> should_stop = nullptr);
     nlohmann::json download_reference(int id, const CallerContext& caller);
+    nlohmann::json pdf_attachment(int id, const CallerContext& caller);
     static nlohmann::json knowledge_result(const SearchKnowledgeResult& result);
 
 private:

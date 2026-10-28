@@ -33,7 +33,7 @@ RUN apt-get update \
     && mkdir -p /models
 COPY --from=build /runtime-libs/ /opt/fast-llm-reasoner/lib/
 COPY --from=build /src/build/bin/fast-llm-reasoner /usr/local/bin/fast-llm-reasoner
-COPY scripts/read_pdf.py /app/scripts/read_pdf.py
+COPY scripts/read_pdf.py scripts/pdf_text.py /app/scripts/
 COPY .artifacts/embedding/bge-small-zh-v1.5-q4_k_m.gguf /models/bge-small-zh-v1.5-q4_k_m.gguf
 RUN chmod 0444 /models/bge-small-zh-v1.5-q4_k_m.gguf
 ENV LD_LIBRARY_PATH=/opt/fast-llm-reasoner/lib

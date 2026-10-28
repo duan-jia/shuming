@@ -69,6 +69,21 @@ class StagingIsolationTests(unittest.TestCase):
             (root / '.env').write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
             self.assertEqual(guard.validate({'STAGING_ROOT': str(root)}, root), root)
 
+    def test_service_password_supports_current_and_legacy_lengths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            values = dict(STAGING_ROOT=str(root), HOST_UID='1000', HOST_GID='1000')
+            for key in guard.KEYS.keys() - values.keys():
+                values[key] = 'a' * (64 if 'TOKEN' in key or key == 'JWT_SECRET' else 48)
+            for length in (16, 48, 17):
+                values['SERVICE_ACCOUNT_PASSWORD'] = 'b' * length
+                (root / '.env').write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
+                if length == 17:
+                    with self.assertRaisesRegex(ValueError, 'invalid SERVICE_ACCOUNT_PASSWORD'):
+                        guard.validate({'STAGING_ROOT': str(root)}, root)
+                else:
+                    self.assertEqual(guard.validate({'STAGING_ROOT': str(root)}, root), root)
+
 
 class ImageTransferTests(unittest.TestCase):
     def run_pull(self, *, cached=False, offline=False, succeeds=False):

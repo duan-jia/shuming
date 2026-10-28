@@ -15,7 +15,7 @@ bool TokenUsageRepository::ensure_daily_usage(MysqlConnection& conn, int tenant_
     std::string sql =
         "INSERT INTO user_token_usage_daily "
         "(tenant_id, user_id, usage_date, token_limit, tokens_used) "
-        "SELECT u.tenant_id, u.id, CURDATE(), t.token_limit_daily, 0 "
+        "SELECT u.tenant_id, u.id, CURDATE(), COALESCE(u.daily_token_quota, t.token_limit_daily), 0 "
         "FROM users u JOIN tenants t ON t.id = u.tenant_id "
         "WHERE u.id=" + std::to_string(user_id)
         + " AND u.tenant_id=" + std::to_string(tenant_id)

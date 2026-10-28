@@ -55,7 +55,8 @@ test('GHCR downloads use pinned client-side transport without daemon changes', (
   assert.match(helper, /v0\.22\.1\/go-containerregistry_Linux_x86_64\.tar\.gz/);
   assert.match(helper, /0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0/);
   assert.ok(helper.indexOf('sha256sum --check') < helper.indexOf('"$work/crane" pull'));
-  assert.match(helper, /--platform linux\/amd64 --format legacy --cache_path/);
+  assert.match(helper, /--platform linux\/amd64 --format tarball/);
+  assert.doesNotMatch(helper, /--cache_path/);
   assert.match(helper, /trap 'rm -rf -- "\$work"' EXIT/);
   assert.match(helper, /docker load --input "\$work\/image\.tar"/);
   assert.doesNotMatch(helper + workflow, /systemctl\s+(?:restart|stop)|daemon\.json/);

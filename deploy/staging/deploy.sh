@@ -23,7 +23,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
   mysql_password="$(random_hex 24)"
   jwt_secret="$(random_hex 32)"
   admin_password="$(random_hex 24)"
-  service_password="$(random_hex 24)"
+  service_password="$(random_hex 8)"
   mcp_token="$(random_hex 32)"
   mcp_token_sha="$(printf '%s' "$mcp_token" | sha256sum | awk '{print $1}')"
 
@@ -100,7 +100,7 @@ admin_token="$(printf '%s' "$admin_response" | jq --raw-output '.token // empty'
 
 create_user_payload="$(
   jq --compact-output --null-input \
-    --arg password "$SERVICE_ACCOUNT_PASSWORD" \
+    --arg password "${SERVICE_ACCOUNT_PASSWORD:0:16}" \
     '{username:"mcp_staging", password:$password, tenant_id:1, role:"user"}'
 )"
 create_user_status="$(
@@ -114,6 +114,24 @@ create_user_status="$(
 if [[ "$create_user_status" != 200 && "$create_user_status" != 409 ]]; then
   echo "Service-account creation failed with HTTP $create_user_status" >&2
   exit 1
+fi
+
+# Existing staging environments used 48-character service passwords. Login
+# remains compatible, but new accounts and resets follow the 8-16 limit.
+if [[ "${#SERVICE_ACCOUNT_PASSWORD}" -gt 16 ]]; then
+  service_user_id="$(curl --fail-with-body --silent --show-error \
+    --header "Authorization: Bearer $admin_token" "$backend_url/api/users" \
+    | jq --raw-output '.users[] | select(.username == "mcp_staging" and .tenant_id == 1) | .id')"
+  [[ "$service_user_id" =~ ^[1-9][0-9]*$ ]] || { echo 'Staging service account not found' >&2; exit 1; }
+  SERVICE_ACCOUNT_PASSWORD="${SERVICE_ACCOUNT_PASSWORD:0:16}"
+  [[ -z "${GITHUB_ACTIONS:-}" ]] || printf '::add-mask::%s\n' "$SERVICE_ACCOUNT_PASSWORD"
+  curl --fail-with-body --silent --show-error \
+    --header "Authorization: Bearer $admin_token" --header 'Content-Type: application/json' \
+    --data "$(jq --compact-output --null-input --arg password "$SERVICE_ACCOUNT_PASSWORD" '{password:$password}')" \
+    "$backend_url/api/users/$service_user_id/password" >/dev/null
+  sed -i "s/^SERVICE_ACCOUNT_PASSWORD=.*/SERVICE_ACCOUNT_PASSWORD=$SERVICE_ACCOUNT_PASSWORD/" "$ENV_FILE"
+  export SERVICE_ACCOUNT_PASSWORD
+  compose up --detach --no-build --pull never --wait --wait-timeout 120 mcp
 fi
 
 list_documents() {

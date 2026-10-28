@@ -16,7 +16,7 @@ public:
                           const std::string& user_content,
                           const std::string& assistant_content,
                           int prompt_tokens, int completion_tokens, const std::string& reasoning = "",
-                          const std::string& source_files = "[]");
+                          const std::string& source_files = "[]", const std::string& attachments = "[]");
 
 private:
     MysqlPool& mysql_;

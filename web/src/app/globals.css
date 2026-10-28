@@ -51,6 +51,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .primary-button:hover { background: #fff; }
 .support-credit { display: flex; align-items: center; gap: 9px; color: #737373; font-size: 12px; font-weight: 400; line-height: 1.5; }
 .support-brand { display: inline-flex; align-items: center; gap: 5px; color: #a3a3a3; font-weight: 500; letter-spacing: -0.025em; }
+.support-brand:hover, .support-brand:focus-visible { color: #ededed; text-decoration: underline; text-underline-offset: 3px; }
 .support-logo { flex-shrink: 0; filter: invert(1); mix-blend-mode: screen; opacity: 0.8; }
 .login-support { justify-content: center; margin-top: 28px; }
 .sidebar-support { margin-top: 20px; font-size: 11px; gap: 7px; }
@@ -111,13 +112,26 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .copy-message svg { flex-shrink: 0; }
 .copy-error { color: #d5ac69; font-size: 12px; }
 .message-notice { margin-top: 12px; border-left: 2px solid #d5ac69; padding-left: 10px; color: #d5c39d; font-size: 12px; }
-.composer { max-width: 1184px; align-items: flex-end; border-radius: 18px; box-shadow: 0 12px 40px #0003; }
+.composer { max-width: 1184px; padding: 8px; border-radius: 14px; box-shadow: 0 12px 40px #0003; }
 .composer:focus-within { border-color: #b5c9e260; }
-.composer textarea { resize: none; min-height: 72px; max-height: 180px; font-size: 19px; line-height: 1.7; }
-.composer > button { margin: 3px; white-space: nowrap; background: #b5c9e2; font-size: 14px; border-radius: 11px; }
+.composer-row { display: flex; align-items: flex-end; gap: 8px; }
+.composer-row textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 160px; padding: 8px 4px; resize: none; overflow-y: auto; background: transparent; font-size: 16px; line-height: 24px; outline: none; }
+.composer-row button { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; height: 40px; border-radius: 9px; cursor: pointer; transition: background .15s, color .15s; }
+.composer-row button:disabled { cursor: default; }
+.composer-row button:focus-visible, .composer-attachment-remove:focus-visible { outline: 2px solid #b5c9e2; outline-offset: 2px; }
+.composer-row .attachment-add { width: 40px; padding: 0; background: transparent; color: #a3a3a3; }
+.composer-row .attachment-add:hover:not(:disabled) { background: #ffffff08; color: #ededed; }
+.composer-send { min-width: 64px; padding: 0 14px; background: #b5c9e2; color: #121212; font-size: 14px; font-weight: 500; white-space: nowrap; }
+.composer-send:hover:not(:disabled) { background: #c6d7ed; }
+.composer-attachments { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 4px 8px; }
+.composer-attachment { display: flex; align-items: center; gap: 6px; max-width: min(100%, 320px); height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; color: #c9c9c9; font-size: 12px; }
+.composer-attachment-remove { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; color: #a3a3a3; }
+.composer-attachment-remove:hover { background: #ffffff0a; color: #ededed; }
+.composer-upload-status { padding: 5px 0; color: #a3a3a3; font-size: 12px; line-height: 18px; }
+.composer-error { padding: 2px 4px 8px; color: #fcd34d; font-size: 13px; line-height: 20px; }
 textarea:focus-visible { outline: none; }
 @media (max-width: 767px) {
-  .prose, .user-content, .composer textarea { font-size: 18px; }
+  .prose, .user-content { font-size: 18px; }
   .chat-header { min-height: 76px; }
   .chat-header p { max-width: 170px; font-size: 10px; }
   .message-row { gap: 10px; }.user-content { padding: 12px; }
@@ -125,7 +139,7 @@ textarea:focus-visible { outline: none; }
 @media (prefers-reduced-motion: reduce) { .stream-dot { animation: none; } }
 
 .composer-area { position: relative; }
-.jump-to-latest { position: absolute; left: 50%; top: -32px; transform: translateX(-50%); padding: 7px 14px; border-radius: 999px; border: 1px solid #ffffff26; background: #1c2026; font-size: 11px; color: #d8e4f4; box-shadow: 0 4px 20px #0005; }
+.jump-to-latest { position: absolute; left: 50%; top: -40px; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 50%; border: 1px solid #ffffff26; background: #1c2026; color: #d8e4f4; box-shadow: 0 4px 20px #0005; }
 .prose img { max-width: 100%; height: auto; border-radius: 8px; }
 .prose hr { margin: 24px 0; border-color: var(--line); }
 
@@ -153,3 +167,17 @@ textarea:focus-visible { outline: none; }
 .source-file-link:focus-visible, .source-files-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 2px; }
 .source-file-link:disabled { opacity: .6; cursor: wait; }
 .source-files-error { margin-top: .3rem; color: #fbbf24; }
+
+.account-settings { position: relative; }
+.account-settings > summary { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 9px 10px; border-radius: 8px; color: #a3a3a3; font-size: 14px; line-height: 20px; cursor: pointer; list-style: none; user-select: none; }
+.account-settings > summary::-webkit-details-marker { display: none; }
+.account-settings > summary:hover, .account-settings[open] > summary { color: #ededed; background: #ffffff08; }
+.account-settings > summary:focus-visible, .account-settings-menu button:focus-visible { outline: 2px solid #b5c9e2; outline-offset: 2px; }
+.settings-chevron { margin-left: auto; transition: transform .15s; }
+.account-settings[open] .settings-chevron { transform: rotate(180deg); }
+.account-settings-menu { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 100%; padding: 6px; border: 1px solid #ffffff1a; border-radius: 11px; background: #191919; box-shadow: 0 8px 28px #0007; }
+.account-settings-menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 9px 10px; border-radius: 7px; color: #d4d4d4; font-size: 13px; line-height: 20px; text-align: left; }
+.account-settings-menu button:hover:not(:disabled) { color: #ededed; background: #ffffff0a; }
+.account-settings-menu button:disabled { opacity: .5; }
+.settings-divider { height: 1px; margin: 5px 4px; background: #ffffff10; }
+.account-settings-menu .settings-logout { color: #d6a2a2; }

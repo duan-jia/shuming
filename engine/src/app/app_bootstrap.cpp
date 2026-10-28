@@ -1,4 +1,5 @@
 #include "app/app_bootstrap.h"
+#include <algorithm>
 
 #include <mysql/mysql.h>
 #include <spdlog/spdlog.h>
@@ -51,8 +52,10 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
 
     ctx.jwt = std::make_unique<JwtHandler>(
         jwt_secret,
-        config.get_int("jwt.expiry_seconds", 86400)
+        config.get_int("jwt.expiry_seconds", 900)
     );
+
+    ctx.refresh_expiry_seconds = std::clamp(config.get_int("auth.refresh_expiry_seconds", 30 * 86400), 60, 90 * 86400);
 
     ctx.rate_limiter = std::make_unique<RateLimiter>();
     if (config.raw().contains("rate_limiter") && config.raw()["rate_limiter"].contains("rules")) {

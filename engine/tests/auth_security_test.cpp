@@ -12,6 +12,11 @@
 
 using namespace fastllm;
 int main() {
+    assert(!CryptoUtils::valid_password("1234567"));
+    assert(CryptoUtils::valid_password("12345678"));
+    assert(CryptoUtils::valid_password("11111111"));
+    assert(CryptoUtils::valid_password("abcdefghijklmnop"));
+    assert(!CryptoUtils::valid_password("abcdefghijklmnopq"));
     LoginLimiter limit;
     auto now = LoginLimiter::Clock::now();
     for (int n = 0; n < 10; ++n) assert(limit.allow_account("canonical-id:1", now));
@@ -78,6 +83,12 @@ int main() {
         const bool known = role != Role::UNKNOWN;
         const bool member = known;
         const bool admin = role == Role::ADMIN;
+        assert(RbacManager::check_route_permission(role, "POST", "/api/chat/attachments") == known);
+        assert(!RbacManager::check_route_permission(role, "GET", "/api/chat/attachments"));
+        assert(RbacManager::check_route_permission(role, "POST", "/api/users/1/quota") == admin);
+        assert(!RbacManager::check_route_permission(role, "GET", "/api/users/1/quota"));
+        assert(!RbacManager::check_route_permission(role, "POST", "/api/users/1/quota/extra"));
+        assert(!RbacManager::check_route_permission(role, "POST", "/api/users/nope/quota"));
         for (auto permission : {Permission::CHAT_WRITE, Permission::SESSION_READ,
                 Permission::SESSION_CREATE, Permission::SESSION_DELETE})
             assert(RbacManager::check_permission(role, permission) == known);

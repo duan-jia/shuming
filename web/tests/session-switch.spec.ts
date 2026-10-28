@@ -226,7 +226,7 @@ test('background replies and session navigation stay isolated', { timeout: 90000
       await evaluate(`window.mock.emit('A',{type:'answer',content:'继续追加内容\\n\\n'.repeat(20)})`);
       await new Promise(resolve=>setTimeout(resolve,150));
       assert.ok(await evaluate<number>(`Math.abs(document.querySelector('main').scrollTop-200)`) < 3, 'Reading history must pause auto-follow');
-      await click('查看最新回答 ↓');
+      await evaluate(`document.querySelector('button[aria-label="查看最新回答"]').click()`);
       await wait(`(() => {const m=document.querySelector('main');return m.scrollHeight-m.clientHeight-m.scrollTop < 3})()`);
       const composerBefore = await evaluate<number>(`document.querySelector('.composer-area').getBoundingClientRect().top`);
       for (let i=0;i<5;i++) {

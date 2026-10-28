@@ -44,6 +44,7 @@ nlohmann::json SessionService::message_to_json(const MessageSummary& message) {
     j["reasoning"] = message.reasoning;
     auto refs = nlohmann::json::parse(message.source_files, nullptr, false);
     j["source_files"] = refs.is_array() ? refs : nlohmann::json::array();
+    if (message.role == "user") j["attachments"] = j["source_files"];
     j["tokens_in"] = message.tokens_in;
     j["tokens_out"] = message.tokens_out;
     j["created_at"] = message.created_at;

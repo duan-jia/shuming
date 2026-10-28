@@ -28,7 +28,9 @@ bool RbacManager::check_permission(Role role, Permission permission) {
 
 bool RbacManager::check_route_permission(Role role, const std::string& method, const std::string& path) {
     auto allows = [role](Permission permission) { return check_permission(role, permission); };
-    if (path == "/api/chat/stream" || path == "/api/chat/cancel") {
+    if (path == "/api/auth/me") return method == "GET" && role != Role::UNKNOWN;
+    if (path == "/api/auth/password") return method == "POST" && (role == Role::ADMIN || role == Role::USER);
+    if (path == "/api/chat/stream" || path == "/api/chat/cancel" || path == "/api/chat/attachments") {
         return method == "POST" && allows(Permission::CHAT_WRITE);
     }
     if (path == "/api/sessions") {
@@ -70,9 +72,13 @@ bool RbacManager::check_route_permission(Role role, const std::string& method, c
     }
     const std::string users = "/api/users/";
     if (path.rfind(users, 0) == 0) {
-        const auto id = path.substr(users.size());
-        return !id.empty() && id.find_first_not_of("0123456789") == std::string::npos
-            && method == "DELETE" && allows(Permission::USER_MANAGE);
+        const auto tail = path.substr(users.size());
+        const auto slash = tail.find('/');
+        const auto id = tail.substr(0, slash);
+        if (id.empty() || id.find_first_not_of("0123456789") != std::string::npos) return false;
+        const bool action = slash == std::string::npos ? method == "DELETE"
+            : (tail.substr(slash) == "/quota" || tail.substr(slash) == "/password") && method == "POST";
+        return action && allows(Permission::USER_MANAGE);
     }
     if (path == "/mcp" || path == "/mcp/knowledge" || path == "/mcp/web") {
         // The transport returns its own 405 for unsupported authenticated methods.

@@ -50,7 +50,7 @@ AgentRuntime::AgentRuntime(IInferenceEngine& model, ToolService& tools, RateLimi
     : model_(model), tools_(tools), limiter_(limiter), caller_(std::move(caller)), options_(options),
       allow_knowledge_(allow_knowledge), allow_web_(allow_web), on_event_(std::move(on_event)),
       remaining_quota_(std::move(remaining_quota)) {
-    if (options.max_output_tokens < 0 || options.max_output_tokens > 8192
+    if (options.max_output_tokens < 0 || options.max_output_tokens > 65536
         || options.max_turns < 1 || options.max_total_tokens < 0 || options.timeout_seconds < 1
         || options.max_tool_calls_per_turn < 1 || options.max_tool_result_bytes < 1024) {
         throw std::invalid_argument("Invalid agent limits");

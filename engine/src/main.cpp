@@ -100,6 +100,7 @@ int main(int argc, char* argv[]) {
     WebSearchService web_search(web_options);
     KnowledgeFetchOptions fetch_options;
     fetch_options.pdf_directory = config.get_str("knowledge_fetch.pdf_directory", "data/pdfs");
+    fetch_options.text_cache_directory = config.get_str("knowledge_fetch.text_cache_directory", "");
     fetch_options.reader_script = config.get_str("knowledge_fetch.reader_script", "scripts/read_pdf.py");
     fetch_options.python = config.get_str("knowledge_fetch.python", "python3");
     fetch_options.public_base_url = config.get_str("knowledge_fetch.public_base_url", "");
