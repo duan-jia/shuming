@@ -291,8 +291,9 @@ jobs:
           DOCKER_CONFIG: ${{ runner.temp }}/shuming-ghcr-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
         run: |
-          rm -f -- "$DOCKER_CONFIG/config.json"
-          rmdir -- "$DOCKER_CONFIG" 2>/dev/null || true
+          # A forced cancellation can skip the transfer subshell's EXIT trap.
+          # Remove this attempt's whole private workspace, including archives.
+          rm -rf -- "$DOCKER_CONFIG"
       - name: Remove downloaded staging bundle
         if: always()
         working-directory: ${{ github.workspace }}

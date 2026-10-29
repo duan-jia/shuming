@@ -29,6 +29,8 @@ test('private-image fetch uses scoped ephemeral authentication and cleanup', () 
   assert.match(deploy, /trap cleanup_registry_auth EXIT/);
   assert.match(deploy, /unset GHCR_TOKEN/);
   assert.match(deploy, /name: Remove temporary registry credentials\n        if: always\(\)/);
+  const cleanup = deploy.split('      - name: Remove temporary registry credentials')[1]?.split('      - name: Remove downloaded staging bundle')[0];
+  assert.match(cleanup, /rm -rf -- "\$DOCKER_CONFIG"/);
   assert.doesNotMatch(deploy, /cat .*config\.json|set -x|docker login.*--password /);
 });
 
