@@ -128,24 +128,35 @@ class NativeMcpTest(unittest.TestCase):
         cls.addClassCleanup(cls.provider.shutdown)
         cls.addClassCleanup(cls.provider.server_close)
         cls.tokens = {}
-        for line in cls.process.stdout:
-            for key in ('ADMIN_TOKEN', 'USER_TOKEN', 'GUEST_TOKEN'):
-                if line.startswith(key + '='):
-                    cls.tokens[key] = line.strip().split('=', 1)[1]
-            if len(cls.tokens) == 3:
-                break
-        if len(cls.tokens) != 3:
-            raise RuntimeError('Fixture failed to start')
-        # Drain logs so pipe capacity cannot stall a worker in concurrency tests.
         cls.logs = []
-        threading.Thread(target=lambda: cls.logs.extend(cls.process.stdout), daemon=True).start()
+        startup = threading.Event()
+
+        def collect_logs():
+            try:
+                for line in cls.process.stdout:
+                    key, separator, value = line.partition('=')
+                    if separator and key in ('ADMIN_TOKEN', 'USER_TOKEN', 'GUEST_TOKEN'):
+                        cls.tokens[key] = value.strip()
+                        if len(cls.tokens) == 3:
+                            startup.set()
+                    else:
+                        cls.logs.append(line)
+            finally:
+                startup.set()
+
+        # Drain immediately; report startup failures without exposing fixture JWTs.
+        threading.Thread(target=collect_logs, daemon=True).start()
+        if not startup.wait(20) or len(cls.tokens) != 3:
+            raise RuntimeError(f'Fixture failed to start (exit={cls.process.poll()}):\n'
+                               + ''.join(cls.logs[-30:]))
         for _ in range(100):
             try:
                 if cls.request('GET', '/healthz')[0] == 200:
                     return
             except OSError:
                 time.sleep(.05)
-        raise RuntimeError('Fixture did not become ready')
+        raise RuntimeError(f'Fixture did not become ready (exit={cls.process.poll()}):\n'
+                           + ''.join(cls.logs[-30:]))
 
     @classmethod
     def cleanup_process(cls):
