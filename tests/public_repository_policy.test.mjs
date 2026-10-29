@@ -26,7 +26,9 @@ function checkStaging(source) {
   const blocks = source.split(/^jobs:\s*\n/m)[1]?.split(/(?=^  [\w-]+:\s*$)/m).filter((b) => b.trim());
   assert.equal(blocks?.length, 2);
   for (const block of blocks) assert.ok(block.includes('    if: >-\n      ' + gate + '\n'));
-  assert.match(source, /group: lab-server-release\n  cancel-in-progress: false/);
+  const [build, deploy] = blocks;
+  assert.match(build, /concurrency:\n      group: staging-images-\$\{\{ github.ref \}\}\n      cancel-in-progress: true/);
+  assert.match(deploy, /concurrency:\n      group: lab-server-release\n      cancel-in-progress: false/);
 }
 
 test('same-repository PR and final master staging are automatic and path-filtered', () => {

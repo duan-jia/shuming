@@ -37,9 +37,6 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: lab-server-release
-  cancel-in-progress: false
 env:
   BACKEND_IMAGE: ghcr.io/duan-jia/shuming-backend:${{ github.sha }}
   MCP_IMAGE: ghcr.io/duan-jia/shuming-mcp:${{ github.sha }}
@@ -58,6 +55,9 @@ jobs:
       packages: write
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    concurrency:
+      group: staging-images-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -73,18 +73,41 @@ jobs:
           printf '%s  %s\n' "$expected" "$target" | sha256sum --check
       - name: Log in to GHCR
         run: echo '${{ github.token }}' | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+      - name: Set up cached image builder
+        uses: docker/setup-buildx-action@v3
       - name: Build and push backend image
-        run: |
-          docker build --file deploy/staging/backend.Dockerfile --tag "$BACKEND_IMAGE" .
-          docker push "$BACKEND_IMAGE"
+        uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: .
+          file: deploy/staging/backend.Dockerfile
+          push: true
+          tags: ${{ env.BACKEND_IMAGE }}
+          cache-from: type=registry,ref=ghcr.io/duan-jia/shuming-backend:buildcache
+          cache-to: type=registry,ref=ghcr.io/duan-jia/shuming-backend:buildcache,mode=max
       - name: Build and push MCP image
-        run: |
-          docker build --file deploy/staging/mcp.Dockerfile --tag "$MCP_IMAGE" .
-          docker push "$MCP_IMAGE"
+        uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: .
+          file: deploy/staging/mcp.Dockerfile
+          push: true
+          tags: ${{ env.MCP_IMAGE }}
+          cache-from: type=registry,ref=ghcr.io/duan-jia/shuming-mcp:buildcache
+          cache-to: type=registry,ref=ghcr.io/duan-jia/shuming-mcp:buildcache,mode=max
       - name: Build and push frontend image
-        run: |
-          docker build --file deploy/server/web.Dockerfile --tag "$WEB_IMAGE" .
-          docker push "$WEB_IMAGE"
+        uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: .
+          file: deploy/server/web.Dockerfile
+          push: true
+          tags: ${{ env.WEB_IMAGE }}
+          cache-from: type=registry,ref=ghcr.io/duan-jia/shuming-web:buildcache
+          cache-to: type=registry,ref=ghcr.io/duan-jia/shuming-web:buildcache,mode=max
       - name: Package source-only staging bundle
         timeout-minutes: 3
         shell: bash
@@ -122,6 +145,9 @@ jobs:
       packages: read
     environment: staging
     runs-on: [self-hosted, Linux, X64, staging]
+    concurrency:
+      group: lab-server-release
+      cancel-in-progress: false
     timeout-minutes: 75
     env:
       STAGING_ROOT: /srv/fastllm-staging
@@ -205,7 +231,7 @@ jobs:
           tar --extract --gzip --file source.tar.gz --directory source --no-same-owner
           python3 source/deploy/staging/guard.py
       - name: Fetch private images with temporary registry credentials
-        timeout-minutes: 50
+        timeout-minutes: 30
         env:
           GHCR_TOKEN: ${{ github.token }}
           DOCKER_CONFIG: ${{ runner.temp }}/shuming-ghcr-${{ github.run_id }}-${{ github.run_attempt }}
@@ -240,6 +266,11 @@ jobs:
         shell: bash
         run: |
           python3 deploy/staging/guard.py
+          exec 9>"$STAGING_ROOT/deploy.lock"
+          if ! flock --nonblock 9; then
+            echo 'Another staging deployment owns cleanup; leaving its containers running.'
+            exit 0
+          fi
           if [[ -f "$STAGING_ROOT/.env" ]]; then
             export REPO_ROOT="$PWD"
             docker compose --env-file "$STAGING_ROOT/.env" -f deploy/staging/compose.json stop --timeout 20
@@ -260,8 +291,9 @@ jobs:
           DOCKER_CONFIG: ${{ runner.temp }}/shuming-ghcr-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
         run: |
-          rm -f -- "$DOCKER_CONFIG/config.json"
-          rmdir -- "$DOCKER_CONFIG" 2>/dev/null || true
+          # A forced cancellation can skip the transfer subshell's EXIT trap.
+          # Remove this attempt's whole private workspace, including archives.
+          rm -rf -- "$DOCKER_CONFIG"
       - name: Remove downloaded staging bundle
         if: always()
         working-directory: ${{ github.workspace }}

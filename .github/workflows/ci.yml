@@ -18,6 +18,11 @@ jobs:
     name: Backend CPU build and test
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 1G
     services:
       mysql:
         image: mysql:8.4
@@ -35,6 +40,22 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/ccache
+          key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('CMakeLists.txt', 'engine/CMakeLists.txt') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('CMakeLists.txt', 'engine/CMakeLists.txt') }}-
+            ccache-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Restore pinned dependency sources
+        id: dependency-sources
+        uses: actions/cache@v4
+        with:
+          path: build/_deps/*-src
+          key: cmake-sources-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+
       - name: Install native dependencies
         shell: bash
         run: |
@@ -49,6 +70,7 @@ jobs:
           sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends \
             build-essential \
             cmake \
+            ccache \
             default-libmysqlclient-dev \
             git \
             gfortran \
@@ -57,11 +79,29 @@ jobs:
             libssl-dev \
             poppler-utils
 
+      - name: Verify fresh and upgraded staging schemas
+        env:
+          MYSQL_TEST_CONTAINER: ${{ job.services.mysql.id }}
+        run: python3 tests/staging_migrations_e2e.py
+
+      - name: Initialize quota test database
+        env:
+          MYSQL_TEST_CONTAINER: ${{ job.services.mysql.id }}
+        run: docker exec --interactive --env MYSQL_PWD=mysql-test-only "$MYSQL_TEST_CONTAINER" mysql --user=root < sql/init.sql
+
       - name: Configure CPU Release build
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_NATIVE=OFF
+        env:
+          DEPENDENCY_CACHE_HIT: ${{ steps.dependency-sources.outputs.cache-hit }}
+        run: |
+          options=()
+          if [[ "$DEPENDENCY_CACHE_HIT" == true ]]; then
+            options+=(-DFETCHCONTENT_FULLY_DISCONNECTED=ON)
+          fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_NATIVE=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "${options[@]}"
 
       - name: Build focused test
-        run: cmake --build build --target knowledge-search-service-test mysql-pool-test native-mcp-test-server auth-security-test auth-service-test document-access-test rag-metadata-test --parallel 2
+        run: cmake --build build --target knowledge-search-service-test mysql-pool-test native-mcp-test-server auth-security-test auth-service-test document-access-test rag-metadata-test user-quota-test --parallel 2
 
       - name: Run focused backend tests
         env:
@@ -74,6 +114,7 @@ jobs:
           ./build/bin/auth-service-test
           ./build/bin/document-access-test
           ./build/bin/rag-metadata-test
+          ./build/bin/user-quota-test
 
       - name: Set up Node.js for MCP interoperability
         uses: actions/setup-node@v4
@@ -104,6 +145,10 @@ jobs:
 
       - name: Build backend CLI
         run: cmake --build build --target fast-llm-cli --parallel 2
+
+      - name: Report compiler cache
+        if: always()
+        run: ccache --show-stats
 
   mcp-gateway:
     name: MCP gateway checks
@@ -146,6 +191,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: Ensure PDF test tools
+        run: |
+          if ! command -v pdfinfo || ! command -v pdftotext; then
+            sudo apt-get -o Acquire::Retries=3 update
+            sudo apt-get -o Acquire::Retries=3 install --yes --no-install-recommends poppler-utils
+          fi
       - name: Verify public repository safety policy
         run: node --test tests/public_repository_policy.test.mjs tests/image_artifact_privacy.test.mjs
       - name: Verify paper dataset and graders
@@ -164,10 +215,11 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p 'test_paper_card.py'
           python3 -m unittest discover -s tests -p 'test_pdf_model_request.py'
+          python3 -m unittest discover -s tests -p 'test_pdf_text.py'
       - name: Run deployment tests
         run: python3 -m unittest discover -s tests -p 'test_*deploy*.py'
       - name: Test staging guard
-        run: python3 -m unittest discover -s tests -p test_staging_isolation.py
+        run: python3 -m unittest discover -s tests -p 'test_staging*.py'
       - name: Test production release
         run: python3 -m unittest discover -s tests -p test_production_release.py
       - name: Check shell syntax
@@ -189,6 +241,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: node --experimental-transform-types --test tests/session-title.spec.ts tests/sse.spec.ts tests/library-access.spec.ts tests/paper-upload-naming.spec.ts
+      - run: node --test tests/auth-client.test.mjs
       - run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: '1'

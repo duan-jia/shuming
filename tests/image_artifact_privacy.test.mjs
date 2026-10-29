@@ -1,7 +1,7 @@
 // Conservative regression checks for this repository's workflow layout.
 // Not a package ACL audit, image secret scan, or security sandbox.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import test from 'node:test';
@@ -29,6 +29,8 @@ test('private-image fetch uses scoped ephemeral authentication and cleanup', () 
   assert.match(deploy, /trap cleanup_registry_auth EXIT/);
   assert.match(deploy, /unset GHCR_TOKEN/);
   assert.match(deploy, /name: Remove temporary registry credentials\n        if: always\(\)/);
+  const cleanup = deploy.split('      - name: Remove temporary registry credentials')[1]?.split('      - name: Remove downloaded staging bundle')[0];
+  assert.match(cleanup, /rm -rf -- "\$DOCKER_CONFIG"/);
   assert.doesNotMatch(deploy, /cat .*config\.json|set -x|docker login.*--password /);
 });
 
@@ -57,6 +59,8 @@ test('GHCR downloads use pinned client-side transport without daemon changes', (
   assert.ok(helper.indexOf('sha256sum --check') < helper.indexOf('"$work/crane" pull'));
   assert.match(helper, /--platform linux\/amd64 --format tarball/);
   assert.doesNotMatch(helper, /--cache_path/);
+  assert.match(helper, /http2client=0/);
+  assert.match(helper, /verify-image\.py/);
   assert.match(helper, /trap 'rm -rf -- "\$work"' EXIT/);
   assert.match(helper, /docker load --input "\$work\/image\.tar"/);
   assert.doesNotMatch(helper + workflow, /systemctl\s+(?:restart|stop)|daemon\.json/);
@@ -67,10 +71,19 @@ test('GHCR downloads use pinned client-side transport without daemon changes', (
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-function mockTransfer({ fail = false, offline = false, cached = false } = {}) {
+function mockTransfer({ fail = false, offline = false, cached = false, corrupt = false, brokenCache = false, badLoad = false } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'shuming-transfer-test-'));
   const bin = path.join(dir, 'bin'), auth = path.join(dir, 'auth');
   mkdirSync(bin); mkdirSync(auth);
+  const fixture = spawnSync('python3', ['-c', `
+import sys, pathlib, json, importlib.util
+root=pathlib.Path(sys.argv[1]); target=pathlib.Path(sys.argv[2])
+spec=importlib.util.spec_from_file_location('archive_fixture',root/'tests/test_staging_image_archive.py')
+m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+(target/'registry.json').write_text(json.dumps(m.fixture(target/'fixture.tar')))
+`, root, dir], { encoding: 'utf8' });
+  assert.equal(fixture.status, 0, fixture.stderr);
+  if (corrupt) writeFileSync(path.join(dir, 'fixture.tar'), 'incomplete archive');
   const scripts = {
     timeout: '[[ "$1" == 2 ]] && exit 1; shift 2; exec "$@"',
     curl: 'echo curl >> "$TEST_LOG"; while (($#)); do if [[ "$1" == --output ]]; then : > "$2"; break; fi; shift; done',
@@ -79,12 +92,18 @@ function mockTransfer({ fail = false, offline = false, cached = false } = {}) {
 cat > "$target/crane" <<'CRANE'
 #!/usr/bin/env bash
 echo crane >> "$TEST_LOG"
-[[ "$TEST_FAIL" == 1 ]] && exit 1
-printf 'fixture' > "\${!#}"
+echo "$GODEBUG" >> "$TEST_GODEBUG"
+if [[ "$TEST_FAIL" == 1 ]]; then echo 'Get https://registry.example/blob?sig=private-secret' >&2; exit 1; fi
+if [[ "$1" == manifest ]]; then cat "$TEST_MANIFEST"; else cp "$TEST_ARCHIVE" "\${!#}"; fi
 CRANE
 chmod +x "$target/crane"`,
     docker: `echo "docker $1" >> "$TEST_LOG"
-if [[ "$1" == image ]]; then [[ "$TEST_CACHED" == 1 || -f "$TEST_STATE" ]]; else touch "$TEST_STATE"; fi`,
+case "$1" in
+ image) [[ "$TEST_CACHED" == 1 || -f "$TEST_STATE" ]];;
+ load) touch "$TEST_STATE";;
+ create) [[ "$TEST_BAD_LOAD" != 1 ]] && { [[ "$TEST_BROKEN_CACHE" != 1 || -f "$TEST_STATE" ]]; };;
+ rm) exit 0;;
+esac`,
     sleep: ':'
   };
   for (const [name, script] of Object.entries(scripts)) {
@@ -95,16 +114,44 @@ if [[ "$1" == image ]]; then [[ "$TEST_CACHED" == 1 || -f "$TEST_STATE" ]]; else
     const r = spawnSync('bash', ['-c', 'set -e; source "$1"; pull_image ghcr.io/example/test:sha', '_', path.join(root, 'deploy/staging/pull-images.sh')], {
       env: { ...process.env, PATH: bin + ':' + process.env.PATH, DOCKER_CONFIG: auth,
         STAGING_OFFLINE: offline ? '1' : '0', TEST_FAIL: fail ? '1' : '0',
-        TEST_CACHED: cached ? '1' : '0', TEST_LOG: log, TEST_STATE: path.join(dir, 'loaded') }, encoding: 'utf8'
+        TEST_CACHED: cached ? '1' : '0', TEST_LOG: log, TEST_STATE: path.join(dir, 'loaded'),
+        TEST_ARCHIVE: path.join(dir, 'fixture.tar'), TEST_MANIFEST: path.join(dir, 'registry.json'),
+        TEST_BROKEN_CACHE: brokenCache ? '1' : '0', TEST_BAD_LOAD: badLoad ? '1' : '0',
+        GODEBUG: 'other=1', TEST_GODEBUG: path.join(dir, 'godebug') }, encoding: 'utf8'
     });
-    return { status: r.status, calls: readFileSync(log, 'utf8'), remaining: readdirSync(auth), stderr: r.stderr };
+    return { status: r.status, calls: readFileSync(log, 'utf8'), remaining: readdirSync(auth), stderr: r.stderr,
+      godebug: existsSync(path.join(dir, 'godebug')) ? readFileSync(path.join(dir, 'godebug'), 'utf8') : '' };
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 test('client-side transfer loads locally and removes temporary image files', () => {
   const r = mockTransfer();
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.calls, /checksum\ncrane\ndocker load/);
+  assert.match(r.calls, /checksum\ncrane\ncrane\ndocker load/);
+  assert.ok(r.godebug.split('\n').filter(Boolean).every(value => value === 'other=1,http2client=0'));
   assert.deepEqual(r.remaining, []);
+});
+
+test('corrupt archives are never imported and are removed on failure', () => {
+  const result = mockTransfer({ corrupt: true });
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(result.calls, /docker load/);
+  assert.deepEqual(result.remaining, []);
+});
+
+test('an inspectable but unstartable cache is rejected offline and repaired online', () => {
+  const offline = mockTransfer({ cached: true, brokenCache: true, offline: true });
+  assert.notEqual(offline.status, 0);
+  assert.doesNotMatch(offline.calls, /crane|docker load/);
+  const online = mockTransfer({ cached: true, brokenCache: true });
+  assert.equal(online.status, 0, online.stderr);
+  assert.match(online.calls, /docker load/);
+});
+
+test('successful Docker load with failing layer unpack never reports success', () => {
+  const result = mockTransfer({ badLoad: true });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.calls.match(/docker load/g)?.length, 2);
+  assert.deepEqual(result.remaining, []);
 });
 test('failed client-side transfer is bounded, never loaded, and cleans up', () => {
   const r = mockTransfer({ fail: true });
@@ -112,6 +159,8 @@ test('failed client-side transfer is bounded, never loaded, and cleans up', () =
   assert.equal(r.calls.match(/^crane$/gm)?.length, 2);
   assert.doesNotMatch(r.calls, /docker load/);
   assert.deepEqual(r.remaining, []);
+  assert.doesNotMatch(r.stderr, /private-secret|sig=/);
+  assert.match(r.stderr, /redacted-url/);
 });
 test('cached and offline image paths never download tools or image layers', () => {
   const cached = mockTransfer({ cached: true });
