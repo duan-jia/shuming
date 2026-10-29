@@ -4,7 +4,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         build-essential ca-certificates cmake default-libmysqlclient-dev git \
-        gfortran libboost-all-dev libopenblas-dev libssl-dev pkg-config \
+        gfortran libboost-dev libopenblas-dev libssl-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY CMakeLists.txt ./
@@ -35,7 +35,9 @@ COPY --from=build /runtime-libs/ /opt/fast-llm-reasoner/lib/
 COPY --from=build /src/build/bin/fast-llm-reasoner /usr/local/bin/fast-llm-reasoner
 COPY scripts/read_pdf.py scripts/pdf_text.py /app/scripts/
 COPY .artifacts/embedding/bge-small-zh-v1.5-q4_k_m.gguf /models/bge-small-zh-v1.5-q4_k_m.gguf
-RUN chmod 0444 /models/bge-small-zh-v1.5-q4_k_m.gguf
+RUN chmod 0755 /app /app/scripts \
+    && chmod 0644 /app/scripts/read_pdf.py /app/scripts/pdf_text.py \
+    && chmod 0444 /models/bge-small-zh-v1.5-q4_k_m.gguf
 ENV LD_LIBRARY_PATH=/opt/fast-llm-reasoner/lib
 WORKDIR /app
 USER fastllm

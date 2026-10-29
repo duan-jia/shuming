@@ -91,7 +91,7 @@ class ImageTransferTests(unittest.TestCase):
             root = Path(directory)
             trace = root / 'trace'
             scripts = {
-                'docker': '#!/bin/bash\n[[ "$1" == image ]] && exit ' + ('0' if cached else '1') + '\nexit 1\n',
+                'docker': '#!/bin/bash\n[[ "$1" == image ]] && exit ' + ('0' if cached else '1') + '\n[[ "$1" == create || "$1" == rm ]] && exit 0\nexit 1\n',
                 'timeout': '#!/bin/bash\nprintf "%s\\n" "$*" >> "$TRACE"\nexit ' + ('0' if succeeds else '124') + '\n',
                 'sleep': '#!/bin/bash\nexit 0\n',
             }

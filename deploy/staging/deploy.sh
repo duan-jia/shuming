@@ -14,6 +14,8 @@ COMPOSE_FILE="$SCRIPT_DIR/compose.json"
 
 umask 077
 mkdir -p "$STAGING_ROOT/models" "$STAGING_ROOT/rag-data"
+exec 9>"$STAGING_ROOT/deploy.lock"
+flock --nonblock 9 || { echo 'Another isolated staging deployment is running' >&2; exit 1; }
 
 random_hex() {
   openssl rand -hex "$1"
@@ -80,13 +82,24 @@ source "$SCRIPT_DIR/pull-images.sh"
 pull_image "$BACKEND_IMAGE"
 pull_image "$MCP_IMAGE"
 pull_image mirror.ccs.tencentyun.com/library/mysql:8.4
-compose up --detach --no-build --pull never --wait --wait-timeout 240 mysql backend mcp
+echo 'Preflight: verify backend image using the deployment UID'
+docker run --rm --interactive --network none --pull never --user "$HOST_UID:$HOST_GID" \
+  --entrypoint python3 "$BACKEND_IMAGE" - <"$SCRIPT_DIR/check-runtime.py"
+
+# Keep all application writers stopped until the existing volume is upgraded.
+compose stop --timeout 20 backend mcp
+echo 'Schema: start isolated MySQL and upgrade before starting the application'
+compose up --detach --no-build --pull never --wait --wait-timeout 180 mysql
 
 # Reapply the idempotent schema so an existing staging volume receives newly
 # added CREATE TABLE statements without requiring destructive resets.
 compose exec --no-TTY \
   --env MYSQL_PWD="$MYSQL_ROOT_PASSWORD" \
   mysql mysql --user=root <"$REPO_ROOT/sql/init.sql"
+python3 "$SCRIPT_DIR/migrate.py"
+
+echo 'Application: start backend and MCP using the upgraded schema'
+compose up --detach --no-build --pull never --wait --wait-timeout 180 backend mcp
 
 backend_url='http://127.0.0.1:19006'
 admin_response="$(
