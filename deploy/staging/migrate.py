@@ -13,7 +13,7 @@ INIT = HERE.parents[1] / 'sql/init.sql'
 SCHEMA_QUERY = """SELECT JSON_OBJECT('table',TABLE_NAME,'column',COLUMN_NAME,
     'type',DATA_TYPE,'nullable',IS_NULLABLE) FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN
-    ('users','tenants','user_token_usage_daily','auth_sessions')
+    ('users','tenants','user_token_usage_daily','auth_sessions','messages','agent_requests','agent_events')
     ORDER BY TABLE_NAME,ORDINAL_POSITION;"""
 IDENTITIES = 'SELECT id,tenant_id,username,password_hash,role,status FROM users ORDER BY id;'
 USAGE = 'SELECT * FROM user_token_usage_daily ORDER BY id;'
@@ -54,6 +54,23 @@ def migration_plan(schema):
         statements.append(ddl.group())
     elif not {'id', 'user_id', 'auth_version', 'refresh_hash', 'expires_at', 'created_at'} <= session_columns:
         raise ValueError('Incomplete staging auth_sessions table; restore or inspect it before retrying')
+    request_column = schema.get(('messages', 'request_id'))
+    if not request_column:
+        statements.append('ALTER TABLE messages ADD COLUMN request_id VARCHAR(64) NULL;')
+    elif request_column['type'] != 'varchar' or request_column['nullable'] != 'YES':
+        raise ValueError('Unexpected staging schema: messages.request_id')
+    for table, required in {
+        'agent_requests': {'request_id', 'session_id', 'model', 'status', 'created_at', 'updated_at'},
+        'agent_events': {'id', 'request_id', 'event_type', 'payload', 'created_at'},
+    }.items():
+        columns = {column for name, column in schema if name == table}
+        if not columns:
+            ddl = re.search(r'CREATE TABLE IF NOT EXISTS ' + table + r' \([\s\S]*?\n\);', INIT.read_text())
+            if not ddl:
+                raise ValueError(f'Authoritative {table} definition is missing')
+            statements.append(ddl.group())
+        elif not required <= columns:
+            raise ValueError(f'Incomplete staging {table} table')
     return statements
 
 

@@ -9,6 +9,7 @@
 #include "persistence/billing_service.h"
 #include "persistence/document_repository.h"
 #include "persistence/message_repository.h"
+#include "persistence/agent_repository.h"
 #include "persistence/mysql_pool.h"
 #include "persistence/session_repository.h"
 #include "persistence/tenant_repository.h"
@@ -41,6 +42,7 @@ struct AppContext {
     std::unique_ptr<TenantRepository> tenant_repository;
     std::unique_ptr<DocumentRepository> document_repository;
     std::unique_ptr<MessageRepository> message_repository;
+    std::unique_ptr<AgentRepository> agent_repository;
     std::unique_ptr<SessionRepository> session_repository;
     std::unique_ptr<SessionService> session_service;
     std::unique_ptr<BatchScheduler> scheduler;

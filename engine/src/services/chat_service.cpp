@@ -14,6 +14,7 @@
 #include <spdlog/spdlog.h>
 
 #include "inference/batch_scheduler.h"
+#include "agent/conversation_history.h"
 #include "services/rag_prompt_formatter.h"
 
 namespace fastllm {
@@ -142,6 +143,10 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         if (request_id.empty()) {
             request_id = generate_uuid();
         }
+        if (request_id.size() > 64 || !std::all_of(request_id.begin(), request_id.end(), [](unsigned char ch) {
+                return std::isalnum(ch) || ch == '-' || ch == '_'; })) {
+            send_sse_error(sse_ctx, "Invalid request ID"); return;
+        }
 
         const auto attachment_ids = body.value("attachments", nlohmann::json::array());
         if (!attachment_ids.is_array() || attachment_ids.size() > 4) {
@@ -219,10 +224,14 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
                 pdf_context.push_back(std::move(pdf));
             }
         };
-        std::vector<ChatMessage> history;
+        if (!ctx_.agent_repository) { send_sse_error(sse_ctx, "Agent journal unavailable"); return; }
+        auto history = ctx_.agent_repository->history(session_id);
+        for (const auto& ref : ctx_.agent_repository->attachments(session_id)) {
+            if (ref.is_object() && ref.contains("doc_id") && ref["doc_id"].is_number_integer())
+                append_pdf(ref["doc_id"].get<int>(), ref, false);
+        }
         for (const auto& stored : ctx_.session_repository->list_messages(session_id, 200)) {
             if ((stored.role == "user" || stored.role == "assistant") && !stored.content.empty()) {
-                history.push_back({stored.role, stored.content, stored.reasoning});
                 if (stored.role == "user") {
                     auto refs = nlohmann::json::parse(stored.source_files, nullptr, false);
                     if (refs.is_array()) for (const auto& ref : refs) {
@@ -329,6 +338,9 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
         infer_req->engine = engine;
         infer_req->should_stop = [state, sse] { return state->cancelled.load() || !sse->is_active(); };
         infer_req->deadline = std::chrono::steady_clock::now() + std::chrono::seconds(options_.timeout_seconds);
+        infer_req->record_event = [ctx, request_id](const nlohmann::json& event) {
+            return ctx->agent_repository->append(request_id, event);
+        };
         if (use_agent) {
             CallerContext caller;
             caller.tenant_id = user.tenant_id;
@@ -392,7 +404,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             } catch (...) {}
         };
 
-        infer_req->on_done = [ctx, sse, utf8_buf, message, session_id, request_id, bill_tenant, bill_user, admission, active = active_, state, fallback_source_files, attachments](const InferResult& result) {
+        infer_req->on_done = [ctx, sse, utf8_buf, message, session_id, request_id, bill_tenant, bill_user, admission, active = active_, state, fallback_source_files, attachments, use_agent](const InferResult& result) {
             auto source_files = result.source_files.empty() ? fallback_source_files : result.source_files;
             for (const auto& ref : attachments) {
                 if (std::none_of(source_files.begin(), source_files.end(), [&](const auto& item) { return item["doc_id"] == ref["doc_id"]; }))
@@ -407,9 +419,25 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
                     result.prompt_tokens, result.completion_tokens);
             }
             bool messages_saved = false;
-            if (!result.text.empty()) {
+            bool transcript_saved = result.stop_reason != "persistence_error";
+            if (!use_agent) {
+                const bool saved = ctx->agent_repository->append(request_id, {{"type", "message"}, {"data", message_to_record(
+                    {"assistant", result.text.empty() ? "[Request stopped: " + result.error + "]" : result.text, result.reasoning})}});
+                transcript_saved = transcript_saved && saved;
+            }
+            const bool journal_end_saved = ctx->agent_repository->append(request_id, {{"type", "request_end"}, {"data", {
+                {"error", result.error}, {"stop_reason", result.stop_reason}, {"finish_reason", result.finish_reason},
+                {"source_files", source_files}, {"source_files_role", "retrieval_hits_not_verified_citations"},
+                {"transcript_persisted", transcript_saved},
+                {"prompt_tokens", result.prompt_tokens}, {"completion_tokens", result.completion_tokens}}}})
+                && ctx->agent_repository->finish(request_id, !transcript_saved ? "persistence_error"
+                    : result.error.empty() ? "completed" : result.stop_reason.empty() ? "model_error" : result.stop_reason);
+            const bool journal_saved = transcript_saved && journal_end_saved;
+            if (!journal_saved) spdlog::error("Incomplete Agent journal: session={} request={}", session_id, request_id);
+            if (!result.text.empty() || !result.error.empty()) {
                 messages_saved = ctx->message_repository && ctx->message_repository->insert_chat_pair(
-                    session_id, message, result.text, result.prompt_tokens, result.completion_tokens, result.reasoning, source_files.dump(), attachments.dump());
+                    session_id, message, result.text.empty() ? "[Request stopped: " + result.error + "]" : result.text,
+                    result.prompt_tokens, result.completion_tokens, result.reasoning, source_files.dump(), attachments.dump(), request_id);
             }
             {
                 std::lock_guard<std::mutex> lock(active->mutex);
@@ -429,6 +457,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
                     err["usage"] = {{"prompt_tokens", result.prompt_tokens}, {"completion_tokens", result.completion_tokens}, {"total_tokens", total_tokens}};
                     err["usage"]["estimated"] = result.usage_estimated;
                     err["messages"]["persisted"] = messages_saved;
+                    err["trace"]["persisted"] = journal_saved;
                     err["billing"]["status"] = charge_result.record_status;
                     sse->send_event("error", err.dump());
                     sse->close();
@@ -461,6 +490,7 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             j["usage"]["total_tokens"] = total_tokens;
             j["usage"]["estimated"] = result.usage_estimated;
             j["messages"]["persisted"] = messages_saved;
+            j["trace"]["persisted"] = journal_saved;
             if (!messages_saved) {
                 j["messages"]["failure_reason"] = "message_insert_failed";
             }
@@ -484,7 +514,15 @@ void ChatService::stream(const HttpRequest& req, const RouteParams& params, std:
             sse->close();
         };
 
-        if (!ctx_.scheduler->submit(infer_req)) send_sse_error(sse, "Chat queue is full; retry later");
+        if (!ctx_.agent_repository->begin(session_id, request_id, engine->model_name(), message, attachments)) {
+            send_sse_error(sse, "Cannot start Agent journal or request ID already exists"); return;
+        }
+        if (!ctx_.scheduler->submit(infer_req)) {
+            ctx_.agent_repository->append(request_id, {{"type", "message"}, {"data", message_to_record(
+                {"assistant", "[Request rejected: chat queue is full; no model or tools were executed.]", ""})}});
+            ctx_.agent_repository->finish(request_id, "queue_rejected");
+            send_sse_error(sse, "Chat queue is full; retry later");
+        }
     } catch (const std::exception& e) {
         nlohmann::json err;
         err["error"] = std::string("Invalid JSON: ") + e.what();

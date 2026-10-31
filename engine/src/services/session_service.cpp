@@ -8,7 +8,7 @@
 
 namespace fastllm {
 
-SessionService::SessionService(SessionRepository& sessions) : sessions_(sessions) {}
+SessionService::SessionService(SessionRepository& sessions, AgentRepository* agents) : sessions_(sessions), agents_(agents) {}
 
 std::string SessionService::generate_uuid() {
     std::random_device rd;
@@ -136,6 +136,34 @@ void SessionService::messages(const RouteParams& params, const UserInfo& user, H
     nlohmann::json j;
     j["messages"] = messages_to_json(sessions_.list_messages(session_id));
     resp.json(j.dump());
+}
+
+void SessionService::requests(const RouteParams& params, const UserInfo& user, HttpResponse& resp) {
+    resp.set_header("Cache-Control", "private, no-store");
+    SessionSummary session;
+    if (!sessions_.get_session(params.get("id"), user.tenant_id, user.id, session)) {
+        resp.json_error(404, "Session not found"); return;
+    }
+    if (!agents_) { resp.json_error(503, "Agent journal unavailable"); return; }
+    try {
+        resp.json(nlohmann::json{{"requests", agents_->requests(session.id, user.tenant_id, user.id)},
+            {"legacy_tool_history", "not_recorded"}}.dump());
+    } catch (const std::exception&) { resp.json_error(503, "Cannot read Agent journal"); }
+}
+
+void SessionService::trace(const RouteParams& params, const UserInfo& user, HttpResponse& resp) {
+    resp.set_header("Cache-Control", "private, no-store");
+    SessionSummary session;
+    if (!sessions_.get_session(params.get("id"), user.tenant_id, user.id, session)) {
+        resp.json_error(404, "Session not found"); return;
+    }
+    if (!agents_) { resp.json_error(503, "Agent journal unavailable"); return; }
+    try {
+        auto events = agents_->trace(session.id, params.get("request_id"), user.tenant_id, user.id);
+        if (events.empty()) { resp.json_error(404, "Request trace not found"); return; }
+        resp.json(nlohmann::json{{"request_id", params.get("request_id")}, {"events", events},
+            {"redactions", {"credentials", "signed_download_urls", "base64_images"}}}.dump());
+    } catch (const std::exception&) { resp.json_error(503, "Cannot read Agent trace"); }
 }
 
 }

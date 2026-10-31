@@ -116,6 +116,7 @@ void BatchScheduler::process_request(std::shared_ptr<InferRequest> req) {
     params.temperature = req->temperature;
     params.top_p = req->top_p;
     params.top_k = req->top_k;
+    params.record_event = req->record_event;
 
     try {
         req->engine->stream_complete(req->prompt, params,

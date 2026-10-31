@@ -16,7 +16,8 @@ public:
                           const std::string& user_content,
                           const std::string& assistant_content,
                           int prompt_tokens, int completion_tokens, const std::string& reasoning = "",
-                          const std::string& source_files = "[]", const std::string& attachments = "[]");
+                          const std::string& source_files = "[]", const std::string& attachments = "[]",
+                          const std::string& request_id = "");
 
 private:
     MysqlPool& mysql_;
@@ -25,7 +26,7 @@ private:
     static bool insert_message(MysqlConnection& conn, const std::string& session_id,
                                const std::string& role, const std::string& content,
                                int tokens_in, int tokens_out, const std::string& reasoning = "",
-                               const std::string& source_files = "[]");
+                               const std::string& source_files = "[]", const std::string& request_id = "");
 };
 
 }

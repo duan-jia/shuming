@@ -3,6 +3,16 @@
 namespace fastllm {
 
 void register_session_routes(HttpServer& server, SessionService& sessions, AuthRequired require_auth) {
+    server.router().get("/api/sessions/:id/requests", [&sessions, require_auth](const HttpRequest& req, RouteParams params, HttpResponse& resp) {
+        UserInfo user;
+        if (!require_auth(req, resp, user)) return;
+        sessions.requests(params, user, resp);
+    });
+    server.router().get("/api/sessions/:id/requests/:request_id", [&sessions, require_auth](const HttpRequest& req, RouteParams params, HttpResponse& resp) {
+        UserInfo user;
+        if (!require_auth(req, resp, user)) return;
+        sessions.trace(params, user, resp);
+    });
     server.router().get("/api/sessions", [&sessions, require_auth](const HttpRequest& req, RouteParams params, HttpResponse& resp) {
         UserInfo user;
         if (!require_auth(req, resp, user)) return;
