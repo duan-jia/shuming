@@ -80,4 +80,12 @@ FetchContent_MakeAvailable(muduo json spdlog)
 set(nlohmann_json_DIR "${json_BINARY_DIR}" CACHE PATH "" FORCE)
 FetchContent_MakeAvailable(jwt_cpp llama_cpp faiss httplib)
 
+# Muduo hard-codes -march=native independently of GGML_NATIVE. Keep portable
+# builds and compiler-cache entries safe to reuse on other x86-64 machines.
+if(NOT GGML_NATIVE AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$"
+   AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(muduo_base PRIVATE -march=x86-64)
+    target_compile_options(muduo_net PRIVATE -march=x86-64)
+endif()
+
 add_subdirectory(engine)

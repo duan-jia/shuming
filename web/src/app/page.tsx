@@ -53,6 +53,18 @@ interface DocumentItem {
   updated_at: string;
 }
 
+function BrandMark() {
+  return (
+    <span className="brand-mark">
+      <Image src="/shuming-icon.png" alt="" width={64} height={64} className="brand-icon" unoptimized />
+      <span className="brand-type">
+        <span className="brand-title"><span className="brand-name">EMOS</span>{" "}<span className="brand-caption">chatbot</span></span>
+        <span className="brand-platform">shuming</span>
+      </span>
+    </span>
+  );
+}
+
 function SupportCredit({ className = "" }: { className?: string }) {
   return (
     <p className={`support-credit ${className}`}>
@@ -793,8 +805,8 @@ export default function Home() {
   if (!loggedIn) {
     return (
       <main className="login-page">
-        <section className="login-panel" aria-label="登录 EMOS">
-          <h1 className="wordmark login-wordmark">EMOS</h1>
+        <section className="login-panel" aria-label="登录 EMOS Chatbot">
+          <h1 className="wordmark login-wordmark" aria-label="EMOS chatbot"><BrandMark /></h1>
           <form onSubmit={(event) => { event.preventDefault(); void login(); }}>
             {loginError && <div role="alert" className="mb-5 rounded-lg bg-amber-400/10 px-3 py-2 text-sm text-amber-300">{loginError}</div>}
             <label className="login-label">
@@ -822,7 +834,7 @@ export default function Home() {
       <aside className={`sidebar fixed inset-y-0 left-0 z-30 flex min-h-0 w-64 shrink-0 flex-col border-r border-line bg-sidebar text-foreground transition-transform md:static md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <button className="absolute right-3 top-3 rounded-lg p-2 text-neutral-400 md:hidden" aria-label="关闭导航" onClick={() => setSidebarOpen(false)}>×</button>
         <div className="shrink-0 border-b border-line p-5">
-          <div className="wordmark sidebar-wordmark">EMOS</div>
+          <div className="wordmark sidebar-wordmark" aria-label="EMOS chatbot"><BrandMark /></div>
           <button
             className="mt-7 w-full rounded-lg border border-line px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-white/5"
             onClick={() => { startNewChat(); setSidebarOpen(false); }}
@@ -940,7 +952,7 @@ export default function Home() {
               {messages.length === 0 && (
                 <div className="chat-welcome">
                   <div className="welcome-content">
-                    <h2 className="wordmark">EMOS</h2>
+                    <h2 className="wordmark" aria-label="EMOS chatbot"><BrandMark /></h2>
                     <p>What would you like to explore?</p>
                     <div className="welcome-prompts" aria-label="Suggested questions">
                       {[
@@ -958,7 +970,7 @@ export default function Home() {
                 </div>
               )}
               {messages.map((msg) => (
-                <article key={msg.id} className={`message-row ${msg.role}`} aria-label={msg.role === "user" ? "你的问题" : "EMOS 的回答"}>
+                <article key={msg.id} className={`message-row ${msg.role}`} aria-label={msg.role === "user" ? "你的问题" : "EMOS Chatbot 的回答"}>
                   <div className="message-body" aria-busy={msg.isStreaming}>
                     {msg.role === "assistant" ? <>
                       {msg.reasoning && <details className="reasoning-panel"><summary>{msg.isReasoning ? "正在思考…" : "思考过程"}</summary><div>{msg.reasoning}</div></details>}

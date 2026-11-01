@@ -40,10 +40,16 @@ button, input { transition: background-color 180ms, border-color 180ms, color 18
 button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 * { scrollbar-width: thin; scrollbar-color: #3a3a3a transparent; }
 
-.wordmark { font-family: "Manrope", sans-serif; font-weight: 600; letter-spacing: -0.055em; line-height: 1.15; }
+.wordmark { font-family: "Manrope", sans-serif; font-weight: 600; letter-spacing: -0.025em; line-height: 1.15; }
+.brand-mark { display: inline-flex; align-items: center; gap: .32em; vertical-align: middle; text-align: left; }
+.brand-icon { display: block; flex-shrink: 0; width: 2em; height: 2em; filter: invert(1); mix-blend-mode: screen; }
+.brand-type { display: flex; flex-direction: column; align-items: flex-start; gap: .08em; }
+.brand-title { display: flex; align-items: baseline; gap: .35em; color: #b4b4b4; font-size: max(12px, .55em); font-weight: 400; line-height: 1.2; letter-spacing: 0; white-space: nowrap; }
+.brand-name, .brand-caption { font: inherit; color: inherit; }
+.brand-platform { color: #ededed; font-size: 1em; font-weight: 600; line-height: 1.05; letter-spacing: -.025em; }
 .login-page { height: 100dvh; overflow-y: auto; display: grid; place-items: center; padding: 32px 24px; background: var(--background); }
 .login-panel { width: 100%; max-width: 320px; margin-top: -7vh; }
-.login-wordmark { margin: 0 0 44px; text-align: center; font-size: 40px; color: #ededed; }
+.login-wordmark { margin: 0 0 44px; text-align: center; font-size: 30px; color: #ededed; }
 .login-label { display: block; margin-top: 22px; color: #a3a3a3; font-size: 13px; font-weight: 400; }
 .login-input { display: block; width: 100%; margin-top: 10px; padding: 13px 15px; background: #141414; color: #ededed; border: 1px solid #ffffff14; border-radius: 10px; outline: none; font-size: 14px; line-height: 1.6; }
 .login-input:focus { border-color: #ffffff50; }
@@ -56,7 +62,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .login-support { justify-content: center; margin-top: 28px; }
 .sidebar-support { margin-top: 20px; font-size: 11px; gap: 7px; }
 .sidebar-support .support-logo { width: 16px; height: 16px; }
-.sidebar-wordmark { padding: 6px 4px; font-size: 23px; }
+.sidebar-wordmark { padding: 6px 4px; font-size: 20px; }
 .composer { padding: 7px; background: #141414; border: 1px solid #ffffff14; border-radius: 12px; }
 .composer:focus-within { border-color: #ffffff30; }
 .prose { overflow-wrap: anywhere; line-height: 1.85; }
@@ -80,7 +86,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 :root { --accent: #b5c9e2; --line: #ffffff14; }
 .chat-header { border-bottom: 1px solid var(--line); min-height: 84px; }
 .chat-welcome { min-height: 100%; display: grid; place-items: center; padding: 32px 0 8vh; text-align: center; }
-.welcome-content h2 { margin: 0 0 16px; font-size: clamp(32px, 4vw, 44px); color: #d5d5d5; }
+.welcome-content h2 { margin: 0 0 16px; font-size: clamp(26px, 4vw, 34px); color: #d5d5d5; }
 .welcome-content > p { color: #8f8f8f; font-size: 17px; line-height: 1.8; }
 .welcome-prompts { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; max-width: 760px; margin: 28px auto 0; }
 .welcome-prompts button { max-width: 100%; padding: 10px 15px; border: 1px solid var(--line); border-radius: 999px; color: #a3a3a3; font-size: 14px; line-height: 1.6; text-align: center; }
