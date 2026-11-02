@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { isPaperSummary } from "../../../../../../lib/paper-summary.ts";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,12 @@ function pdfDirectory() {
   return process.env.PDF_SOURCE_DIR
     ? path.resolve(/* turbopackIgnore: true */ process.env.PDF_SOURCE_DIR)
     : path.join(/* turbopackIgnore: true */ repositoryRoot(), "data", "pdfs");
+}
+
+function processedDirectory() {
+  return process.env.PDF_PROCESSED_DIR
+    ? path.resolve(/* turbopackIgnore: true */ process.env.PDF_PROCESSED_DIR)
+    : path.join(/* turbopackIgnore: true */ repositoryRoot(), "data", "processed");
 }
 
 function backendUrl(route: string) {
@@ -69,7 +76,34 @@ export async function GET(
 
   if (format === "md") {
     const filename = detail.filename || `document-${id}.md`;
-    const content = new TextEncoder().encode(detail.content || "");
+    let markdown = detail.content || "";
+    if (detail.source_filename || detail.source_storage_name) {
+      // Older corpus imports put extracted PDF text in documents.content.
+      // The generated paper card is a separate artifact; never download the
+      // source-text cache as a substitute for a missing summary.
+      const storageName = detail.source_storage_name || "";
+      if (STORAGE_NAME_PATTERN.test(storageName)) {
+        try {
+          const generated = await readFile(
+            path.join(processedDirectory(), `${path.parse(storageName).name}.md`),
+            "utf8"
+          );
+          if (isPaperSummary(generated)) markdown = generated;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            console.error("Failed to read paper summary", storageName, error);
+            return Response.json({ error: "读取论文摘要失败。" }, { status: 500 });
+          }
+        }
+      }
+      if (!isPaperSummary(markdown)) {
+        return Response.json({
+          error: "该论文尚无可用的总结 MD，请先生成论文摘要。",
+          code: "SUMMARY_NOT_AVAILABLE",
+        }, { status: 409 });
+      }
+    }
+    const content = new TextEncoder().encode(markdown);
     return new Response(content, {
       headers: {
         "Content-Type": "text/markdown; charset=utf-8",
