@@ -318,7 +318,8 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     await wait(`(document.querySelector('.composer-send').textContent==='发送')`);
     await send('自动创建并生成');
     await wait(`(document.querySelector('.composer-send').textContent==='停止生成')`);
-    await click('退出');
+    await evaluate(`document.querySelector('.account-settings').open = true`);
+    await click('退出登录');
     await evaluate(`(() => { const input = document.querySelector('input[type="password"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'test-password'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     await click('登录');
     await wait(`document.body.innerText.includes('会话A')`);
