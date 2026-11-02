@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import "katex/dist/katex.min.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "EMOS",
-  description: "EMOS 智能助手",
+  title: "EMOS Chatbot",
+  description: "EMOS Chatbot 智能对话助手",
   icons: {
     icon: "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E",
   },

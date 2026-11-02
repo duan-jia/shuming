@@ -47,7 +47,7 @@ function CreateUserForm({ tenants, token, onCreated }: { tenants: {id: number; n
       <label className="grid gap-2 text-xs text-neutral-400">所属组<select className={fieldClass} name="tenant" required disabled={pending || !tenants.length}>{tenants.map(tenant => <option key={tenant.id} value={tenant.id}>{tenant.name === "default" ? "RMDA group" : tenant.name}</option>)}</select></label>
       <label className="grid gap-2 text-xs text-neutral-400">角色<select className={fieldClass} name="role" disabled={pending}><option value="user">普通用户</option><option value="admin">管理员</option></select></label>
       <label className="grid gap-2 text-xs text-neutral-400">每日专属额度（留空继承）<input className={fieldClass} name="quota" inputMode="numeric" disabled={pending} /></label>
-      <p className="self-center text-xs text-neutral-500">密码为 8 至 16 个字符，不限制字符组合。</p>
+      <p className="self-center text-xs text-neutral-500">密码为 8 至 16 个字符。</p>
       {error && <p role="alert" className="text-sm text-amber-300 sm:col-span-2">{error}</p>}
       <button type="submit" disabled={pending || !tenants.length} className="justify-self-start rounded-lg bg-foreground px-4 py-2 text-sm text-background disabled:opacity-50">{pending ? "创建中…" : "确认创建"}</button>
     </form>}

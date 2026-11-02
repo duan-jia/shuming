@@ -33,6 +33,7 @@ struct InferRequest {
     std::function<void(const std::string&)> on_token;
     std::function<void(const std::string&)> on_reasoning;
     std::function<void(const InferResult&)> on_done;
+    std::function<bool(const nlohmann::json&)> record_event;
 };
 
 class BatchScheduler {

@@ -7,7 +7,6 @@ export function PasswordSettings({ onChanged }: { onChanged: () => void }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   return <section className="max-w-lg" aria-label="修改自己的密码">
-    <p className="mb-6 text-sm text-neutral-400">修改后，所有已登录设备需要使用新密码重新登录。</p>
     <form className="grid gap-4" onSubmit={async event => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
@@ -29,9 +28,9 @@ export function PasswordSettings({ onChanged }: { onChanged: () => void }) {
         <label key={name} className="grid gap-2 text-sm text-neutral-300">{label}
           <input className="rounded-lg border border-line bg-surface px-3 py-2.5 outline-none focus:border-neutral-500" name={name} type="password" autoComplete={complete} maxLength={1024} required disabled={pending} />
         </label>)}
-      <p className="text-xs text-neutral-500">新密码需 8 至 16 个字符，不限制字符组合。</p>
+      <p className="text-xs text-neutral-500">新密码需 8 至 16 个字符。</p>
       {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
-      <button className="justify-self-start rounded-lg bg-foreground px-4 py-2.5 text-sm font-medium text-background disabled:opacity-50" disabled={pending} type="submit">{pending ? "修改中…" : "修改密码并重新登录"}</button>
+      <button className="justify-self-start rounded-lg bg-foreground px-4 py-2.5 text-sm font-medium text-background disabled:opacity-50" disabled={pending} type="submit">{pending ? "修改中…" : "确认修改"}</button>
     </form>
   </section>;
 }

@@ -1,5 +1,6 @@
 #include "agent/agent_runtime.h"
 #include "agent/source_files.h"
+#include "agent/conversation_history.h"
 
 #include <algorithm>
 #include <chrono>
@@ -65,6 +66,13 @@ void AgentRuntime::stream_complete(const std::string& prompt, const InferParams&
     const auto deadline = std::min(input.deadline, std::chrono::steady_clock::now() + std::chrono::seconds(options_.timeout_seconds));
     const auto stopped = [&] { return (input.should_stop && input.should_stop()) || std::chrono::steady_clock::now() >= deadline; };
     auto stop = [&](const std::string& reason, const std::string& message) { total.stop_reason = reason; total.error = message; };
+    auto record = [&](const std::string& type, const Json& data) {
+        if (!input.record_event || input.record_event({{"type", type}, {"data", data}})) return true;
+        stop("persistence_error", "Cannot persist Agent execution; no further tools will be executed");
+        return false;
+    };
+    bool final_recorded = false;
+    std::string last_text, last_reasoning;
     auto check_stop = [&] {
         if (input.should_stop && input.should_stop()) { stop("cancelled", "Generation cancelled"); return true; }
         if (std::chrono::steady_clock::now() >= deadline) { stop("timeout", "Agent time limit reached"); return true; }
@@ -132,11 +140,19 @@ void AgentRuntime::stream_complete(const std::string& prompt, const InferParams&
                 [&](const std::string& text) { total.reasoning += text; if (on_reasoning) on_reasoning(text); },
                 [&](const InferResult& value) { result = value; completed = true; });
         } catch (const std::exception&) { result.error = "Model request failed"; }
+        last_text = result.text;
+        last_reasoning = result.reasoning;
         total.usage_estimated = total.usage_estimated || result.usage_estimated;
         total.prompt_tokens += std::max(0, result.prompt_tokens);
         total.completion_tokens += std::max(0, result.completion_tokens);
+        Json returned_calls = Json::array();
+        for (const auto& call : result.tool_calls) returned_calls.push_back({{"id", call.id}, {"name", call.name}, {"arguments", call.arguments}});
+        if (!record("model_response", {{"text", result.text}, {"reasoning", result.reasoning},
+                {"tool_calls", returned_calls}, {"finish_reason", result.finish_reason}, {"error", result.error},
+                {"prompt_tokens", result.prompt_tokens}, {"completion_tokens", result.completion_tokens}})) break;
         if (check_stop()) break;
-        if (!completed || !result.error.empty()) { stop("model_error", result.error.empty() ? "Model request did not finish" : result.error); break; }
+        if (!completed || !result.error.empty()) { stop(result.stop_reason.empty() ? "model_error" : result.stop_reason,
+            result.error.empty() ? "Model request did not finish" : result.error); break; }
         if (options_.max_total_tokens > 0
             && static_cast<long long>(total.prompt_tokens) + total.completion_tokens > options_.max_total_tokens) {
             stop("token_limit", "Agent token budget exhausted"); break;
@@ -149,12 +165,14 @@ void AgentRuntime::stream_complete(const std::string& prompt, const InferParams&
             } else {
                 total.finish_reason = "length";
                 total.stop_reason = "output_limit";
+                final_recorded = record("message", message_to_record({"assistant", result.text, result.reasoning}));
             }
             break;
         }
         if (result.tool_calls.empty()) {
             if (result.text.empty()) { stop("model_error", "Model returned no final answer"); break; }
             total.finish_reason = result.finish_reason;
+            final_recorded = record("message", message_to_record({"assistant", result.text, result.reasoning}));
             break;
         }
         if (result.tool_calls.size() > static_cast<size_t>(options_.max_tool_calls_per_turn)) {
@@ -170,23 +188,41 @@ void AgentRuntime::stream_complete(const std::string& prompt, const InferParams&
         if (!total.error.empty()) break;
         Json assistant = {{"role", "assistant"}, {"content", result.text}, {"tool_calls", calls}};
         if (!result.reasoning.empty()) assistant["reasoning_content"] = result.reasoning;
+        if (!record("message", assistant)) break;
         params.tool_messages.push_back(std::move(assistant));
+        last_text.clear();
+        last_reasoning.clear();
         if (!result.text.empty()) { total.text += "\n\n"; if (on_token) on_token("\n\n"); }
         Json page_content = Json::array();
         for (const auto& call : result.tool_calls) {
-            if (check_stop()) break;
+            // A cancelled batch still closes every declared call in the transcript.
+            const bool skipped = check_stop();
+            if (!record("tool_start", {{"name", call.name}, {"tool_call_id", call.id},
+                    {"arguments", call.arguments}, {"skipped", skipped}})) break;
             if (on_event_) on_event_({{"type", "tool_start"}, {"name", call.name}, {"tool_call_id", call.id}});
             std::string content;
             bool error = false;
+            Json raw = Json::object();
+            const auto tool_started = std::chrono::steady_clock::now();
+            bool execution_started = false;
+            std::string stage = "cancel_check";
             try {
+                if (skipped) throw std::runtime_error("Request stopped before tool execution");
+                stage = "permission";
                 if (!permitted.count(call.name)) throw std::runtime_error("Tool is not permitted");
+                stage = "rate_limit";
                 if (!limiter_.allow(caller_.principal_id, call.name)) throw std::runtime_error("Tool rate limit exceeded");
+                stage = "arguments";
                 auto arguments = Json::parse(call.arguments);
                 if (call.name == "fetch_knowledge" && arguments.value("representation", "text") == "pages" && !model_.supports_images())
                     throw std::runtime_error("Selected model does not support page images; use text");
+                stage = "execute";
+                execution_started = true;
                 auto output = tools_.execute(call.name, arguments, caller_, stopped);
+                raw = output.data;
+                stage = "result_processing";
                 content = tool_content(output.data, options_.max_tool_result_bytes);
-                error = output.data.contains("error");
+                error = output.data.contains("error") || Json::parse(content).contains("error");
                 if (!error) collect_source_files(total.source_files, call.name, content,
                     [&](int id) { return tools_.download_reference(id, caller_); });
                 if (!output.attachments.empty()) {
@@ -197,14 +233,30 @@ void AgentRuntime::stream_complete(const std::string& prompt, const InferParams&
                 }
             } catch (const std::exception&) {
                 error = true;
-                content = Json{{"error", "Tool failed, arguments are invalid, or access is not permitted. Revise the request or answer with the available evidence."}}.dump();
+                content = Json{{"error", skipped ? "Request stopped before tool execution; this call was not executed."
+                    : "Tool failed, arguments are invalid, or access is not permitted. Revise the request or answer with the available evidence."}}.dump();
+                raw = Json::parse(content);
             }
-            params.tool_messages.push_back({{"role", "tool"}, {"tool_call_id", call.id}, {"content", content}});
+            const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - tool_started).count();
+            if (!record("tool_end", {{"name", call.name}, {"tool_call_id", call.id}, {"raw_result", raw},
+                    {"model_content", content}, {"is_error", error}, {"execution_started", execution_started},
+                    {"stage", error ? stage : "completed"}, {"duration_ms", duration}})) break;
+            Json tool_message = {{"role", "tool"}, {"tool_call_id", call.id}, {"content", content}};
+            auto durable_message = tool_message;
+            if (!page_content.empty()) durable_message["content"] = content
+                + "\n[PDF page images were shown in this request but are not retained in history; fetch pages again to inspect them.]";
+            if (!record("message", durable_message)) break;
+            params.tool_messages.push_back(std::move(tool_message));
             if (on_event_) on_event_({{"type", "tool_end"}, {"name", call.name}, {"tool_call_id", call.id}, {"is_error", error}});
         }
         // Finish every tool response in the batch before adding page images.
         // DeepSeek Chat Completions accepts images in user messages only.
         if (!page_content.empty()) params.tool_messages.push_back({{"role", "user"}, {"content", std::move(page_content)}});
+    }
+    if (!final_recorded) {
+        // Partial/failed answers remain inspectable, but never look like a success.
+        const auto failure = total.error.empty() ? "Request ended without a final answer" : total.error;
+        record("message", message_to_record({"assistant", last_text + "\n[Request stopped: " + failure + "]", last_reasoning}));
     }
     if (on_done) on_done(total);
 }

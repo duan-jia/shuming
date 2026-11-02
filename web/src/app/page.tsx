@@ -5,7 +5,7 @@ import Image from "next/image";
 import { createSseParser } from "../lib/sse";
 import { sessionTitle } from "../lib/session-title";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { markdownPlugins, markdownRehypePlugins } from "../lib/markdown";
 import { UserManagement } from "../components/user-quotas";
 import { SettingsMenu } from "../components/settings-menu";
 import { PasswordSettings } from "../components/password-settings";
@@ -67,20 +67,13 @@ function BrandMark() {
 
 function SupportCredit({ className = "" }: { className?: string }) {
   return (
-    <p className={`support-credit ${className}`}>
+    <span className={`support-credit ${className}`}>
       <span>Supported by</span>
-      <a
-        className="support-brand"
-        href="https://github.com/duan-jia/shuming"
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="查看 shuming GitHub 项目（在新标签页打开）"
-        title="查看 GitHub 项目（在新标签页打开）"
-      >
+      <a className="support-brand" href="https://github.com/duan-jia/shuming" target="_blank" rel="noopener noreferrer" aria-label="查看 shuming GitHub 项目（在新标签页打开）" title="查看 GitHub 项目（在新标签页打开）">
         <Image src="/shuming-icon.png" alt="" width={18} height={18} className="support-logo" />
         <span>shuming · GitHub</span>
       </a>
-    </p>
+    </span>
   );
 }
 
@@ -117,7 +110,7 @@ const API_BASE = "";
 const EMPTY_MESSAGES: Message[] = [];
 // Keep completed answers out of the Markdown parser while another reply streams.
 const MarkdownContent = memo(function MarkdownContent({ content }: { content: string }) {
-  return <div className="prose max-w-none prose-slate"><ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown></div>;
+  return <div className="prose max-w-none prose-slate"><ReactMarkdown remarkPlugins={markdownPlugins} rehypePlugins={markdownRehypePlugins}>{content}</ReactMarkdown></div>;
 });
 
 function CopyMessageButton({ content, role }: { content: string; role: Message["role"] }) {
@@ -882,7 +875,7 @@ export default function Home() {
                 >
                   <span className="min-w-0 flex-1 truncate text-sm" title={s.title}>{s.title}</span>
                   <button
-                    aria-label={`删除会话 ${s.title}`} className="text-xs text-neutral-500 hover:text-red-300 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
+                    aria-label={`删除会话 ${s.title}`} className="text-sm text-neutral-500 hover:text-red-300 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
                     onClick={(e) => deleteSession(s.id, e)}
                   >
                     x
@@ -893,7 +886,7 @@ export default function Home() {
           ) : null}
         </div>
         <div className="shrink-0 border-t border-line p-4">
-          {userRole === "guest" && <p className="mb-3 text-xs text-neutral-400">游客体验 · 15 分钟有效</p>}
+          {userRole === "guest" && <p className="mb-3 text-sm text-neutral-400">游客体验 · 15 分钟有效</p>}
           <SettingsMenu role={userRole}
             onNavigate={view => { setActiveView(view); setSidebarOpen(false); setUploadNotice(null); }}
             onLogout={async () => {
@@ -1175,7 +1168,6 @@ export default function Home() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void sendMessage(); } }}
-                  disabled={loading}
                 />
                 <button
                   className="composer-send disabled:opacity-50"

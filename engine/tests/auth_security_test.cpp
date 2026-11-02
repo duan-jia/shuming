@@ -103,6 +103,10 @@ int main() {
         assert(!RbacManager::check_route_permission(role, "GET", "/api/future"));
         assert(!RbacManager::check_route_permission(role, "POST", "/api/sessions/id/future"));
         assert(!RbacManager::check_route_permission(role, "DELETE", "/api/sessions/id/messages"));
+        assert(RbacManager::check_route_permission(role, "GET", "/api/sessions/id/requests") == known);
+        assert(RbacManager::check_route_permission(role, "GET", "/api/sessions/id/requests/request-id") == known);
+        assert(!RbacManager::check_route_permission(role, "POST", "/api/sessions/id/requests/request-id"));
+        assert(!RbacManager::check_route_permission(role, "GET", "/api/sessions/id/requests/request-id/extra"));
         assert(!RbacManager::check_route_permission(role, "GET", "/api/sessions/"));
         assert(!RbacManager::check_route_permission(role, "POST", "/api/documents/1/approve/future"));
         assert(!RbacManager::check_route_permission(role, "POST", "/api/users/1"));

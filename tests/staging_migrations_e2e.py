@@ -17,6 +17,8 @@ CREATE TABLE users (id INT PRIMARY KEY, tenant_id INT NOT NULL, username VARCHAR
     password_hash VARCHAR(256), role VARCHAR(16), status VARCHAR(16));
 CREATE TABLE user_token_usage_daily (id INT PRIMARY KEY, tenant_id INT, user_id INT,
     usage_date DATE, token_limit INT NOT NULL, tokens_used INT NOT NULL DEFAULT 0);
+CREATE TABLE sessions (id VARCHAR(36) PRIMARY KEY);
+CREATE TABLE messages (id BIGINT PRIMARY KEY AUTO_INCREMENT, session_id VARCHAR(36), content TEXT);
 INSERT INTO tenants VALUES (1,2147483647);
 INSERT INTO users VALUES (1,1,'migration-fixture','unchanged-fixture-hash','user','active');
 INSERT INTO user_token_usage_daily VALUES (1,1,1,CURDATE(),2147483647,96713);

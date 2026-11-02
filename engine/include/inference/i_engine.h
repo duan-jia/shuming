@@ -12,6 +12,10 @@ struct ChatMessage {
     std::string role;
     std::string content;
     std::string reasoning;
+    nlohmann::json tool_calls = nlohmann::json::array();
+    std::string tool_call_id;
+    // Internal request boundary; never sent as a provider message field.
+    std::string request_id;
 };
 
 struct ToolCall {
@@ -40,6 +44,8 @@ struct InferParams {
     std::function<bool()> should_stop;
     int timeout_seconds = 300;
     std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
+    // Returning false stops inference before the next external operation.
+    std::function<bool(const nlohmann::json&)> record_event;
 };
 
 struct InferResult {

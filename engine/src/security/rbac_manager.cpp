@@ -46,7 +46,12 @@ bool RbacManager::check_route_permission(Role role, const std::string& method, c
             if (method == "GET") return allows(Permission::SESSION_READ);
             return method == "DELETE" && allows(Permission::SESSION_DELETE);
         }
-        return tail.substr(slash) == "/messages" && method == "GET" && allows(Permission::SESSION_READ);
+        const auto action = tail.substr(slash);
+        const std::string trace_prefix = "/requests/";
+        const bool trace = action.rfind(trace_prefix, 0) == 0 && action.size() > trace_prefix.size()
+            && action.find('/', trace_prefix.size()) == std::string::npos;
+        return (action == "/messages" || action == "/requests" || trace)
+            && method == "GET" && allows(Permission::SESSION_READ);
     }
     if (path == "/api/documents") {
         if (method == "GET") return allows(Permission::DOCUMENT_READ);

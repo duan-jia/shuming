@@ -17,13 +17,15 @@ std::string MessageRepository::escape_sql(MYSQL* mysql, const std::string& input
 
 bool MessageRepository::insert_message(MysqlConnection& conn, const std::string& session_id,
                                        const std::string& role, const std::string& content,
-                                       int tokens_in, int tokens_out, const std::string& reasoning, const std::string& source_files) {
-    std::string sql = "INSERT INTO messages (session_id, role, content, reasoning, rag_references, tokens_in, tokens_out) VALUES ('"
+                                       int tokens_in, int tokens_out, const std::string& reasoning, const std::string& source_files,
+                                       const std::string& request_id) {
+    std::string sql = "INSERT INTO messages (session_id, role, content, reasoning, rag_references, tokens_in, tokens_out, request_id) VALUES ('"
         + escape_sql(conn.raw(), session_id) + "','"
         + escape_sql(conn.raw(), role) + "','"
         + escape_sql(conn.raw(), content) + "','" + escape_sql(conn.raw(), reasoning) + "','" + escape_sql(conn.raw(), source_files) + "',"
         + std::to_string(tokens_in) + ","
-        + std::to_string(tokens_out) + ")";
+        + std::to_string(tokens_out) + ","
+        + (request_id.empty() ? "NULL" : "'" + escape_sql(conn.raw(), request_id) + "'") + ")";
     return conn.execute(sql);
 }
 
@@ -40,7 +42,8 @@ bool MessageRepository::insert_message(const std::string& session_id, const std:
 bool MessageRepository::insert_chat_pair(const std::string& session_id,
                                          const std::string& user_content,
                                          const std::string& assistant_content,
-                                         int prompt_tokens, int completion_tokens, const std::string& reasoning, const std::string& source_files, const std::string& attachments) {
+                                         int prompt_tokens, int completion_tokens, const std::string& reasoning, const std::string& source_files, const std::string& attachments,
+                                         const std::string& request_id) {
     auto conn = mysql_.acquire();
     if (!conn || !conn->valid()) return false;
 
@@ -50,8 +53,8 @@ bool MessageRepository::insert_chat_pair(const std::string& session_id,
         return false;
     }
 
-    bool ok = insert_message(*conn, session_id, "user", user_content, prompt_tokens, 0, "", attachments)
-        && insert_message(*conn, session_id, "assistant", assistant_content, 0, completion_tokens, reasoning, source_files)
+    bool ok = insert_message(*conn, session_id, "user", user_content, prompt_tokens, 0, "", attachments, request_id)
+        && insert_message(*conn, session_id, "assistant", assistant_content, 0, completion_tokens, reasoning, source_files, request_id)
         && tx.commit();
 
     if (!ok) tx.rollback();

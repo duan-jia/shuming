@@ -1,7 +1,7 @@
 #include "inference/remote_engine.h"
+#include "agent/conversation_history.h"
 
 #include <algorithm>
-#include <optional>
 #include <vector>
 #include <chrono>
 #include <map>
@@ -31,11 +31,6 @@ struct StreamCtx {
     std::string finish_reason;
     bool done = false;
     bool response_success = false;
-};
-
-struct ConversationTurn {
-    ChatMessage user;
-    ChatMessage assistant;
 };
 
 static size_t estimate_text_tokens(const std::string& text) {
@@ -85,22 +80,6 @@ static size_t estimate_messages(const nlohmann::json& messages) {
     return tokens;
 }
 
-static std::vector<ConversationTurn> collect_complete_turns(
-    const std::vector<ChatMessage>& history) {
-    std::vector<ConversationTurn> turns;
-    std::optional<ChatMessage> pending_user;
-
-    for (const auto& message : history) {
-        if (message.role == "user") {
-            pending_user = message;
-        } else if (message.role == "assistant" && pending_user) {
-            turns.push_back({*pending_user, message});
-            pending_user.reset();
-        }
-    }
-    return turns;
-}
-
 static bool build_messages(const std::string& prompt, const InferParams& params,
                            int context_window_tokens, nlohmann::json& messages,
                            std::string& error) {
@@ -129,13 +108,14 @@ static bool build_messages(const std::string& prompt, const InferParams& params,
         error = "Tool conversation exceeds the configured remote context window";
         return false;
     }
-    auto turns = collect_complete_turns(params.history);
+    auto turns = conversation_turns(params.history);
     size_t first_selected = turns.size();
     size_t selected_tokens = 0;
     while (first_selected > 0) {
         const auto& turn = turns[first_selected - 1];
-        size_t turn_tokens = estimate_message_tokens(turn.user)
-            + estimate_message_tokens(turn.assistant);
+        nlohmann::json serialized = nlohmann::json::array();
+        for (const auto& message : turn) serialized.push_back(message_to_record(message));
+        size_t turn_tokens = estimate_messages(serialized);
         if (required_tokens + selected_tokens + turn_tokens > input_budget) break;
         selected_tokens += turn_tokens;
         --first_selected;
@@ -149,13 +129,13 @@ static bool build_messages(const std::string& prompt, const InferParams& params,
         });
     }
     for (size_t i = first_selected; i < turns.size(); ++i) {
-        messages.push_back({
-            {"role", turns[i].user.role},
-            {"content", turns[i].user.content}
-        });
-        nlohmann::json assistant = {{"role", turns[i].assistant.role}, {"content", turns[i].assistant.content}};
-        if (!params.tools.empty()) assistant["reasoning_content"] = turns[i].assistant.reasoning;
-        messages.push_back(std::move(assistant));
+        for (const auto& message : turns[i]) {
+            auto serialized = message_to_record(message);
+            if (message.role == "assistant" && !params.tools.empty())
+                serialized["reasoning_content"] = message.reasoning;
+            else serialized.erase("reasoning_content");
+            messages.push_back(std::move(serialized));
+        }
     }
     messages.push_back({
         {"role", "user"},
@@ -320,6 +300,13 @@ void RemoteEngine::stream_complete(
     }
 
     std::string body_str = body.dump();
+    if (params.record_event && !params.record_event({{"type", "model_request"}, {"data", body}})) {
+        InferResult result;
+        result.error = "Cannot persist model request";
+        result.stop_reason = "persistence_error";
+        if (on_done) on_done(result);
+        return;
+    }
 
     std::string host_url = endpoint_;
     if (!host_url.empty() && host_url.back() == '/') host_url.pop_back();

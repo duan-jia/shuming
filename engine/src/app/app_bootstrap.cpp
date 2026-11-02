@@ -83,8 +83,13 @@ bool AppBootstrap::initialize(AppContext& ctx, const ConfigManager& config, cons
     }
     ctx.document_repository = std::make_unique<DocumentRepository>(*ctx.mysql_pool);
     ctx.message_repository = std::make_unique<MessageRepository>(*ctx.mysql_pool);
+    ctx.agent_repository = std::make_unique<AgentRepository>(*ctx.mysql_pool);
+    if (!ctx.agent_repository->schema_ready()) {
+        spdlog::critical("Agent journal schema missing; apply sql/migrate_agent_history.sql before startup");
+        return false;
+    }
     ctx.session_repository = std::make_unique<SessionRepository>(*ctx.mysql_pool);
-    ctx.session_service = std::make_unique<SessionService>(*ctx.session_repository);
+    ctx.session_service = std::make_unique<SessionService>(*ctx.session_repository, ctx.agent_repository.get());
 
     ctx.model_mgr = std::make_unique<ModelManager>();
     ctx.rag = std::make_unique<RagService>();

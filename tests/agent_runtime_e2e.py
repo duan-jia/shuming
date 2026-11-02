@@ -25,8 +25,9 @@ class Model(BaseHTTPRequestHandler):
         with self.condition:
             self.requests.append(body)
             self.condition.notify_all()
-        prompt = next(item['content'] for item in reversed(body['messages']) if item['role'] == 'user' and isinstance(item['content'], str))
-        tools = [item for item in body['messages'] if item['role'] == 'tool']
+        user_index = max(i for i, item in enumerate(body['messages']) if item['role'] == 'user' and isinstance(item['content'], str))
+        prompt = body['messages'][user_index]['content']
+        tools = [item for item in body['messages'][user_index + 1:] if item['role'] == 'tool']
         if prompt == 'resume':
             previous = [item for item in body['messages'] if item['role'] == 'assistant']
             assert previous and previous[0]['reasoning_content'] == 'fixture reasoningfixture reasoning'
@@ -160,6 +161,45 @@ class AgentTest(native.NativeMcpTest):
         self.assertEqual(events[-1]['type'], 'done')
         self.assertEqual(events[-1]['usage'], {'prompt_tokens': 100, 'completion_tokens': 10, 'estimated': False})
         self.assertNotIn('tool_start', [e['type'] for e in events])
+
+    def test_agent_records_each_tool_message_and_stops_on_journal_failure(self):
+        events = self.stream('both')
+        trace = events[-1]['trace']
+        messages = [e['data'] for e in trace if e['type'] == 'message']
+        self.assertEqual([m['role'] for m in messages], ['assistant', 'tool', 'assistant', 'tool', 'assistant'])
+        self.assertEqual(messages[0]['tool_calls'][0]['id'], messages[1]['tool_call_id'])
+        ends = [e['data'] for e in trace if e['type'] == 'tool_end']
+        self.assertEqual([e['name'] for e in ends], ['search_knowledge', 'search_web'])
+        self.assertIn('raw_result', ends[0])
+        self.assertIn('model_content', ends[0])
+        self.assertGreaterEqual(ends[0]['duration_ms'], 0)
+        for event_type in ('model_request', 'tool_start'):
+            before = len(Model.requests)
+            events = self.stream('both', fail_record_type=event_type)
+            self.assertEqual(events[-1]['stop_reason'], 'persistence_error', events)
+            self.assertNotIn('tool_start', [e['type'] for e in events])
+            self.assertEqual(len(Model.requests) - before, 0 if event_type == 'model_request' else 1)
+
+    def test_history_replays_and_trims_whole_tool_sequences(self):
+        history = [
+            {'role': 'user', 'content': 'old question', 'request_id': 'old'},
+            {'role': 'assistant', 'content': '', 'reasoning_content': 'old reasoning', 'request_id': 'old',
+             'tool_calls': [{'id': 'old-call', 'type': 'function', 'function': {'name': 'search_knowledge', 'arguments': '{"query":"old"}'}}]},
+            {'role': 'tool', 'content': '{"results":[]}', 'tool_call_id': 'old-call', 'request_id': 'old'},
+            {'role': 'assistant', 'content': 'old answer', 'request_id': 'old'},
+        ]
+        self.assertEqual(self.stream('direct', history=history)[-1]['type'], 'done')
+        sent = Model.requests[-1]['messages']
+        self.assertEqual([m['role'] for m in sent], ['system', 'user', 'assistant', 'tool', 'assistant', 'user'])
+        self.assertEqual(sent[2]['tool_calls'][0]['id'], sent[3]['tool_call_id'])
+        self.assertEqual(sent[2]['reasoning_content'], 'old reasoning')
+        history[2]['content'] = 'x' * 600000
+        history += [{'role': 'user', 'content': 'recent question', 'request_id': 'recent'},
+                    {'role': 'assistant', 'content': 'recent answer', 'request_id': 'recent'}]
+        self.assertEqual(self.stream('direct', history=history, image_inputs=False)[-1]['type'], 'done')
+        sent = Model.requests[-1]['messages']
+        self.assertEqual([m['role'] for m in sent], ['system', 'user', 'assistant', 'user'])
+        self.assertEqual(sent[1]['content'], 'recent question')
 
     def test_agent_output_limit_is_omitted_unless_explicit(self):
         self.assertEqual(self.stream("direct")[-1]["type"], "done")

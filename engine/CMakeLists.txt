@@ -18,6 +18,7 @@ add_executable(fast-llm-reasoner
     src/persistence/billing_service.cpp
     src/persistence/document_repository.cpp
     src/persistence/message_repository.cpp
+    src/persistence/agent_repository.cpp
     src/persistence/rag_document_repository.cpp
     src/persistence/session_repository.cpp
     src/persistence/tenant_repository.cpp
@@ -125,6 +126,19 @@ target_compile_definitions(fast-llm-cli PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
 option(FASTLLM_BUILD_TESTS "Build focused backend unit tests" ON)
 if(FASTLLM_BUILD_TESTS)
     enable_testing()
+    add_executable(conversation-history-test tests/conversation_history_test.cpp)
+    target_include_directories(conversation-history-test PRIVATE include)
+    target_link_libraries(conversation-history-test PRIVATE nlohmann_json::nlohmann_json)
+    target_compile_options(conversation-history-test PRIVATE -UNDEBUG)
+    add_test(NAME conversation-history-test COMMAND conversation-history-test)
+    add_executable(agent-journal-test tests/agent_journal_test.cpp
+        src/persistence/agent_repository.cpp src/persistence/message_repository.cpp
+        src/persistence/session_repository.cpp src/persistence/mysql_pool.cpp)
+    target_include_directories(agent-journal-test PRIVATE include)
+    target_link_libraries(agent-journal-test PRIVATE nlohmann_json::nlohmann_json spdlog::spdlog mysqlclient pthread)
+    target_compile_options(agent-journal-test PRIVATE -UNDEBUG)
+    add_test(NAME agent-journal-test COMMAND agent-journal-test)
+    set_tests_properties(agent-journal-test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
     add_executable(user-quota-test
         tests/user_quota_test.cpp
         src/persistence/mysql_pool.cpp

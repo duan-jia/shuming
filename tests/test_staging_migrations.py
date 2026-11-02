@@ -17,10 +17,13 @@ def schema():
         'user_token_usage_daily': {'token_limit': 'bigint', 'tokens_used': 'bigint'},
         'users': {'daily_token_quota': 'bigint', 'auth_version': 'int', 'must_change_password': 'tinyint'},
         'auth_sessions': dict.fromkeys(['id', 'user_id', 'auth_version', 'refresh_hash', 'expires_at', 'created_at'], 'char'),
+        'messages': {'request_id': 'varchar'},
+        'agent_requests': dict.fromkeys(['request_id', 'session_id', 'model', 'status', 'created_at', 'updated_at'], 'char'),
+        'agent_events': dict.fromkeys(['id', 'request_id', 'event_type', 'payload', 'created_at'], 'char'),
     }.items():
         for column, data_type in fields.items():
             rows.append({'table': table, 'column': column, 'type': data_type,
-                         'nullable': 'YES' if column == 'daily_token_quota' else 'NO'})
+                         'nullable': 'YES' if column == 'daily_token_quota' or (table, column) == ('messages', 'request_id') else 'NO'})
     return migrate.read_schema('\n'.join(map(json.dumps, rows)).encode())
 
 
@@ -41,6 +44,15 @@ class MigrationPlanTests(unittest.TestCase):
         plan = migrate.migration_plan(current)
         self.assertEqual(len(plan), 1)
         self.assertIn('ADD COLUMN must_change_password', plan[0])
+
+    def test_agent_migration_resumes_without_recreating_existing_tables(self):
+        current = schema()
+        del current['messages', 'request_id']
+        current = {key: value for key, value in current.items() if key[0] != 'agent_events'}
+        plan = migrate.migration_plan(current)
+        self.assertEqual(len(plan), 2)
+        self.assertIn('ADD COLUMN request_id', plan[0])
+        self.assertIn('CREATE TABLE IF NOT EXISTS agent_events', plan[1])
 
     def test_unexpected_quota_type_and_partial_session_table_fail_closed(self):
         for mutate in ('quota', 'sessions'):

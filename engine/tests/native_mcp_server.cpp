@@ -6,6 +6,7 @@
 #include <muduo/net/EventLoop.h>
 #include "auth/jwt_handler.h"
 #include "agent/agent_runtime.h"
+#include "agent/conversation_history.h"
 #include "inference/remote_engine.h"
 #include "mcp/mcp_service.h"
 #include "server/http_server.h"
@@ -107,6 +108,14 @@ int main(int argc, char** argv) {
             limits.timeout_seconds = body.value("timeout_seconds", 5);
             limits.max_output_tokens = body.value("max_output_tokens", limits.max_output_tokens);
             InferParams params;
+            for (const auto& message : body.value("history", nlohmann::json::array()))
+                params.history.push_back(message_from_record(message, message.value("request_id", "")));
+            auto recorded = std::make_shared<nlohmann::json>(nlohmann::json::array());
+            params.record_event = [recorded, body](const nlohmann::json& entry) {
+                if (entry.value("type", "") == body.value("fail_record_type", "")) return false;
+                recorded->push_back(entry);
+                return true;
+            };
             params.max_tokens = body.value("max_tokens", limits.max_output_tokens);
             params.should_stop = [sse] { return !sse->is_active(); };
             CallerContext caller;
@@ -119,11 +128,12 @@ int main(int argc, char** argv) {
             runtime.stream_complete(body.value("message", "test"), params,
                 [event](const std::string& text) { event({{"type", "answer"}, {"content", text}}); },
                 [event](const std::string& text) { event({{"type", "reasoning"}, {"content", text}}); },
-                [sse](const InferResult& result) {
+                [sse, recorded](const InferResult& result) {
                     nlohmann::json output = {{"type", result.error.empty() ? "done" : "error"},
                         {"usage", {{"prompt_tokens", result.prompt_tokens}, {"completion_tokens", result.completion_tokens}, {"estimated", result.usage_estimated}}},
                         {"stop_reason", result.stop_reason}, {"finish_reason", result.finish_reason}, {"truncated", result.finish_reason == "length"}};
                     if (!result.error.empty()) output["error"] = result.error;
+                    output["trace"] = *recorded;
                     sse->send_event(result.error.empty() ? "message" : "error", output.dump());
                     sse->close();
                 });

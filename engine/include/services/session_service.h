@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "persistence/session_repository.h"
+#include "persistence/agent_repository.h"
 #include "security/rbac_manager.h"
 #include "server/http_protocol.h"
 #include "server/router.h"
@@ -14,16 +15,19 @@ namespace fastllm {
 
 class SessionService {
 public:
-    explicit SessionService(SessionRepository& sessions);
+    explicit SessionService(SessionRepository& sessions, AgentRepository* agents = nullptr);
 
     void list(const UserInfo& user, HttpResponse& resp);
     void create(const HttpRequest& req, const UserInfo& user, HttpResponse& resp);
     void detail(const RouteParams& params, const UserInfo& user, HttpResponse& resp);
     void remove(const RouteParams& params, const UserInfo& user, HttpResponse& resp);
     void messages(const RouteParams& params, const UserInfo& user, HttpResponse& resp);
+    void requests(const RouteParams& params, const UserInfo& user, HttpResponse& resp);
+    void trace(const RouteParams& params, const UserInfo& user, HttpResponse& resp);
 
 private:
     SessionRepository& sessions_;
+    AgentRepository* agents_;
 
     static std::string generate_uuid();
     static nlohmann::json session_to_json(const SessionSummary& session);
