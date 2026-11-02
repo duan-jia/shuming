@@ -69,7 +69,7 @@ mysql --database=llm_platform < sql/migrate_agent_history.sql
 
 凭据通过现有安全方式提供，不写入命令或版本库。迁移增加 nullable 列和新表，可重复执行，不改变旧问答或文档。staging 的迁移检查也包含这些新增结构。缺少 schema 时新后端拒绝启动并提示迁移文件，不静默降级。
 
-回退旧后端时可保留新增列和表；不要为回退删除记录。本次实现没有自动迁移或更新现有 dev-eval/正式服务。
+回退旧后端时可保留新增列和表；不要为回退删除记录。后端启动不会自动执行迁移，部署前需要显式升级数据库。
 
 ## 验证
 
@@ -91,3 +91,40 @@ MYSQL_TEST_HOST=<isolated_mysql_host> MYSQL_TEST_PASSWORD=<test_only_password> \
 ```
 
 该测试启动真实 C++ 后端和本地 mock 模型/网页搜索，验证实际请求 JSON、工具返回、后端重启、取消、强制崩溃与跨用户拒绝。它会写入测试账号和会话，必须使用隔离数据库，不能连接现有业务数据库。PDF 回归还需要 Poppler。
+
+## 导出和固定证据重放
+
+`scripts/replay_agent_trace.py` 只依赖 Python 标准库。导出需要会话所有者的访问 token，通过环境变量传入；也可显式使用 `--login-config <本地配置>` 登录管理员自己的会话。输出目录必须是新目录或空目录，文件权限为 0600，凭据、签名链接和图片数据会脱敏。
+
+```sh
+python3 scripts/replay_agent_trace.py export \
+  --base-url http://127.0.0.1:3002 \
+  --session-id <session_id> --request-id <request_id> \
+  --output .tmp/trace-export
+```
+
+token 默认从 `EMOS_TRACE_TOKEN` 读取。省略 `--request-id` 时读取该会话最近一次请求。输出包括 `trace.json`、每轮实际模型输入 `model-request-NN.json` 和可阅读的 `report.md`。旧会话没有工具 trace，不能用问答或来源文件补造。
+
+已有 trace 文件可离线查看，不访问网络：
+
+```sh
+python3 scripts/replay_agent_trace.py inspect .tmp/trace-export/trace.json \
+  --output .tmp/trace-inspect
+python3 scripts/replay_agent_trace.py replay .tmp/trace-export/trace.json \
+  --compare-without-tool-history --output .tmp/trace-replay-dry
+```
+
+真正重新生成回答必须显式添加 `--live` 和匹配模型的配置：
+
+```sh
+python3 scripts/replay_agent_trace.py replay .tmp/trace-export/trace.json \
+  --model-config .tmp/dev-eval-local/config.json --live \
+  --compare-without-tool-history --max-tokens 2048 \
+  --output .tmp/trace-replay-live
+```
+
+默认选择最后一个模型请求，也可用 `--turn 1` 指定轮次。脚本固定已记录的工具结果，设置 `tool_choice=none`，只调用配置中的模型，不重新执行工具。输出 `*.request.json`、`*.response.json` 和 `replay.md`；该生成不写回业务会话，不经过应用账单结算，但上游模型正常计费。仍可能生成错误描述，需要对照原 trace 判断。
+
+API 密钥若仅由 Docker 环境变量注入，本地配置文件不包含密钥，需要在持有该环境变量的运行环境中执行，不要把密钥复制到命令行或导出文件。精简后端镜像中 Python 的默认 CA 路径可能不存在；可设置 `SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt`，使用与 C++ 后端相同的信任文件，保持证书校验开启。
+
+对照模式移除历史工具调用及返回，保留已有普通问答；这是消融试验，不是对旧故障的精确复现。重放还会改成非流式请求并设置输出上限，不能声称与原始请求完全相同。包含已省略页图的请求会拒绝在线重放。私有资料只有在明确授权后才应使用 `--live` 发送到所选模型。
