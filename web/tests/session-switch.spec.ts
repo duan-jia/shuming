@@ -174,7 +174,7 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     await wait(`!!window.mock.streams.A`);
     await evaluate(`window.mock.emit('A',{type:'reasoning',content:'先检索实验室资料，再对比研究结论。'});window.mock.emit('A',{type:'answer',content:'回答A第一段'})`);
     await wait(`document.body.innerText.includes('回答A第一段')`);
-    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.prose')).fontSize`), '19px');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.prose')).fontSize`), '20px');
     assert.ok(await evaluate<number>(`document.querySelector('main').getBoundingClientRect().width`) > 896);
     assert.equal(await evaluate(`document.querySelector('.message-avatar, .assistant-avatar-logo, .message-label, .stream-badge') === null`), true);
     assert.equal(await evaluate(`document.querySelector('header').innerText.trim()`), '');
@@ -197,7 +197,7 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     await command('Emulation.setDeviceMetricsOverride', { width:390, height:900, deviceScaleFactor:1, mobile:true });
     await new Promise(resolve => setTimeout(resolve, 350));
     assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
-    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.prose')).fontSize`), '18px');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('.prose')).fontSize`), '20px');
     const mobileChat = await command('Page.captureScreenshot', { format:'png' });
     await writeFile('/tmp/shuming-mobile-chat.png', Buffer.from(mobileChat.data as string,'base64'));
     await command('Emulation.setDeviceMetricsOverride', { width:1280, height:900, deviceScaleFactor:1, mobile:false });

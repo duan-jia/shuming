@@ -101,7 +101,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "${options[@]}"
 
       - name: Build focused test
-        run: cmake --build build --target knowledge-search-service-test mysql-pool-test native-mcp-test-server auth-security-test auth-service-test document-access-test rag-metadata-test user-quota-test --parallel 2
+        run: cmake --build build --target knowledge-search-service-test mysql-pool-test native-mcp-test-server auth-security-test auth-service-test document-access-test rag-metadata-test user-quota-test conversation-history-test agent-journal-test --parallel 2
 
       - name: Run focused backend tests
         env:
@@ -115,6 +115,8 @@ jobs:
           ./build/bin/document-access-test
           ./build/bin/rag-metadata-test
           ./build/bin/user-quota-test
+          ./build/bin/conversation-history-test
+          ./build/bin/agent-journal-test
 
       - name: Set up Node.js for MCP interoperability
         uses: actions/setup-node@v4
@@ -142,6 +144,12 @@ jobs:
 
       - name: Build backend server
         run: cmake --build build --target fast-llm-reasoner --parallel 2
+
+      - name: Verify persisted Agent history and trace access
+        env:
+          MYSQL_TEST_HOST: 127.0.0.1
+          MYSQL_TEST_PASSWORD: mysql-test-only
+        run: python3 tests/agent_history_e2e.py
 
       - name: Build backend CLI
         run: cmake --build build --target fast-llm-cli --parallel 2
@@ -211,11 +219,13 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p 'test_evaluation.py'
           python3 -m unittest discover -s tests -p 'test_agent_model_eval.py'
+          python3 -m unittest discover -s tests -p 'test_replay_agent_trace.py'
       - name: Verify paper processing and title validation
         run: |
           python3 -m unittest discover -s tests -p 'test_paper_card.py'
           python3 -m unittest discover -s tests -p 'test_pdf_model_request.py'
           python3 -m unittest discover -s tests -p 'test_pdf_text.py'
+          python3 -m unittest discover -s tests -p 'test_paper_import_guard.py'
       - name: Run deployment tests
         run: python3 -m unittest discover -s tests -p 'test_*deploy*.py'
       - name: Test staging guard
@@ -241,6 +251,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: node --experimental-transform-types --test tests/session-title.spec.ts tests/sse.spec.ts tests/library-access.spec.ts tests/paper-upload-naming.spec.ts
+      - run: node --experimental-transform-types --test tests/markdown.spec.ts tests/document-download.spec.ts
       - run: node --test tests/auth-client.test.mjs
       - run: npm run build
         env:
