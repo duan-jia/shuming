@@ -62,6 +62,13 @@ test("MD download selects summaries and preserves document authorization", async
       detail.content = fullText;
       assert.equal((await download()).status, 409);
     });
+    await t.test("curated legacy summary headings remain downloadable without rewriting prose", async () => {
+      const legacy = "# Paper\n\n## Summary\n\nSummary.\n\n## Key Takeaways\n\nFinding.\n\n## Scope and Positioning\n\nScope.\n";
+      detail = { filename: "Paper.md", source_filename: "Paper.pdf", content: legacy };
+      assert.equal(await (await download()).text(), legacy);
+      detail.content = legacy + "\n" + fullText;
+      assert.equal((await download()).status, 409);
+    });
     await t.test("legacy Markdown without a PDF remains downloadable", async () => {
       detail = { filename: "notes.md", content: "# Notes" };
       assert.equal(await (await download()).text(), "# Notes");
