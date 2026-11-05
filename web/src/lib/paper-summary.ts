@@ -4,7 +4,7 @@ export function isPaperSummary(markdown: string): boolean {
   if (/^## .*\| PDF page \d+ \| block \d+/m.test(markdown)) return false;
   const sections = new Map(markdown.split(/^## /m).slice(1).map(section => {
     const newline = section.indexOf("\n");
-    const current = [section.slice(0, newline).trim(), section.slice(newline + 1).trim()];
+    return [section.slice(0, newline).trim(), section.slice(newline + 1).trim()];
   }));
   const current = [
     "Problem and Context",
