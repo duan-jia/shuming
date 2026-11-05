@@ -1,10 +1,10 @@
+import { isPaperStorageName } from "../../../../lib/paper-filenames.ts";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
 
 export const runtime = "nodejs";
 
-const STORAGE_NAME_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:--[^\u0000-\u001f/\\]{1,160})?\.pdf$/u;
+
 
 function repositoryRoot() {
   return process.env.PROJECT_ROOT
@@ -90,7 +90,15 @@ export async function DELETE(
 
   const storageName = detail.source_storage_name || "";
   const cleanupFailures: string[] = [];
-  if (deleted.source_cleanup_allowed === true && STORAGE_NAME_PATTERN.test(storageName)) {
+  try {
+    await unlink(path.join(processedDirectory(), "library", `${id}.json`));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      cleanupFailures.push("paper-classification");
+      console.error("Failed to remove paper classification", id, error);
+    }
+  }
+  if (deleted.source_cleanup_allowed === true && isPaperStorageName(storageName)) {
     const stem = path.parse(storageName).name;
     const artifacts = [
       path.join(pdfDirectory(), storageName),
@@ -109,7 +117,7 @@ export async function DELETE(
         }
       })
     );
-  } else if (storageName && !STORAGE_NAME_PATTERN.test(storageName)) {
+  } else if (storageName && !isPaperStorageName(storageName)) {
     cleanupFailures.push("invalid-storage-name");
     console.error("Refused to remove document artifact with invalid storage name", storageName);
   }

@@ -1,11 +1,11 @@
+import { isPaperStorageName, safePaperStem } from "../../../../../../lib/paper-filenames.ts";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { isPaperSummary } from "../../../../../../lib/paper-summary.ts";
 
 export const runtime = "nodejs";
 
-const STORAGE_NAME_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:--[^\u0000-\u001f/\\]{1,160})?\.pdf$/u;
+
 
 type DocumentDetail = {
   error?: string;
@@ -74,15 +74,16 @@ export async function GET(
     );
   }
 
+  const downloadStem = safePaperStem(detail.source_filename || detail.filename || `document-${id}`);
   if (format === "md") {
-    const filename = detail.filename || `document-${id}.md`;
+    const filename = `${downloadStem}.md`;
     let markdown = detail.content || "";
     if (detail.source_filename || detail.source_storage_name) {
       // Older corpus imports put extracted PDF text in documents.content.
       // The generated paper card is a separate artifact; never download the
       // source-text cache as a substitute for a missing summary.
       const storageName = detail.source_storage_name || "";
-      if (STORAGE_NAME_PATTERN.test(storageName)) {
+      if (isPaperStorageName(storageName)) {
         try {
           const generated = await readFile(
             path.join(processedDirectory(), `${path.parse(storageName).name}.md`),
@@ -115,7 +116,7 @@ export async function GET(
   }
 
   const storageName = detail.source_storage_name || "";
-  if (!STORAGE_NAME_PATTERN.test(storageName) || !detail.source_filename) {
+  if (!isPaperStorageName(storageName) || !detail.source_filename) {
     return Response.json({ error: "该文档没有可下载的源 PDF。" }, { status: 404 });
   }
 
@@ -124,7 +125,7 @@ export async function GET(
     return new Response(new Uint8Array(bytes), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": contentDisposition(detail.source_filename),
+        "Content-Disposition": contentDisposition(`${downloadStem}.pdf`),
         "Content-Length": String(bytes.byteLength),
         "Cache-Control": "private, no-store",
       },

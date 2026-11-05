@@ -18,6 +18,7 @@ struct DocumentSummary {
     int uploaded_by = 0;
     std::string uploader_username;
     std::string source_filename;
+    std::string source_storage_name;
     std::string review_reason;
     std::uint64_t source_size_bytes = 0;
     std::uint64_t markdown_size_bytes = 0;
@@ -26,7 +27,6 @@ struct DocumentSummary {
 };
 
 struct DocumentDetails : DocumentSummary {
-    std::string source_storage_name;
     std::string content;
 };
 

@@ -36,6 +36,12 @@ test("MD download selects summaries and preserves document authorization", async
       assert.match(response.headers.get("content-disposition")!, /Paper.md/);
       assert.equal(response.headers.get("content-length"), String(Buffer.byteLength(summary)));
     });
+    await t.test("download name shares the source PDF stem and sanitizes punctuation", async () => {
+      detail.source_filename = "REPS: Recycled.pdf";
+      const response = await download();
+      assert.match(response.headers.get("content-disposition")!, /filename\*=UTF-8''REPS_%20Recycled.md/);
+      detail.source_filename = "Paper.pdf";
+    });
     await t.test("missing artifact can use the indexed summary", async () => {
       await rm(path.join(directory, storage.replace(/\.pdf$/, ".md")));
       detail.content = summary;

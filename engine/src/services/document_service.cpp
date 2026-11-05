@@ -30,6 +30,8 @@ nlohmann::json summary_json(const DocumentSummary& doc, const UserInfo& user) {
     result["source_size_bytes"] = doc.source_size_bytes;
     result["markdown_size_bytes"] = doc.markdown_size_bytes;
     result["has_pdf"] = !doc.source_filename.empty();
+    result["source_storage_name"] = doc.source_storage_name.empty()
+        ? nlohmann::json(nullptr) : nlohmann::json(doc.source_storage_name);
     result["can_delete"] = can_delete_document(doc, user);
     result["created_at"] = doc.created_at;
     result["updated_at"] = doc.updated_at;
@@ -100,7 +102,7 @@ void DocumentService::upload(const HttpRequest& req, const UserInfo& user, HttpR
                 || !std::regex_match(source_storage_name, storage_name_pattern)
                 || !std::regex_match(source_sha256, sha256_pattern)
                 || source_size_bytes == 0
-                || source_size_bytes > 30ULL * 1024ULL * 1024ULL)) {
+                || source_size_bytes > 100ULL * 1024ULL * 1024ULL)) {
             resp.json_error(400, "Invalid source PDF metadata");
             return;
         }

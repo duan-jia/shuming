@@ -1,3 +1,4 @@
+import { safePaperStem } from "./paper-filenames";
 import { authFetch as fetch } from "./auth-client";
 
 export interface SourceFile {
@@ -36,7 +37,12 @@ export async function downloadDocumentFile(id: number, filename: string, format:
   const url = URL.createObjectURL(await response.blob());
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = filename;
+  const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(response.headers.get("content-disposition") || "")?.[1];
+  let downloadName = filename;
+  if (encodedName) {
+    try { downloadName = decodeURIComponent(encodedName); } catch { /* Use the supplied fallback. */ }
+  }
+  anchor.download = `${safePaperStem(downloadName)}.${format}`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

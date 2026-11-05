@@ -1,3 +1,4 @@
+import { safePdfFilename, safePaperStem } from "../../../../lib/paper-filenames.ts";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
@@ -6,7 +7,7 @@ import { promisify } from "node:util";
 
 export const runtime = "nodejs";
 
-const MAX_PDF_BYTES = 30 * 1024 * 1024;
+const MAX_PDF_BYTES = 100 * 1024 * 1024;
 const PDF_SIGNATURE = "%PDF-";
 const execFileAsync = promisify(execFile);
 
@@ -26,42 +27,6 @@ function processedDirectory() {
   return process.env.PDF_PROCESSED_DIR
     ? path.resolve(/* turbopackIgnore: true */ process.env.PDF_PROCESSED_DIR)
     : path.join(/* turbopackIgnore: true */ repositoryRoot(), "data", "processed");
-}
-
-function safePdfFilename(filename: string) {
-  const base = path.basename(filename).normalize("NFKC");
-  if (!base.toLowerCase().endsWith(".pdf")) return "";
-
-  const sanitized = base
-    .replace(/[^\p{L}\p{N}._()\- ]/gu, "_")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return sanitized && sanitized.toLowerCase() !== ".pdf" ? sanitized : "";
-}
-
-function truncateUtf8(value: string, maxBytes: number) {
-  let result = "";
-  let bytes = 0;
-  for (const character of value) {
-    const size = Buffer.byteLength(character, "utf8");
-    if (bytes + size > maxBytes) break;
-    result += character;
-    bytes += size;
-  }
-  return result;
-}
-
-function safeDocumentTitle(title: string | undefined, fallbackFilename: string) {
-  const fallback = path.parse(fallbackFilename).name;
-  const sanitized = (title || fallback)
-    .normalize("NFKC")
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
-    .replace(/\s+/g, " ")
-    .replace(/\.(?:pdf|md)$/i, "")
-    .replace(/[. ]+$/g, "")
-    .trim();
-  return truncateUtf8(sanitized || fallback || "document", 160);
 }
 
 async function tokenIsValid(authorization: string) {
@@ -244,7 +209,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "仅支持文件名有效的 .pdf 文件。" }, { status: 400 });
   }
   if (file.size === 0 || file.size > MAX_PDF_BYTES) {
-    return Response.json({ error: "PDF 文件必须小于 30 MB 且不能为空。" }, { status: 413 });
+    return Response.json({ error: "PDF 文件不能超过 100 MB 且不能为空。" }, { status: 413 });
   }
   if (file.type && file.type !== "application/pdf" && file.type !== "application/octet-stream") {
     return Response.json({ error: "文件类型不是 PDF。" }, { status: 415 });
@@ -313,7 +278,7 @@ export async function POST(request: Request) {
       throw new Error("文档处理前后的 SHA-256 不一致。");
     }
 
-    const title = safeDocumentTitle(compression.title, filename);
+    const title = safePaperStem(compression.title?.trim() || filename);
     const titledStem = `${uploadId}--${title}`;
     const sourceStorageName = `${titledStem}.pdf`;
     const titledPdfPath = path.join(sourceDirectory, sourceStorageName);
