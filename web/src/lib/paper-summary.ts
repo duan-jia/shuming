@@ -6,10 +6,15 @@ export function isPaperSummary(markdown: string): boolean {
     const newline = section.indexOf("\n");
     return [section.slice(0, newline).trim(), section.slice(newline + 1).trim()];
   }));
-  return [
+  const current = [
     "Problem and Context",
     "Core Idea and Approach",
     "Key Takeaways",
     "Scope and Limitations",
   ].every(title => Boolean(sections.get(title)));
+  // Earlier curated paper summaries use these headings. Preserve their prose
+  // instead of rewriting it merely to make an existing MD downloadable.
+  const legacy = ["Summary", "Key Takeaways", "Scope and Positioning"]
+    .every(title => Boolean(sections.get(title)));
+  return current || legacy;
 }

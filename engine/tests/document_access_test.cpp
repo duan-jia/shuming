@@ -40,6 +40,22 @@ int main() {
     fixture.id = 10; fixture.tenant_id = 7; fixture.uploaded_by = 2;
     fixture.filename = "document.md"; fixture.status = "ready";
     RouteParams params; params.params["id"] = "10";
+    // PDF metadata size must agree with the web upload limit, including equality.
+    for (std::uint64_t size : {100ULL * 1024 * 1024, 100ULL * 1024 * 1024 + 1}) {
+        UserInfo user{1, 7, "member", Role::USER};
+        nlohmann::json body = {
+            {"filename", "paper.md"}, {"content", "content"},
+            {"source_filename", "paper.pdf"},
+            {"source_storage_name", "00000000-0000-0000-0000-000000000001.pdf"},
+            {"source_sha256", std::string(64, 'a')}, {"source_size_bytes", size}
+        };
+        HttpRequest request; request.body = body.dump();
+        HttpResponse response; service.upload(request, user, response);
+        assert(response.status_code == (size == 100ULL * 1024 * 1024 ? 503 : 400));
+    }
+    fixture.source_storage_name = "00000000-0000-0000-0000-000000000001.pdf";
+    HttpResponse list; service.list(UserInfo{1, 7, "member", Role::USER}, list);
+    assert(nlohmann::json::parse(list.body)["documents"][0]["source_storage_name"] == fixture.source_storage_name);
     for (auto role : {Role::ADMIN, Role::USER, Role::GUEST}) {
         UserInfo user{1, 7, "member", role};
         HttpRequest upload; upload.body = R"({"filename":"new.md","content":"content","visibility":"public"})";

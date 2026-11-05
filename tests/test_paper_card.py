@@ -50,6 +50,16 @@ class PaperCardTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "title could not be identified"):
                     self.normalize(raw)
 
+    def test_structured_publication_metadata(self) -> None:
+        card = self.normalize(dict(self.raw, publication_year=2025,
+                                   publication_type="conference", publication_venue="NSDI"))
+        self.assertEqual(card["publication_year"], 2025)
+        self.assertEqual(card["publication_type"], "conference")
+        self.assertEqual(card["publication_venue"], "NSDI")
+        for year in [None, True, "2025", 0, 9999]:
+            self.assertIsNone(self.normalize(dict(self.raw, publication_year=year))["publication_year"])
+        self.assertEqual(self.normalize(dict(self.raw, publication_type=["journal"]))["publication_type"], "unknown")
+
     def test_multiline_title_is_joined_for_filename(self) -> None:
         card = self.normalize(dict(self.raw, title="  A Useful\nPaper\tTitle  "))
         self.assertEqual(card["title"], "A Useful Paper Title")

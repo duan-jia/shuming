@@ -36,6 +36,12 @@ test("MD download selects summaries and preserves document authorization", async
       assert.match(response.headers.get("content-disposition")!, /Paper.md/);
       assert.equal(response.headers.get("content-length"), String(Buffer.byteLength(summary)));
     });
+    await t.test("download name shares the source PDF stem and sanitizes punctuation", async () => {
+      detail.source_filename = "REPS: Recycled.pdf";
+      const response = await download();
+      assert.match(response.headers.get("content-disposition")!, /filename\*=UTF-8''REPS_%20Recycled.md/);
+      detail.source_filename = "Paper.pdf";
+    });
     await t.test("missing artifact can use the indexed summary", async () => {
       await rm(path.join(directory, storage.replace(/\.pdf$/, ".md")));
       detail.content = summary;
@@ -54,6 +60,13 @@ test("MD download selects summaries and preserves document authorization", async
     await t.test("storage traversal does not read files outside processed", async () => {
       detail.source_storage_name = "../Paper.pdf";
       detail.content = fullText;
+      assert.equal((await download()).status, 409);
+    });
+    await t.test("curated legacy summary headings remain downloadable without rewriting prose", async () => {
+      const legacy = "# Paper\n\n## Summary\n\nSummary.\n\n## Key Takeaways\n\nFinding.\n\n## Scope and Positioning\n\nScope.\n";
+      detail = { filename: "Paper.md", source_filename: "Paper.pdf", content: legacy };
+      assert.equal(await (await download()).text(), legacy);
+      detail.content = legacy + "\n" + fullText;
       assert.equal((await download()).status, 409);
     });
     await t.test("legacy Markdown without a PDF remains downloadable", async () => {

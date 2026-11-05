@@ -12,6 +12,8 @@ import { PasswordSettings } from "../components/password-settings";
 import { authFetch as fetch, acceptAuth, subscribeAuth, refreshAuth, logoutAuth } from "../lib/auth-client";
 import { SourceFiles } from "../components/source-files";
 import { downloadDocumentFile, normalizeSourceFiles, type SourceFile } from "../lib/source-files";
+import { type PaperClassification } from "../lib/paper-library";
+import { PaperClassificationEditor } from "../components/paper-classification";
 
 interface Message {
   id: string;
@@ -34,7 +36,8 @@ interface Session {
   updated_at: string;
 }
 
-interface DocumentItem {
+interface DocumentItem extends Partial<PaperClassification> {
+  title?: string | null;
   id: number;
   tenant_id: number;
   filename: string;
@@ -51,6 +54,10 @@ interface DocumentItem {
   can_delete: boolean;
   created_at: string;
   updated_at: string;
+}
+
+function paperTitle(doc: DocumentItem) {
+  return doc.title?.trim() || (doc.source_filename || doc.filename).replace(/\.(pdf|md)$/i, "");
 }
 
 function BrandMark() {
@@ -178,9 +185,14 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeView, setActiveView] = useState<"chat" | "documents" | "quotas" | "password">("chat");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
-  const [activeLibrary, setActiveLibrary] = useState<"public" | "group">("public");
+  const [uploadLibrary, setUploadLibrary] = useState<"public" | "group">("group");
+  const [activeLibrary, setActiveLibrary] = useState<"all" | "public" | "group">("all");
+  const [paperYear, setPaperYear] = useState("");
+  const [paperName, setPaperName] = useState("");
+  const [paperVenue, setPaperVenue] = useState("");
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsError, setDocumentsError] = useState("");
+  const [expandedDocument, setExpandedDocument] = useState<number | null>(null);
   const [deletingDocument, setDeletingDocument] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadNotice, setUploadNotice] = useState<{
@@ -197,9 +209,14 @@ export default function Home() {
   const [attachments, setAttachments] = useState<SourceFile[]>([]);
   const [attaching, setAttaching] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
-  const visibleDocuments = documents.filter(document => document.visibility === activeLibrary);
-  const canUploadToLibrary = activeLibrary === "group" || userRole === "admin";
-  const libraryLabels = { public: "EMOS group", group: userRole === "guest" ? "测试实验组库" : "RMDA group" };
+  const libraryDocuments = documents.filter(document => activeLibrary === "all" || document.visibility === activeLibrary);
+  const paperYears = [...new Set(libraryDocuments.flatMap(document => document.publication_year ? [document.publication_year] : []))].sort((a, b) => b - a);
+  const paperVenues = [...new Set(libraryDocuments.flatMap(document => document.publication_venue ? [document.publication_venue] : []))].sort((a, b) => a.localeCompare(b));
+  const visibleDocuments = libraryDocuments.filter(document => paperTitle(document).toLocaleLowerCase().includes(paperName.trim().toLocaleLowerCase()) && (!paperYear || (paperYear === "unknown" ? !document.publication_year : String(document.publication_year) === paperYear))
+    && (!paperVenue || (paperVenue === "unknown" ? !document.publication_venue : document.publication_venue === paperVenue)));
+  const hasPaperFilters = Boolean(paperName || paperYear || paperVenue);
+  const uploadTarget = userRole === "admin" ? uploadLibrary : "group";
+  const libraryLabels = { all: "All", public: "EMOS group", group: userRole === "guest" ? "测试实验组库" : "RDMA group" };
 
   useEffect(() => {
     const unsubscribe = subscribeAuth(auth => {
@@ -212,7 +229,7 @@ export default function Home() {
         historyVersions.current.clear(); activeSessionRef.current = "";
         setToken(""); setLoggedIn(false); setUserRole("user"); setCurrentUserId(0);
         setActiveSession(""); setSessionMessages({}); setSessions([]); setGenerating({}); setInput("");
-        setDocuments([]); setDocumentsError(""); setUploadNotice(null); setActiveLibrary("public"); setPassword("");
+        setDocuments([]); setDocumentsError(""); setUploadNotice(null); setActiveLibrary("all"); setUploadLibrary("group"); setPassword("");
         setAttachments([]); setAttaching(false); setAttachmentError(""); setActiveView("chat"); setSidebarOpen(false);
       }
     });
@@ -273,7 +290,7 @@ export default function Home() {
     if (!token) return;
     if (showLoading) setDocumentsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/documents`, {
+      const res = await fetch("/api/library/documents", {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       });
@@ -436,8 +453,8 @@ export default function Home() {
       event.target.value = "";
       if (!file || uploading) return;
 
-      if (!file.name.toLowerCase().endsWith(".pdf") || file.size === 0 || file.size > 30 * 1024 * 1024) {
-        setUploadNotice({ type: "error", message: "请选择一个小于 30 MB 的 PDF 文件。" });
+      if (!file.name.toLowerCase().endsWith(".pdf") || file.size === 0 || file.size > 100 * 1024 * 1024) {
+        setUploadNotice({ type: "error", message: "请选择一个非空且不超过 100 MB 的 PDF 文件。" });
         return;
       }
 
@@ -447,7 +464,7 @@ export default function Home() {
       try {
         const formData = new FormData();
         formData.append("file", file);
-        formData.append("visibility", activeLibrary);
+        formData.append("visibility", uploadTarget);
         const response = await fetch("/api/papers/upload", {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
@@ -473,7 +490,7 @@ export default function Home() {
         setUploading(false);
       }
     },
-    [token, uploading, fetchDocuments, activeLibrary]
+    [token, uploading, fetchDocuments, uploadTarget]
   );
 
   const uploadChatPdf = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -481,8 +498,8 @@ export default function Home() {
     event.target.value = "";
     if (!file || attaching || loading) return;
     if (attachments.length >= 4) { setAttachmentError("每条消息最多附加 4 个 PDF。"); return; }
-    if (!file.name.toLowerCase().endsWith(".pdf") || file.size === 0 || file.size > 30 * 1024 * 1024) {
-      setAttachmentError("请选择一个小于 30 MB 的 PDF 文件。"); return;
+    if (!file.name.toLowerCase().endsWith(".pdf") || file.size === 0 || file.size > 100 * 1024 * 1024) {
+      setAttachmentError("请选择一个非空且不超过 100 MB 的 PDF 文件。"); return;
     }
     const controller = new AbortController();
     attachmentController.current = controller;
@@ -531,7 +548,7 @@ export default function Home() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "审核通过失败。");
-      setUploadNotice({ type: "success", message: `${document.filename} 已通过审核并提交 RAG。` });
+      setUploadNotice({ type: "success", message: `${paperTitle(document)} 已通过审核并提交 RAG。` });
       await fetchDocuments();
     } catch (error) {
       setUploadNotice({
@@ -542,7 +559,7 @@ export default function Home() {
   }, [token, fetchDocuments]);
 
   const deleteDocument = useCallback(async (document: DocumentItem) => {
-    const displayName = document.source_filename || document.filename;
+    const displayName = paperTitle(document);
     if (!window.confirm(`确定永久删除“${displayName}”及其磁盘文件吗？此操作无法恢复。`)) {
       return;
     }
@@ -905,8 +922,12 @@ export default function Home() {
             {activeView === "quotas" && <h1 className="text-sm font-medium">用户管理</h1>}
             {activeView === "password" && <h1 className="text-sm font-medium">修改密码</h1>}
           </div>
-          {activeView === "documents" && canUploadToLibrary && (
-            <div>
+          {activeView === "documents" && (
+            <div className="flex items-center gap-2">
+              {userRole === "admin" ? <select aria-label="上传到文档库" value={uploadLibrary} onChange={event => setUploadLibrary(event.target.value as "public" | "group")} disabled={uploading} className="max-w-36 rounded-lg border border-line bg-surface px-2 py-2 text-xs text-foreground">
+                <option value="group">RDMA group</option>
+                <option value="public">EMOS group</option>
+              </select> : <span className="text-xs text-neutral-400">{libraryLabels.group}</span>}
               <input
                 ref={pdfInputRef}
                 className="hidden"
@@ -981,16 +1002,34 @@ export default function Home() {
           ) : (
             <section>
               <div role="tablist" aria-label="文档库" className="mb-4 flex gap-2">
-                {(["public", "group"] as const).map(library => (
+                {(["all", "public", "group"] as const).map(library => (
                   <button key={library} type="button" role="tab" aria-selected={activeLibrary === library}
-                    disabled={uploading} onClick={() => { setActiveLibrary(library); setUploadNotice(null); }}
+                    disabled={uploading} onClick={() => { setActiveLibrary(library); if (library !== "all") setUploadLibrary(library); setUploadNotice(null); setPaperYear(""); setPaperName(""); setPaperVenue(""); }}
                     className={`rounded-lg px-4 py-2 text-sm transition ${activeLibrary === library ? "bg-white/10 text-foreground" : "text-neutral-500 hover:bg-white/5 hover:text-foreground"}`}>
                     {libraryLabels[library]}
                   </button>
                 ))}
               </div>
-              <div className="mb-4 flex items-center justify-between">
-                <p className="text-sm text-neutral-400">共 {visibleDocuments.length} 条可见文档</p>
+              <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.3fr)]" role="group" aria-label="文档分类">
+                <label className="col-span-2 min-w-0 text-xs text-neutral-400 lg:col-span-1">论文名称<input type="search" aria-label="论文名字" value={paperName} onChange={event => setPaperName(event.target.value)} placeholder="按论文名称筛选" className="mt-1 w-full min-w-0 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-foreground" /></label>
+                <label className="text-xs text-neutral-400">发表年份
+                  <select aria-label="发表年份" value={paperYear} onChange={event => setPaperYear(event.target.value)} className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-foreground">
+                    <option value="">全部年份</option>{paperYears.map(year => <option key={year} value={year}>{year}</option>)}<option value="unknown">年份未知</option>
+                  </select>
+                </label>
+                <label className="text-xs text-neutral-400">会议/期刊
+                  <select aria-label="会议或期刊" value={paperVenue} onChange={event => setPaperVenue(event.target.value)} className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-foreground">
+                    <option value="">全部会议与期刊</option>{paperVenues.map(venue => <option key={venue} value={venue}>{venue}</option>)}<option value="unknown">名称未知</option>
+                  </select>
+                </label>
+              </div>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-sm text-neutral-400" role="status">
+                  {hasPaperFilters
+                    ? `找到 ${visibleDocuments.length} 篇，共 ${libraryDocuments.length} 篇`
+                    : `共 ${libraryDocuments.length} 篇论文`}
+                </p>
+                {hasPaperFilters && <button type="button" className="text-sm text-neutral-300 hover:text-foreground" onClick={() => { setPaperYear(""); setPaperName(""); setPaperVenue(""); }}>清除筛选</button>}
                 <button
                   className="text-sm font-medium text-neutral-400 transition hover:text-foreground disabled:opacity-50"
                   onClick={() => void fetchDocuments(true)}
@@ -1011,130 +1050,58 @@ export default function Home() {
                   正在加载文档…
                 </div>
               ) : visibleDocuments.length === 0 ? (
-                <div className="py-20 text-center text-sm text-neutral-500">暂无文档</div>
+                <div className="py-20 text-center text-sm text-neutral-500">{hasPaperFilters ? "该分类下暂无文档，请调整分类筛选。" : "暂无文档"}</div>
               ) : (
-                <>
-                  <div className="hidden overflow-hidden rounded-xl border border-line bg-surface md:block">
-                    <table className="w-full table-fixed text-left text-sm">
-                      <thead className="border-b border-line bg-white/5 text-xs font-medium uppercase tracking-wide text-neutral-400">
-                        <tr>
-                          <th className="w-[34%] px-4 py-3">文件</th>
-                          <th className="w-[12%] px-4 py-3">状态</th>
-                          <th className="w-[13%] px-4 py-3">范围</th>
-                          <th className="w-[14%] px-4 py-3">上传者</th>
-                          <th className="w-[15%] px-4 py-3">创建时间</th>
-                          <th className="w-[12%] px-4 py-3 text-right">操作</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-line">
-                        {visibleDocuments.map((doc) => (
-                          <tr key={doc.id} className="align-top hover:bg-white/5">
-                            <td className="px-4 py-4">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="rounded bg-rose-400/10 px-1.5 py-0.5 text-[10px] font-semibold text-rose-300">PDF</span>
-                                  <span className="truncate font-medium" title={doc.source_filename || "无源 PDF"}>
-                                    {doc.source_filename || "历史记录无源 PDF"}
-                                  </span>
-                                  <span className="shrink-0 text-xs text-neutral-500">{formatBytes(doc.source_size_bytes)}</span>
-                                </div>
-                                <div className="mt-2 flex items-center gap-2 text-neutral-400">
-                                  <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400">MD</span>
-                                  <span className="truncate" title={doc.filename}>{doc.filename}</span>
-                                  <span className="shrink-0 text-xs text-neutral-500">{formatBytes(doc.markdown_size_bytes)}</span>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-4">
-                              <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${documentStatus[doc.status].className}`}>
-                                {documentStatus[doc.status].label}
-                              </span>
-                              <div className="mt-2 text-xs text-neutral-500">{doc.chunk_count} 个分块</div>
-                              {doc.status === "pending" && doc.review_reason && (
-                                <div className="mt-2 text-xs leading-5 text-amber-300" title={doc.review_reason}>
-                                  {doc.review_reason}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-4 py-4 text-neutral-400">{libraryLabels[doc.visibility]}</td>
-                            <td className="truncate px-4 py-4 text-neutral-400" title={doc.uploader_username || "未知"}>
-                              {doc.uploader_username || "未知"}
-                            </td>
-                            <td className="px-4 py-4 text-xs leading-5 text-neutral-400">{formatDate(doc.created_at)}</td>
-                            <td className="px-4 py-4">
-                              <div className="flex flex-col items-end gap-2">
-                                {doc.status === "pending" && userRole === "admin" && (
-                                  <button
-                                    className="text-xs font-medium text-emerald-300 hover:text-emerald-900"
-                                    onClick={() => void approveDocument(doc)}
-                                  >
-                                    审核通过
-                                  </button>
-                                )}
-                                <button
-                                  className="text-xs font-medium text-neutral-300 hover:text-foreground disabled:cursor-not-allowed disabled:text-neutral-600"
-                                  disabled={!doc.has_pdf}
-                                  onClick={() => void downloadDocument(doc, "pdf")}
-                                >
-                                  下载 PDF
-                                </button>
-                                <button className="text-xs font-medium text-neutral-300 hover:text-foreground" onClick={() => void downloadDocument(doc, "md")}>
-                                  下载 MD
-                                </button>
-                                {doc.can_delete && (
-                                  <button
-                                    className="text-xs font-medium text-rose-300 hover:text-rose-200 disabled:opacity-50"
-                                    disabled={deletingDocument === doc.id}
-                                    onClick={() => void deleteDocument(doc)}
-                                  >
-                                    {deletingDocument === doc.id ? "删除中" : "删除"}
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="space-y-3 md:hidden">
-                    {visibleDocuments.map((doc) => (
-                      <article key={doc.id} className="rounded-xl border border-line bg-surface p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate font-medium">{doc.source_filename || doc.filename}</div>
-                            <div className="mt-1 truncate text-xs text-neutral-400">{doc.filename}</div>
-                          </div>
-                          <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${documentStatus[doc.status].className}`}>
-                            {documentStatus[doc.status].label}
-                          </span>
+                <div className="overflow-hidden rounded-xl border border-line bg-surface divide-y divide-line">
+                  {visibleDocuments.map(doc => (
+                    <article key={doc.id} className="px-4 py-3 transition hover:bg-white/[0.02]" onKeyDown={event => {
+                      if (event.key === "Escape" && expandedDocument === doc.id) {
+                        setExpandedDocument(null);
+                        event.currentTarget.querySelector<HTMLButtonElement>('[data-document-more]')?.focus();
+                      }
+                    }}>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="whitespace-normal font-medium leading-6 [overflow-wrap:anywhere]">{paperTitle(doc)}</h3>
+                          <p className="mt-1 text-xs leading-5 text-neutral-400">
+                            {[doc.publication_year, doc.publication_venue].filter(Boolean).join(" · ") || "暂无分类信息"}
+                          </p>
+                          {doc.status !== "ready" && (
+                            <div className="mt-3 text-xs leading-5">
+                              <span className={`inline-flex rounded-full px-2 py-1 ${documentStatus[doc.status].className}`}>{documentStatus[doc.status].label}</span>
+                              {doc.review_reason && <p className="mt-1 text-neutral-400">{doc.review_reason}</p>}
+                            </div>
+                          )}
                         </div>
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-neutral-400">
-                          <span>{libraryLabels[doc.visibility]}</span>
-                          <span>{doc.chunk_count} 个分块</span>
-                          <span>{doc.uploader_username || "未知上传者"}</span>
-                          <span>{formatDate(doc.created_at)}</span>
-                        </div>
-                        {doc.status === "pending" && doc.review_reason && (
-                          <div className="mt-3 text-xs leading-5 text-amber-300">{doc.review_reason}</div>
-                        )}
-                        <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-3">
+                        <div className="flex shrink-0 flex-wrap items-center gap-1 text-xs">
                           {doc.status === "pending" && userRole === "admin" && (
-                            <button className="rounded-md border border-emerald-400/20 px-2.5 py-1.5 text-xs text-emerald-300" onClick={() => void approveDocument(doc)}>审核通过</button>
+                            <button className="rounded-md border border-emerald-400/20 px-3 py-2 text-emerald-300" onClick={() => void approveDocument(doc)}>审核通过</button>
                           )}
-                          <button className="rounded-md border border-line px-2.5 py-1.5 text-xs disabled:text-neutral-600" disabled={!doc.has_pdf} onClick={() => void downloadDocument(doc, "pdf")}>下载 PDF</button>
-                          <button className="rounded-md border border-line px-2.5 py-1.5 text-xs" onClick={() => void downloadDocument(doc, "md")}>下载 MD</button>
-                          {doc.can_delete && (
-                            <button className="rounded-md border border-rose-400/20 px-2.5 py-1.5 text-xs text-rose-300 disabled:opacity-50" disabled={deletingDocument === doc.id} onClick={() => void deleteDocument(doc)}>
-                              {deletingDocument === doc.id ? "删除中" : "删除"}
-                            </button>
-                          )}
+                          {doc.has_pdf && <button className="rounded-md border border-line px-3 py-2 text-neutral-300 transition hover:bg-white/5 hover:text-foreground" onClick={() => void downloadDocument(doc, "pdf")}>下载 PDF</button>}
+                          <button className="rounded-md px-2 py-2 text-neutral-400 transition hover:bg-white/5 hover:text-foreground" onClick={() => void downloadDocument(doc, "md")}>下载 MD</button>
+                          <button type="button" data-document-more aria-expanded={expandedDocument === doc.id} aria-controls={`document-info-${doc.id}`} onClick={() => setExpandedDocument(expandedDocument === doc.id ? null : doc.id)} className="rounded-md px-2 py-2 text-neutral-500 transition hover:bg-white/5 hover:text-foreground">
+                            更多 <span aria-hidden="true">{expandedDocument === doc.id ? "⌃" : "⌄"}</span>
+                          </button>
                         </div>
-                      </article>
-                    ))}
-                  </div>
-                </>
+                      </div>
+                      <div id={`document-info-${doc.id}`} hidden={expandedDocument !== doc.id} className="mt-3 rounded-lg border border-line bg-white/[0.02] p-4">
+                          <dl className="grid gap-x-8 gap-y-2 text-xs leading-5 text-neutral-400 sm:grid-cols-2 [overflow-wrap:anywhere]">
+                            <div><dt className="inline text-neutral-500">上传者：</dt><dd className="inline">{doc.uploader_username || "未知"}</dd></div>
+                            <div><dt className="inline text-neutral-500">创建时间：</dt><dd className="inline">{formatDate(doc.created_at)}</dd></div>
+                            <div><dt className="inline text-neutral-500">所属文档库：</dt><dd className="inline">{libraryLabels[doc.visibility]}</dd></div>
+                            <div><dt className="inline text-neutral-500">文件大小：</dt><dd className="inline">{doc.has_pdf ? `PDF ${formatBytes(doc.source_size_bytes)} · ` : ""}MD {formatBytes(doc.markdown_size_bytes)}</dd></div>
+                          </dl>
+                          {!doc.has_pdf && <p className="mt-2 text-xs text-neutral-500">此记录未保留源 PDF，可下载 MD。</p>}
+                          <div className="mt-3 border-t border-line pt-2">
+                            <PaperClassificationEditor document={doc} token={token} onSaved={fetchDocuments} />
+                          </div>
+                          {doc.can_delete && <div className="mt-3 border-t border-line pt-3">
+                            <button className="rounded px-2 py-1 text-xs text-rose-300 hover:bg-rose-400/10 disabled:opacity-50" disabled={deletingDocument === doc.id} onClick={() => void deleteDocument(doc)}>{deletingDocument === doc.id ? "删除中" : "删除文档"}</button>
+                          </div>}
+                      </div>
+                    </article>
+                  ))}
+                </div>
               )}
             </section>
           )}

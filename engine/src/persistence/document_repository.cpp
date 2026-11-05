@@ -15,7 +15,7 @@ std::vector<DocumentSummary> DocumentRepository::list_visible_documents(int tena
         "SELECT d.id, d.tenant_id, d.filename, d.chunk_count, d.visibility, d.status, "
         "d.uploaded_by, COALESCE(u.username,''), COALESCE(d.source_filename,''), "
         "COALESCE(d.source_size_bytes,0), OCTET_LENGTH(d.content), d.created_at, d.updated_at, "
-        "COALESCE(d.review_reason,'') "
+        "COALESCE(d.review_reason,''), COALESCE(d.source_storage_name,'') "
         "FROM documents d LEFT JOIN users u ON u.id=d.uploaded_by "
         "WHERE d.status<>'deleted' AND (d.tenant_id="
         + std::to_string(tenant_id)
@@ -39,6 +39,7 @@ std::vector<DocumentSummary> DocumentRepository::list_visible_documents(int tena
             doc.created_at = row[11] ? row[11] : "";
             doc.updated_at = row[12] ? row[12] : "";
             doc.review_reason = row[13] ? row[13] : "";
+            doc.source_storage_name = row[14] ? row[14] : "";
             documents.push_back(doc);
             row = mysql_fetch_row(res);
         }
