@@ -250,7 +250,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: node --experimental-transform-types --test tests/session-title.spec.ts tests/sse.spec.ts tests/library-access.spec.ts tests/paper-upload-naming.spec.ts
+      - run: node --experimental-transform-types --test tests/session-title.spec.ts tests/sse.spec.ts tests/library-access.spec.ts tests/paper-upload-naming.spec.ts tests/paper-filenames.spec.ts tests/paper-library.spec.ts tests/paper-metadata.spec.ts
       - run: node --experimental-transform-types --test tests/markdown.spec.ts tests/document-download.spec.ts
       - run: node --test tests/auth-client.test.mjs
       - run: npm run build
