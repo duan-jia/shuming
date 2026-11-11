@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
         const auto body = nlohmann::json::parse(req.body);
         if (!agent_workers.submit([&, body, sse, user] {
             AgentOptions limits;
-            limits.max_turns = body.value("max_turns", 6);
+            limits.max_turns = body.value("max_turns", 0);
             limits.max_total_tokens = body.value("max_total_tokens", limits.max_total_tokens);
             limits.timeout_seconds = body.value("timeout_seconds", 5);
             limits.max_output_tokens = body.value("max_output_tokens", limits.max_output_tokens);

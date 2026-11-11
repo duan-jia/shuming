@@ -128,7 +128,7 @@ int main(int argc, char* argv[]) {
     McpService mcp(tools, require_auth, *ctx.rate_limiter, mcp_options);
     AgentOptions agent_options;
     agent_options.enabled = config.get_bool("agent.enabled", true);
-    agent_options.max_turns = config.get_int("agent.max_turns", 6);
+    agent_options.max_turns = config.get_int("agent.max_turns", 0);
     agent_options.max_output_tokens = config.get_int("agent.max_output_tokens", 0);
     agent_options.max_total_tokens = config.get_int("agent.max_total_tokens", 0);
     agent_options.timeout_seconds = config.get_int("agent.timeout_seconds", 90);

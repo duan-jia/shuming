@@ -56,7 +56,7 @@ class Model(BaseHTTPRequestHandler):
             elif prompt == 'truncated-stream':
                 delta({'content': 'partial'})
                 return
-            elif prompt.startswith('long-context ') or prompt in ('direct', 'slow-model', 'disconnect', 'missing-usage', 'partial-timeout', 'resume', 'length-answer') or (tools and prompt != 'loop' and (prompt not in ('both', 'search-fetch') or len(tools) >= 2)):
+            elif prompt.startswith('long-context ') or prompt in ('direct', 'slow-model', 'disconnect', 'missing-usage', 'partial-timeout', 'resume', 'length-answer') or (tools and prompt != 'loop' and (prompt != 'seven-tools' or len(tools) >= 7) and (prompt not in ('both', 'search-fetch') or len(tools) >= 2)):
                 if tools:
                     assistant = next(item for item in reversed(body['messages']) if item['role'] == 'assistant')
                     assert assistant['reasoning_content'] == 'fixture reasoning'
@@ -138,6 +138,15 @@ class AgentTest(native.NativeMcpTest):
         events = self.stream('search-fetch')
         self.assertEqual(events[-1]['type'], 'done')
         self.assertEqual([e['name'] for e in events if e['type'] == 'tool_start'], ['search_knowledge', 'fetch_knowledge'])
+
+    def test_unlimited_turns_complete_beyond_previous_default(self):
+        for limits in ({}, {'max_turns': 0}):
+            events = self.stream('seven-tools', **limits)
+            self.assertEqual(events[-1]['type'], 'done', events)
+            self.assertEqual([e['turn'] for e in events if e['type'] == 'agent_turn'], list(range(1, 9)))
+            self.assertEqual(len([e for e in events if e['type'] == 'tool_end']), 7)
+        events = self.stream('loop', max_turns=0, timeout_seconds=1)
+        self.assertEqual(events[-1]['stop_reason'], 'timeout', events)
 
     def test_agent_text_only_model_rejects_image_fetch(self):
         events = self.stream('fetch-pages', image_inputs=False)

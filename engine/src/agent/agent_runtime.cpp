@@ -52,7 +52,7 @@ AgentRuntime::AgentRuntime(IInferenceEngine& model, ToolService& tools, RateLimi
       allow_knowledge_(allow_knowledge), allow_web_(allow_web), on_event_(std::move(on_event)),
       remaining_quota_(std::move(remaining_quota)) {
     if (options.max_output_tokens < 0 || options.max_output_tokens > 65536
-        || options.max_turns < 1 || options.max_total_tokens < 0 || options.timeout_seconds < 1
+        || options.max_turns < 0 || options.max_total_tokens < 0 || options.timeout_seconds < 1
         || options.max_tool_calls_per_turn < 1 || options.max_tool_result_bytes < 1024) {
         throw std::invalid_argument("Invalid agent limits");
     }
@@ -99,7 +99,8 @@ void AgentRuntime::stream_complete(const std::string& prompt, const InferParams&
         params.tools.push_back({{"type", "function"}, {"function", {{"name", name}, {"description", tool["description"]}, {"parameters", schema}}}});
     }
     if (!model_.supports_tools()) stop("unsupported", "Selected model does not support agent tools");
-    for (int turn = 0; total.error.empty() && turn < options_.max_turns; ++turn) {
+    for (long long turn = 0; total.error.empty()
+            && (options_.max_turns == 0 || turn < options_.max_turns); ++turn) {
         if (check_stop()) break;
         const long long used = static_cast<long long>(total.prompt_tokens) + total.completion_tokens;
         const long long budget_remaining = options_.max_total_tokens > 0
@@ -178,7 +179,9 @@ void AgentRuntime::stream_complete(const std::string& prompt, const InferParams&
         if (result.tool_calls.size() > static_cast<size_t>(options_.max_tool_calls_per_turn)) {
             stop("tool_limit", "Too many tool calls in one model turn"); break;
         }
-        if (turn + 1 >= options_.max_turns) { stop("turn_limit", "Agent turn limit reached"); break; }
+        if (options_.max_turns > 0 && turn + 1 >= options_.max_turns) {
+            stop("turn_limit", "Agent turn limit reached"); break;
+        }
         Json calls = Json::array();
         std::set<std::string> ids;
         for (const auto& call : result.tool_calls) {

@@ -86,7 +86,7 @@
   },
   "agent": {
     "enabled": true,
-    "max_turns": 6,
+    "max_turns": 0,
     "max_total_tokens": 0,
     "timeout_seconds": 300,
     "max_tool_calls_per_turn": 4,
