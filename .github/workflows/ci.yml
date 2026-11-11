@@ -61,7 +61,8 @@ jobs:
         run: |
           # Keep downloads off the Azure archive endpoint that was slow in CI.
           # Edit only this ephemeral runner; preserve suites, components and keys.
-          for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+          # Newer runner images also select mirrors through this mirror+file list.
+          for source in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
             [ -f "$source" ] || continue
             sudo sed -i -E 's#https?://azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$source"
           done
@@ -202,8 +203,13 @@ jobs:
       - name: Ensure PDF test tools
         run: |
           if ! command -v pdfinfo || ! command -v pdftotext; then
-            sudo apt-get -o Acquire::Retries=3 update
-            sudo apt-get -o Acquire::Retries=3 install --yes --no-install-recommends poppler-utils
+            for source in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+              [ -f "$source" ] || continue
+              sudo sed -i -E 's#https?://azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$source"
+            done
+            apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+            sudo apt-get "${apt_options[@]}" update
+            sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends poppler-utils
           fi
       - name: Verify public repository safety policy
         run: node --test tests/public_repository_policy.test.mjs tests/image_artifact_privacy.test.mjs
