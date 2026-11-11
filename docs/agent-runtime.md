@@ -45,7 +45,7 @@ POST /api/chat/stream
 {
   "agent": {
     "enabled": true,
-    "max_turns": 6,
+    "max_turns": 0,
     "max_output_tokens": 0,
     "max_total_tokens": 0,
     "timeout_seconds": 90,
@@ -60,7 +60,8 @@ POST /api/chat/stream
   本地模型仍使用原有的默认生成上限。
 - 普通文本因长度截断时，保留回答并返回 done/truncated=true，前端提示继续追问；
   不执行被截断的工具调用。只有 reasoning、没有可见回答的截断返回 output_limit。
-- 轮数包括最终回答的模型调用。到最后一轮仍要求工具时，停止并返回 turn_limit，
+- max_turns 默认为 0，不限制模型调用轮数；负值无效。正值开启轮数限制，
+  轮数包括最终回答的模型调用。到最后一轮仍要求工具时，停止并返回 turn_limit，
   不再执行无机会读取结果的工具调用。
 - max_total_tokens 默认为 0，不限制单次问答累计 token；正值可启用预算，
   累计每一轮的 prompt 和 completion。每轮前仍检查剩余用户额度，
@@ -97,7 +98,11 @@ POST /api/chat/stream
 stop_reason 包括 cancelled、timeout、token_limit、turn_limit、tool_limit、output_limit、model_error。
 连接异常结束不会作为成功回答；模型流格式错误或缺少结束信号会返回错误。
 
-前端显示工具状态和“停止生成”。停止按钮中止前端读取，并显式发送：
+前端实时显示模型轮次、每次工具调用的进行中/完成/失败状态，以及模型返回的思考内容。
+生成时自动展开思考和工具流程，结束后可以折叠；没有 reasoning 输出时不生成思考文本。
+流程保留在当前页面的消息中，重新加载历史只显示已持久化的思考和回答。
+界面示例见 [Agent 流程截图](screenshots/agent-progress-desktop.png)，使用模拟会话和工具事件生成。
+“停止生成”按钮中止前端读取，并显式发送：
 
 ```http
 POST /api/chat/cancel

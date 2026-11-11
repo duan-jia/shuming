@@ -8,7 +8,7 @@ namespace fastllm {
 
 struct AgentOptions {
     bool enabled = true;
-    int max_turns = 6;
+    int max_turns = 0; // Zero disables the model-turn limit.
     int max_output_tokens = 0; // Zero leaves the provider output limit unspecified.
     int max_total_tokens = 0; // Zero disables the per-request cumulative token budget.
     int timeout_seconds = 90;

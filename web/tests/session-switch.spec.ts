@@ -172,7 +172,19 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     await click('会话A');
     await send('问题A');
     await wait(`!!window.mock.streams.A`);
-    await evaluate(`window.mock.emit('A',{type:'reasoning',content:'先检索实验室资料，再对比研究结论。'});window.mock.emit('A',{type:'answer',content:'回答A第一段'})`);
+    await evaluate(`window.mock.emit('A',{type:'agent_turn',turn:1});window.mock.emit('A',{type:'reasoning',content:'先检索实验室资料，再对比研究结论。'})`);
+    await wait(`document.querySelector('.reasoning-panel[open]')?.innerText.includes('先检索实验室资料')`);
+    await evaluate(`window.mock.emit('A',{type:'tool_start',name:'search_knowledge',tool_call_id:'search-1'})`);
+    await wait(`document.querySelector('.generation-status')?.innerText.includes('正在知识库检索')`);
+    assert.equal(await evaluate(`document.querySelector('.agent-progress li').innerText.includes('进行中')`), true);
+    // Providers may reuse a tool-call ID in a later model turn.
+    await evaluate(`window.mock.emit('A',{type:'tool_end',name:'search_knowledge',tool_call_id:'search-1',is_error:false});window.mock.emit('A',{type:'agent_turn',turn:2});window.mock.emit('A',{type:'tool_start',name:'fetch_knowledge',tool_call_id:'search-1'});window.mock.emit('A',{type:'tool_end',name:'fetch_knowledge',tool_call_id:'search-1',is_error:true})`);
+    await wait(`document.querySelector('.agent-progress li[data-status="failed"]')!==null`);
+    assert.equal(await evaluate(`document.querySelectorAll('.agent-progress li').length`), 2);
+    assert.equal(await evaluate(`document.querySelector('.agent-progress li').innerText.includes('已完成')`), true);
+    const progressShot = await command('Page.captureScreenshot', { format: 'png' });
+    await writeFile('/tmp/shuming-agent-progress.png', Buffer.from(progressShot.data as string, 'base64'));
+    await evaluate(`window.mock.emit('A',{type:'answer',content:'回答A第一段'})`);
     await wait(`document.body.innerText.includes('回答A第一段')`);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.prose')).fontSize`), '20px');
     assert.ok(await evaluate<number>(`document.querySelector('main').getBoundingClientRect().width`) > 896);
@@ -222,6 +234,8 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     })()`);
     await wait(`(document.querySelector('.composer-send').textContent==='发送')`);
     assert.equal(await evaluate(`document.querySelector('article.assistant .prose').textContent.endsWith('流'.repeat(200)+'尾部完成')`), true);
+    assert.equal(await evaluate(`document.querySelectorAll('.agent-progress li').length`), 2);
+    assert.equal(await evaluate(`document.querySelector('.agent-progress').open`), false);
     assert.ok(await evaluate<number>('window.streamMutations') < 80, 'Streaming should batch DOM updates');
     await evaluate('window.streamObserver.disconnect()');
     // A second question after a multi-screen answer must only scroll the chat pane.
@@ -320,6 +334,8 @@ test('background replies and session navigation stay isolated', { timeout: 90000
     await wait(`(document.querySelector('.composer-send').textContent==='停止生成')`);
     await evaluate(`document.querySelector('.account-settings').open = true`);
     await click('退出登录');
+    await wait(`document.querySelector('input[type="password"]')!==null`);
+    await evaluate(`(() => { const input = document.querySelector('input[autocomplete="username"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'test'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     await evaluate(`(() => { const input = document.querySelector('input[type="password"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'test-password'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     await click('登录');
     await wait(`document.body.innerText.includes('会话A')`);

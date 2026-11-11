@@ -14,6 +14,7 @@ import { SourceFiles } from "../components/source-files";
 import { downloadDocumentFile, normalizeSourceFiles, type SourceFile } from "../lib/source-files";
 import { type PaperClassification } from "../lib/paper-library";
 import { PaperClassificationEditor } from "../components/paper-classification";
+import { AgentProgress, toolLabel, type ToolProgress } from "../components/agent-progress";
 
 interface Message {
   id: string;
@@ -23,6 +24,8 @@ interface Message {
   isReasoning?: boolean;
   reasoning?: string;
   toolStatus?: string;
+  agentTurn?: number;
+  tools?: ToolProgress[];
   notice?: string;
   sourceFiles?: SourceFile[];
   attachments?: SourceFile[];
@@ -725,21 +728,31 @@ export default function Home() {
                 : message
             )
           );
-        } else if (parsed.type === "tool_start" || parsed.type === "tool_end") {
-          const toolNames: Record<string, string> = {
-            search_knowledge: "知识库检索",
-            fetch_knowledge: "读取论文",
-            search_web: "网页搜索",
-            fetch_web: "读取网页",
-          };
-          const name = toolNames[parsed.name] || "工具调用";
+        } else if (parsed.type === "agent_turn") {
           setMessages((prev) => prev.map((message) => message.id === msgId
-            ? { ...message, isReasoning: false, toolStatus: parsed.type === "tool_start" ? `正在${name}…` : parsed.is_error ? `${name}未完成，正在继续处理…` : `${name}完成，正在整理…` }
+            ? { ...message, agentTurn: parsed.turn, isReasoning: false, toolStatus: `第 ${parsed.turn} 轮 · 正在分析…` }
             : message));
+        } else if (parsed.type === "tool_start" || parsed.type === "tool_end") {
+          const name = toolLabel(parsed.name);
+          setMessages((prev) => prev.map((message) => {
+            if (message.id !== msgId) return message;
+            const tools = [...(message.tools || [])];
+            const turn = message.agentTurn || 1;
+            const index = tools.findIndex(tool => tool.id === parsed.tool_call_id && tool.turn === turn);
+            const tool: ToolProgress = {
+              id: parsed.tool_call_id,
+              name: parsed.name,
+              turn,
+              status: parsed.type === "tool_start" ? "running" : parsed.is_error ? "failed" : "completed",
+            };
+            if (index < 0) tools.push(tool);
+            else tools[index] = { ...tools[index], status: tool.status };
+            return { ...message, tools, isReasoning: false, toolStatus: parsed.type === "tool_start" ? `正在${name}…` : parsed.is_error ? `${name}未完成，正在继续处理…` : `${name}完成，正在整理…` };
+          }));
         } else if (parsed.type === "reasoning") {
           setMessages((prev) =>
             prev.map((message) =>
-              message.id === msgId ? { ...message, isReasoning: true, reasoning: (message.reasoning || "") + (parsed.content || "") } : message
+              message.id === msgId ? { ...message, isReasoning: true, toolStatus: undefined, reasoning: (message.reasoning || "") + (parsed.content || "") } : message
             )
           );
         } else if (parsed.type === "done") {
@@ -987,10 +1000,11 @@ export default function Home() {
                 <article key={msg.id} className={`message-row ${msg.role}`} aria-label={msg.role === "user" ? "你的问题" : "EMOS Chatbot 的回答"}>
                   <div className="message-body" aria-busy={msg.isStreaming}>
                     {msg.role === "assistant" ? <>
-                      {msg.reasoning && <details className="reasoning-panel"><summary>{msg.isReasoning ? "正在思考…" : "思考过程"}</summary><div>{msg.reasoning}</div></details>}
+                      {msg.reasoning && <details className="reasoning-panel" open={msg.isStreaming}><summary>{msg.isReasoning ? "正在思考…" : "思考过程"}</summary><div>{msg.reasoning}</div></details>}
+                      <AgentProgress turn={msg.agentTurn || 0} tools={msg.tools || []} streaming={msg.isStreaming} />
                       <MarkdownContent content={msg.content} />
                       {!msg.isStreaming && <SourceFiles files={msg.sourceFiles || []} token={token} />}
-                      {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" aria-hidden="true" /><span className="sr-only">{msg.toolStatus || (msg.isReasoning ? "正在思考" : "正在生成回答")}</span></div>}
+                      {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" aria-hidden="true" /><span>{msg.toolStatus || (msg.isReasoning ? "正在思考…" : "正在生成回答…")}</span></div>}
                       {msg.notice && <p role="status" className="message-notice">{msg.notice}</p>}
                     </> : <><p className="user-content">{msg.content}</p>
                       {!!msg.attachments?.length && <SourceFiles files={msg.attachments} token={token} label="附件" />}</>}
