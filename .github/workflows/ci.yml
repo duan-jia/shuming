@@ -59,12 +59,12 @@ jobs:
       - name: Install native dependencies
         shell: bash
         run: |
-          # Keep downloads off the Azure archive endpoint that was slow in CI.
+          # Use an Ubuntu mirror when the runner cannot resolve Canonical archive hosts.
           # Edit only this ephemeral runner; preserve suites, components and keys.
           # Newer runner images also select mirrors through this mirror+file list.
           for source in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
             [ -f "$source" ] || continue
-            sudo sed -i -E 's#https?://azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$source"
+            sudo sed -i -E 's#https?://((azure\.)?archive|security)\.ubuntu\.com/ubuntu#https://mirrors.mit.edu/ubuntu#g' "$source"
           done
           apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
@@ -205,7 +205,7 @@ jobs:
           if ! command -v pdfinfo || ! command -v pdftotext; then
             for source in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
               [ -f "$source" ] || continue
-              sudo sed -i -E 's#https?://azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$source"
+              sudo sed -i -E 's#https?://((azure\.)?archive|security)\.ubuntu\.com/ubuntu#https://mirrors.mit.edu/ubuntu#g' "$source"
             done
             apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
             sudo apt-get "${apt_options[@]}" update
