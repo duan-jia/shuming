@@ -132,6 +132,32 @@ nlohmann::json AgentRepository::requests(const std::string& session, int tenant,
     return result;
 }
 
+nlohmann::json AgentRepository::displays(const std::string& session, int tenant, int user) {
+    auto conn = mysql_.acquire();
+    MysqlGuard guard(mysql_, conn);
+    if (!conn) throw std::runtime_error("Conversation journal unavailable");
+    auto* res = conn->query("SELECT e.request_id,e.payload FROM agent_events e "
+        "JOIN agent_requests r ON r.request_id=e.request_id JOIN sessions s ON s.id=r.session_id "
+        "WHERE s.id=" + quote(conn->raw(), session)
+        + " AND s.tenant_id=" + std::to_string(tenant) + " AND s.user_id=" + std::to_string(user)
+        + " AND r.request_id IN (SELECT request_id FROM (SELECT request_id FROM messages WHERE session_id="
+        + quote(conn->raw(), session) + " AND role='assistant' ORDER BY id DESC LIMIT 200) recent)"
+        + " AND e.event_type='tool_end' AND JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.name'))='display_html' ORDER BY e.id");
+    if (!res) throw std::runtime_error("Cannot load HTML displays");
+    auto result = nlohmann::json::object();
+    try {
+        while (auto row = mysql_fetch_row(res)) {
+            const auto payload = nlohmann::json::parse(row[1]);
+            if (payload.value("is_error", true)) continue;
+            auto& blocks = result[row[0]];
+            if (blocks.is_null()) blocks = nlohmann::json::array();
+            if (blocks.size() < 4) blocks.push_back(payload.at("raw_result"));
+        }
+    } catch (...) { mysql_free_result(res); throw; }
+    mysql_free_result(res);
+    return result;
+}
+
 nlohmann::json AgentRepository::trace(const std::string& session, const std::string& request, int tenant, int user) {
     auto conn = mysql_.acquire();
     MysqlGuard guard(mysql_, conn);

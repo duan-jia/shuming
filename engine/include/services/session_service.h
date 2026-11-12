@@ -32,7 +32,8 @@ private:
     static std::string generate_uuid();
     static nlohmann::json session_to_json(const SessionSummary& session);
     static nlohmann::json message_to_json(const MessageSummary& message);
-    static nlohmann::json messages_to_json(const std::vector<MessageSummary>& messages);
+    nlohmann::json messages_to_json(const std::vector<MessageSummary>& messages,
+        const std::string& session, const UserInfo& user);
 };
 
 }

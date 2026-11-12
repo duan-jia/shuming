@@ -21,6 +21,7 @@ struct MessageSummary {
     std::string content;
     std::string reasoning;
     std::string source_files = "[]";
+    std::string request_id;
     int tokens_in = 0;
     int tokens_out = 0;
     std::string created_at;

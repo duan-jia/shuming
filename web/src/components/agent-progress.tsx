@@ -7,6 +7,7 @@ export interface ToolProgress {
 
 export function toolLabel(name: string) {
   const labels: Record<string, string> = {
+    display_html: "展示富内容",
     search_knowledge: "知识库检索",
     fetch_knowledge: "读取论文",
     search_web: "网页搜索",
