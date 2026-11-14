@@ -1,6 +1,7 @@
 // Run against `npm run dev` or `npm start` with Node >=22.18 and Chromium:
 // node --experimental-strip-types --test tests/html-display.spec.ts
 // TEST_URL and CHROMIUM_PATH optionally override the defaults. No backend needed.
+// CJK_FONT_FAMILY optionally asserts the actual platform font for the Chinese heading.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -37,10 +38,24 @@ test('HTML display streams, replays and isolates hostile content', { timeout: 90
     const pending = new Map<number, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }>();
     const errors: string[] = [];
     const responses: string[] = [];
+    const iframeSessions = new Map<string,string>();
     let cspBlocked = 0;
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data));
+      if (message.method === 'Target.attachedToTarget') {
+        const session = message.params.sessionId as string;
+        if (message.params.targetInfo.type === 'iframe') iframeSessions.set(message.params.targetInfo.targetId, session);
+        // Capture resource/CSP events from OOPIFs before their document runs.
+        void command('Network.enable', {}, session)
+          .then(() => command('Log.enable', {}, session))
+          .then(() => command('Runtime.enable', {}, session))
+          .then(() => command('Runtime.runIfWaitingForDebugger', {}, session))
+          .catch(error => errors.push(String(error)));
+      }
       if (message.method === 'Network.loadingFailed' && message.params.blockedReason === 'csp') ++cspBlocked;
+      if (message.method === 'Log.entryAdded' &&
+          /display-test\.invalid\/css/.test(message.params.entry.text) &&
+          /content security policy/i.test(message.params.entry.text)) ++cspBlocked;
       if (message.method === 'Network.responseReceived') responses.push(message.params.response.url);
       if (message.method === 'Runtime.exceptionThrown') errors.push(JSON.stringify(message.params));
       const request = pending.get(message.id);
@@ -50,11 +65,11 @@ test('HTML display streams, replays and isolates hostile content', { timeout: 90
         else request.resolve(message.result);
       }
     });
-    const command = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const command = (method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<Record<string, unknown>> => {
       const id = ++sequence;
       return new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });
-        socket!.send(JSON.stringify({ id, method, params }));
+        socket!.send(JSON.stringify({ id, method, params, ...(sessionId ? {sessionId} : {}) }));
       });
     };
     const evaluate = async <T,>(expression: string): Promise<T> => {
@@ -83,7 +98,11 @@ test('HTML display streams, replays and isolates hostile content', { timeout: 90
     };
     await command('Page.enable');
     await command('Network.enable');
+    await command('Log.enable');
     await command('Runtime.enable');
+    await command('DOM.enable');
+    await command('CSS.enable');
+    await command('Target.setAutoAttach', {autoAttach:true,waitForDebuggerOnStart:true,flatten:true});
     await command('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     await command('Page.addScriptToEvaluateOnNewDocument', { source: `
       (() => {
@@ -157,14 +176,54 @@ test('HTML display streams, replays and isolates hostile content', { timeout: 90
     await evaluate(`window.mock.saved=[{id:20,role:'assistant',content:'历史回答',displays:[${JSON.stringify(block)}]}]`);
     await click('会话B');
     await wait("document.body.innerText.includes('历史回答')&&!!document.querySelector('.html-display iframe')");
-    const tree = await command('Page.getFrameTree');
-    const child = (tree.frameTree as {childFrames: {frame: {id:string}}[]}).childFrames[0].frame.id;
-    const world = await command('Page.createIsolatedWorld',{frameId:child,worldName:'display-inspection'});
-    const inside = await command('Runtime.evaluate', {contextId:world.executionContextId,
+    // Sandboxed srcdoc may be an out-of-process iframe in Chromium. Inspect
+    // it through its own CDP session without weakening browser isolation.
+    let child: string | undefined;
+    let iframeSession: string | undefined;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const tree = await command('Page.getFrameTree');
+      child = (tree.frameTree as {childFrames?: {frame: {id:string}}[]}).childFrames?.[0]?.frame.id;
+      if (child) break;
+      const targets = await command('Target.getTargets');
+      const iframe = (targets.targetInfos as {type:string;targetId:string}[]).find(target => target.type === 'iframe');
+      if (iframe) {
+        iframeSession = iframeSessions.get(iframe.targetId);
+        if (!iframeSession) {
+          const attached = await command('Target.attachToTarget', {targetId:iframe.targetId,flatten:true});
+          iframeSession = attached.sessionId as string;
+        }
+        await command('Page.enable', {}, iframeSession);
+        await command('Runtime.enable', {}, iframeSession);
+        await command('DOM.enable', {}, iframeSession);
+        await command('CSS.enable', {}, iframeSession);
+        const iframeTree = await command('Page.getFrameTree', {}, iframeSession);
+        child = (iframeTree.frameTree as {frame:{id:string}}).frame.id;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.ok(child, 'Replay iframe child document attached');
+    const frameCommand = (method:string, params:Record<string,unknown> = {}) => command(method, params, iframeSession);
+    const world = await frameCommand('Page.createIsolatedWorld',{frameId:child,worldName:'display-inspection'});
+    const inside = await frameCommand('Runtime.evaluate', {contextId:world.executionContextId,
       expression:"({text:document.body.innerText, navigation:document.querySelectorAll('a,form,button,iframe,script,img').length})",returnByValue:true});
     const rendered = (inside.result as {value:{text:string,navigation:number}}).value;
-    assert.ok(rendered.text.includes('Throughput') && rendered.text.includes('42'));
+    assert.ok(rendered.text.includes('实验结果') && rendered.text.includes('Throughput') && rendered.text.includes('42'));
     assert.equal(rendered.navigation,0);
+    // Text presence alone does not detect missing CJK glyphs (tofu). Inspect
+    // Chromium's actual font usage inside the opaque-origin iframe via CDP.
+    const heading = await frameCommand('Runtime.evaluate', {contextId:world.executionContextId,
+      expression:"document.querySelector('h2')"});
+    await frameCommand('DOM.getDocument');
+    const node = await frameCommand('DOM.requestNode', {objectId:(heading.result as {objectId:string}).objectId});
+    const fonts = await frameCommand('CSS.getPlatformFontsForNode', {nodeId:node.nodeId});
+    const usedFonts = fonts.fonts as {familyName:string;glyphCount:number}[];
+    console.info('Iframe Chinese heading platform fonts:', JSON.stringify(usedFonts));
+    assert.ok(usedFonts.some(font => font.glyphCount > 0), 'Chinese heading uses a platform font');
+    if (process.env.CJK_FONT_FAMILY) {
+      assert.ok(usedFonts.some(font => font.familyName === process.env.CJK_FONT_FAMILY && font.glyphCount >= 4),
+        `Expected all four Chinese glyphs from ${process.env.CJK_FONT_FAMILY}`);
+    }
     // Hostile tags/attributes are removed; inline CSS is isolated and its network blocked.
     const evil = {...block,title:"安全边界测试",html:
       '<p style="background:url(https://display-test.invalid/css)">Visible safe text</p>' +

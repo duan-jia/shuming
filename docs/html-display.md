@@ -52,6 +52,10 @@ npm run build
 npm start
 # 另一个终端；Node >=22.18 + Chromium，不需要真实后端/凭证
 node --experimental-strip-types --test tests/html-display.spec.ts
+# 有本地 Noto CJK 字体的 Linux 测试环境，可额外断言框内中文实际使用的字体：
+CJK_FONT_FAMILY="Noto Sans CJK SC" node --experimental-strip-types --test tests/html-display.spec.ts
 ```
 
 浏览器测试使用真实聊天组件 + mock API/SSE，覆盖展示、历史回放、空内容降级、恶意标签/CSS 网络尝试、opaque-origin 隔离和 1280/768/390px 页面溢出。截图在 `.artifacts/html-display/`。这不等于真实模型、MySQL 和线上后端联调通过。
+
+测试会记录 iframe 中文标题实际使用的系统字体；设置 `CJK_FONT_FAMILY` 时，还会检查四个中文字形均由指定字体渲染。仅检查 DOM 中存在中文不能排除缺字方框，仍应查看截图。测试环境字体须完整且可被 fontconfig 识别；这不会放宽 iframe CSP 或加载外部字体，也不会给最终用户设备自动安装字体。
