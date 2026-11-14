@@ -16,7 +16,11 @@ import { type PaperClassification } from "../lib/paper-library";
 import { PaperClassificationEditor } from "../components/paper-classification";
 import { AgentProgress, toolLabel, type ToolProgress } from "../components/agent-progress";
 
+import { HtmlDisplayCard } from "../components/html-display";
+import { normalizeDisplays, type HtmlDisplay } from "../lib/html-display";
+
 interface Message {
+  displays?: HtmlDisplay[];
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -373,13 +377,15 @@ export default function Home() {
       const data = await res.json();
       if (data.messages && historyVersions.current.get(id) === version && !requests.current.has(id)) {
         const loaded: Message[] = data.messages.map(
-          (m: { id: number; role: string; content: string; reasoning?: string; source_files?: unknown; attachments?: unknown }) => ({
+          (m: { id: number; role: string; content: string; reasoning?: string; source_files?: unknown; attachments?: unknown; displays?: unknown; display_notice?: string }) => ({
             id: String(m.id),
             role: m.role as "user" | "assistant",
             content: m.content || "",
             sourceFiles: normalizeSourceFiles(m.source_files),
             attachments: normalizeSourceFiles(m.attachments),
             reasoning: m.reasoning || "",
+            displays: normalizeDisplays(m.displays),
+            notice: m.display_notice,
             isStreaming: false,
           })
         );
@@ -749,6 +755,11 @@ export default function Home() {
             else tools[index] = { ...tools[index], status: tool.status };
             return { ...message, tools, isReasoning: false, toolStatus: parsed.type === "tool_start" ? `正在${name}…` : parsed.is_error ? `${name}未完成，正在继续处理…` : `${name}完成，正在整理…` };
           }));
+        } else if (parsed.type === "html_display") {
+          const blocks = normalizeDisplays([parsed.display]);
+          setMessages(prev => prev.map(message => message.id === msgId
+            ? { ...message, displays: [...(message.displays || []), ...blocks].slice(0, 4),
+                notice: blocks.length ? message.notice : "富内容格式无效，请参考文字回答。" } : message));
         } else if (parsed.type === "reasoning") {
           setMessages((prev) =>
             prev.map((message) =>
@@ -1003,6 +1014,7 @@ export default function Home() {
                       {msg.reasoning && <details className="reasoning-panel" open={msg.isStreaming}><summary>{msg.isReasoning ? "正在思考…" : "思考过程"}</summary><div>{msg.reasoning}</div></details>}
                       <AgentProgress turn={msg.agentTurn || 0} tools={msg.tools || []} streaming={msg.isStreaming} />
                       <MarkdownContent content={msg.content} />
+                      {msg.displays?.map((block, index) => <HtmlDisplayCard key={index} block={block} />)}
                       {!msg.isStreaming && <SourceFiles files={msg.sourceFiles || []} token={token} />}
                       {msg.isStreaming && <div className="generation-status" role="status"><span className="stream-dot" aria-hidden="true" /><span>{msg.toolStatus || (msg.isReasoning ? "正在思考…" : "正在生成回答…")}</span></div>}
                       {msg.notice && <p role="status" className="message-notice">{msg.notice}</p>}
