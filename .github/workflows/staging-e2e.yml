@@ -176,15 +176,32 @@ jobs:
             echo 'Using the local mihomo proxy for staging bundle downloads.'
           fi
           python3 - <<'PY'
-          import base64, json, os, pathlib, urllib.request
+          import base64, json, os, pathlib, time, urllib.error, urllib.request
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, request, fp, code, message, headers, newurl):
                   return None
           repo, revision = os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_SHA']
           url = f'https://api.github.com/repos/{repo}/contents/deploy/staging/download-bundle.py?ref={revision}'
           request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + os.environ['GITHUB_TOKEN'], 'User-Agent': 'shuming-staging'})
-          with urllib.request.build_opener(NoRedirect).open(request, timeout=30) as response:
-              content = base64.b64decode(json.load(response)['content'])
+          # A listening loopback proxy does not guarantee a healthy TLS upstream.
+          # Retry only transient failures; keep auth/policy errors fail-closed.
+          opener = urllib.request.build_opener(NoRedirect)
+          for attempt in range(3):
+              try:
+                  with opener.open(request, timeout=30) as response:
+                      content = base64.b64decode(json.load(response)['content'])
+                  break
+              except urllib.error.HTTPError as error:
+                  retryable = error.code in (408, 429, 500, 502, 503, 504)
+                  error.close()
+                  if not retryable:
+                      raise SystemExit(f'Bundle downloader bootstrap refused (HTTP {error.code}).') from None
+              except (urllib.error.URLError, OSError):
+                  pass
+              if attempt == 2:
+                  raise SystemExit('Bundle downloader bootstrap failed after 3 attempts; use the offline bundle fallback.') from None
+              print(f'Bundle downloader bootstrap transient failure; retry {attempt + 1}/2.')
+              time.sleep(attempt + 1)
           target = pathlib.Path(os.environ['BUNDLE_DIR'])
           target.mkdir(parents=True, exist_ok=True)
           (target / 'download-bundle.py').write_bytes(content)
