@@ -198,3 +198,13 @@ textarea:focus-visible { outline: none; }
 .account-settings-menu button:disabled { opacity: .5; }
 .settings-divider { height: 1px; margin: 5px 4px; background: #ffffff10; }
 .account-settings-menu .settings-logout { color: #d6a2a2; }
+
+/* Generated content never participates in the host layout or style cascade. */
+.html-display { margin: 1rem 0; border: 1px solid var(--line, #d9dfe8); border-radius: 12px; overflow: hidden; min-width: 0; }
+.html-display > header { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: baseline; padding: .75rem 1rem; }
+.html-display > header span, .html-display > details { font-size: .75rem; opacity: .8; }
+.html-display-summary { margin: 0; padding: 0 1rem .75rem; overflow-wrap: anywhere; }
+.html-display iframe { display: block; width: 100%; height: 320px; border: 0; background: white; }
+.html-display > details { padding: .75rem 1rem; }
+.html-display > details summary { cursor: pointer; }
+.html-display > p[role="status"] { padding: 1rem; }

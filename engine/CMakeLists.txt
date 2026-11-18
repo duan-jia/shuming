@@ -258,3 +258,22 @@ if(FASTLLM_BUILD_TESTS)
     target_compile_options(document-access-test PRIVATE -UNDEBUG)
     add_test(NAME document-access-test COMMAND document-access-test)
 endif()
+
+if(FASTLLM_BUILD_TESTS)
+    add_executable(html-display-test
+        tests/html_display_test.cpp
+        src/agent/agent_runtime.cpp
+        src/services/tool_service.cpp
+        src/services/knowledge_fetch_service.cpp
+        src/services/web_search_service.cpp
+        src/services/knowledge_search_service.cpp
+        src/security/rate_limiter.cpp
+        src/server/http_protocol.cpp)
+    target_include_directories(html-display-test PRIVATE include)
+    target_link_libraries(html-display-test PRIVATE
+        nlohmann_json::nlohmann_json spdlog::spdlog httplib::httplib
+        OpenSSL::SSL OpenSSL::Crypto pthread)
+    target_compile_definitions(html-display-test PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+    target_compile_options(html-display-test PRIVATE -UNDEBUG)
+    add_test(NAME html-display-test COMMAND html-display-test)
+endif()

@@ -51,10 +51,20 @@ nlohmann::json SessionService::message_to_json(const MessageSummary& message) {
     return j;
 }
 
-nlohmann::json SessionService::messages_to_json(const std::vector<MessageSummary>& messages) {
+nlohmann::json SessionService::messages_to_json(const std::vector<MessageSummary>& messages,
+    const std::string& session, const UserInfo& user) {
     nlohmann::json result = nlohmann::json::array();
+    auto displays = nlohmann::json::object();
+    bool unavailable = false;
+    try { if (agents_) displays = agents_->displays(session, user.tenant_id, user.id); }
+    catch (const std::exception&) { unavailable = true; }
     for (const auto& message : messages) {
-        result.push_back(message_to_json(message));
+        auto item = message_to_json(message);
+        if (message.role == "assistant") {
+            item["displays"] = displays.value(message.request_id, nlohmann::json::array());
+            if (unavailable) item["display_notice"] = "富内容暂不可用，请参考文字回答。";
+        }
+        result.push_back(std::move(item));
     }
     return result;
 }
@@ -105,7 +115,7 @@ void SessionService::detail(const RouteParams& params, const UserInfo& user, Htt
     }
 
     nlohmann::json j = session_to_json(session);
-    j["messages"] = messages_to_json(sessions_.list_messages(session_id));
+    j["messages"] = messages_to_json(sessions_.list_messages(session_id), session_id, user);
     resp.json(j.dump());
 }
 
@@ -134,7 +144,7 @@ void SessionService::messages(const RouteParams& params, const UserInfo& user, H
     }
 
     nlohmann::json j;
-    j["messages"] = messages_to_json(sessions_.list_messages(session_id));
+    j["messages"] = messages_to_json(sessions_.list_messages(session_id), session_id, user);
     resp.json(j.dump());
 }
 
