@@ -165,3 +165,18 @@ image-layer caches are not exported to the public repository's Actions cache or
 artifacts. Build-record artifact uploads are disabled. New caches start cold;
 the workflow reports compiler-cache statistics instead of claiming an unmeasured
 speedup. Package visibility and trusted-PR gates remain unchanged.
+
+### Bundle downloader bootstrap failures
+
+Before importing the source bundle, CI fetches `download-bundle.py` at the exact
+workflow revision. A listening loopback proxy is not proof of healthy upstream
+TLS. The bootstrap retries transient network failures and HTTP 408/429/5xx
+(500/502/503/504) up to three attempts (30 seconds each, 1/2 second backoff).
+Authorization errors and redirects fail closed; no TLS checks are disabled.
+Persistent failure still requires the existing run-specific offline ZIP fallback;
+it is not treated as a successful transfer. All bundle digest/revision/content
+checks remain mandatory. GitHub's `continue-on-error` can show the download step
+as successful even when its **outcome** is failure; inspect the actual log.
+
+Offline regression check (no network, containers, or deployment):
+`python3 -m unittest discover -s tests -p test_staging_bundle_bootstrap.py -v`.
