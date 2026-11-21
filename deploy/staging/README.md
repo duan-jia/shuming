@@ -222,3 +222,11 @@ migrate staging data and seed test records; those effects need a separate review
 recovery plan. Existing cleanup stops the CI staging stack even after a failure.
 Logs saying `Stopped` alone do not prove that the attempt caused a fresh outage:
 inspect container state/timestamps before attributing availability changes.
+
+When automatic source-bundle download fails, the same-run offline fallback now
+waits at most 180 seconds for the operator's atomic file publication. The step
+has a five-minute ceiling; no network retry, extraction or deployment occurs
+while waiting. This window allows copying the new hosted artifact without
+racing the self-hosted job. The revision and content checks still follow before
+any use. Missing input after the deadline fails closed. Upload the ZIP associated
+with that exact new run; never relabel an older ZIP or its REVISION.

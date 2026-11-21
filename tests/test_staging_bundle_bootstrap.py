@@ -86,8 +86,10 @@ class OfflineFallbackTests(unittest.TestCase):
             with patch.dict(os.environ, {'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '2',
                                          'GITHUB_WORKSPACE': str(workspace)}), \
                     patch('pathlib.Path', side_effect=isolated_path):
-                with self.assertRaisesRegex(SystemExit, '123.zip'):
-                    exec(code, {})
+                with patch('time.monotonic', side_effect=[0, 1, 181]), patch('time.sleep') as sleep:
+                    with self.assertRaisesRegex(SystemExit, '123.zip'):
+                        exec(code, {})
+                    sleep.assert_called_once_with(2)
                 (bundles / '123.zip').write_bytes(b'fixture')
                 exec(code, {})
             self.assertEqual((workspace / '.staging-123-2/bundle.zip').read_bytes(), b'fixture')

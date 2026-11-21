@@ -209,18 +209,25 @@ jobs:
           python3 "$BUNDLE_DIR/download-bundle.py"
       - name: Use separately transferred bundle if download failed
         if: steps.download.outcome == 'failure'
-        timeout-minutes: 2
+        timeout-minutes: 5
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import os, pathlib, shutil
+          import os, pathlib, shutil, time
           run = os.environ['GITHUB_RUN_ID']
           attempt = os.environ['GITHUB_RUN_ATTEMPT']
           bundle = pathlib.Path('/srv/fastllm-staging/bundles') / (run + '.zip')
           target = pathlib.Path(os.environ['GITHUB_WORKSPACE']) / f'.staging-{run}-{attempt}'
           target.mkdir(exist_ok=True)
+          # Allow an operator to deliver this newly built run-specific artifact.
+          # No network retries or data import occur during this bounded wait.
+          deadline = time.monotonic() + 180
+          if not bundle.is_file():
+              print('Waiting up to 180 seconds for the same-run offline source bundle.', flush=True)
+          while not bundle.is_file() and time.monotonic() < deadline:
+              time.sleep(2)
           if not bundle.is_file():
               raise SystemExit(f'Artifact download failed. Transfer this run\'s staging-bundle ZIP to {bundle}, then retry the deployment job.')
           shutil.copyfile(bundle, target / 'bundle.zip')
