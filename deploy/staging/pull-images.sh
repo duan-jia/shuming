@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Source this file only after the staging isolation guard has passed.
-# GHCR transfers use a client-side proxy, not the shared Docker daemon's network.
+# GHCR transfers use the client's existing transport, not daemon reconfiguration.
 STAGING_TRANSFER_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 probe_image() (
@@ -46,12 +46,8 @@ pull_private_image() (
   trap 'rm -rf -- "$work"' EXIT
   # This proxy path stalled with Go HTTP/2; scope the workaround to this client.
   export GODEBUG="${GODEBUG:+${GODEBUG},}http2client=0"
-  if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/7890' 2>/dev/null; then
-    export HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890
-    export https_proxy="$HTTPS_PROXY" http_proxy="$HTTP_PROXY"
-    export NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1
-    echo 'Using existing loopback proxy for client-side GHCR image transfer.'
-  fi
+  # Preserve the runner's default/inherited transport; a listening proxy may
+  # have broken upstream TLS. Never override proxy variables automatically.
   prepare_crane "$work"
   for attempt in 1 2; do
     started=$SECONDS

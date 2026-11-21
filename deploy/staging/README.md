@@ -31,7 +31,7 @@ Validate this path on the real runner before merging. Public repository/fork
 workflow permissions still need a separate security review: job conditions are
 not a sandbox or a proof that private packages cannot be accessed by forks.
 
-The optional loopback proxy still applies to source-bundle downloads. The fallback
+Source-bundle downloads preserve the runner's existing default transport. The fallback
 transfer path accepts only a source-only bundle for the same run. Legacy bundles
 containing images are rejected by the exact file allowlist.
 
@@ -115,8 +115,8 @@ The ZIP is deleted after the run. This fallback needs no registry credentials
 or production configuration.
 
 An optional loopback-only mihomo download proxy can be prepared with
-[deploy/proxy](../proxy/README.md). The download step uses it when port 7890
-is listening; otherwise direct download and the offline fallback remain.
+[deploy/proxy](../proxy/README.md). Downloads do not select it merely because port 7890 is listening. They preserve
+the existing default/inherited transport; the offline fallback remains.
 Subscription credentials stay on the server outside the repository.
 
 The distributed backend image disables GGML_NATIVE so the embedding backend
@@ -129,7 +129,7 @@ catches instruction incompatibility that build-runner-only tests cannot.
 
 Docker image pulls run in the daemon, so exporting a proxy in a CI shell does
 not change the shared daemon's network path. GHCR downloads therefore use the
-SHA256-pinned crane v0.22.1 client and the existing loopback proxy when available.
+SHA256-pinned crane v0.22.1 client using the runner's existing default/inherited transport.
 The job's temporary Docker authentication is reused, with no permanent token or
 daemon reconfiguration. Only the transfer subprocess disables Go HTTP/2 using
 `GODEBUG=http2client=0`, following the stalled proxy transfers observed during
@@ -230,3 +230,19 @@ while waiting. This window allows copying the new hosted artifact without
 racing the self-hosted job. The revision and content checks still follow before
 any use. Missing input after the deadline fails closed. Upload the ZIP associated
 with that exact new run; never relabel an older ZIP or its REVISION.
+
+### Preserve the existing default transport
+
+Source bootstrap and GHCR client transfers no longer overwrite proxy/no_proxy
+variables just because a loopback listener exists. The runner's existing default
+path is tried with unchanged request deadlines and retry bounds. Explicit
+inherited proxy settings are preserved, not erased or replaced. There is no
+automatic probe-based switch and no system/daemon/network configuration change.
+This follows server evidence: default public GitHub API returned200 and GHCR
+returned401, while explicit loopback proxy returned curl35/HTTP000. These are
+connectivity observations, not private-manifest/layer authorization proof.
+Private requests still use only the executing CI job's own temporary token.
+
+Regression: `python3 -m unittest discover -s tests -p test_staging_default_transport.py -v`.
+Tests simulate an unhealthy listening proxy, verify unchanged unset/inherited
+proxy variables, no automatic listener probe/network call, and private cleanup.
