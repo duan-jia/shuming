@@ -180,3 +180,45 @@ as successful even when its **outcome** is failure; inspect the actual log.
 
 Offline regression check (no network, containers, or deployment):
 `python3 -m unittest discover -s tests -p test_staging_bundle_bootstrap.py -v`.
+
+### Pinned offline crane input
+
+CI's image-fetch step selects the fixed archive
+`/srv/fastllm-staging/tools/go-containerregistry-v0.22.1-linux-x86_64.tar.gz`
+through `STAGING_CRANE_ARCHIVE`. Before authorizing a new run, an operator must
+place the original upstream v0.22.1 Linux x86_64 archive there using a task-specific
+temporary filename and atomic publication (do not overwrite a different file).
+The file must be owned by the runner user, mode 0600, a regular file, and its
+canonical absolute path must not traverse symlinks. Do not change directory,
+server, proxy or credential permissions to accommodate this input.
+
+Expected SHA256:
+`0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0`.
+The archive is copied to the existing mode-0700 job-private transfer directory,
+checked against the fixed digest, and only then is `crane` extracted. A missing,
+unsafe or mismatched explicit offline input fails closed without online fallback.
+If no offline variable is selected, non-CI callers retain the existing bounded
+online download. Cached valid images continue to bypass tool preparation.
+The credential cleanup removes job-private copies, not the operator's source
+archive. Do not commit the binary or attach image archives to Actions artifacts.
+
+Offline unit check:
+`python3 -m unittest discover -s tests -p test_staging_crane_offline.py -v`.
+The matching-fixture unit test mocks only the pinned digest verifier; the bad
+archive test uses real SHA256. Validate any actual upstream input against the
+fixed digest separately before transfer. No unit test contacts Docker/registries.
+
+This input only removes the crane-tool download dependency. Bundle retrieval,
+GHCR manifests/blobs and MySQL pulls may still fail; it does not prove registry
+network health. Re-running an old Actions run still uses its old scripts and
+cannot acquire this feature. A reviewed update and separately authorized new
+execution are needed; neither publishing this code nor placing the file is a
+standing deployment authorization.
+
+Rollback: revert the offline-input change and remove only its task-owned source
+archive after confirming no run is consuming it. Do not remove database volumes,
+restore data, or change production as part of tool rollback. A deployment may
+migrate staging data and seed test records; those effects need a separate reviewed
+recovery plan. Existing cleanup stops the CI staging stack even after a failure.
+Logs saying `Stopped` alone do not prove that the attempt caused a fresh outage:
+inspect container state/timestamps before attributing availability changes.

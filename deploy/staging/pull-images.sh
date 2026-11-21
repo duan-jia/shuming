@@ -12,6 +12,31 @@ probe_image() (
     --network none --pull never --entrypoint /bin/true "$1" >/dev/null
 )
 
+# Prepare only a pinned archive in the job-private workspace. An explicit offline
+# input fails closed; never replace a bad/missing file with an online download.
+prepare_crane() {
+  local work="$1" offline="${STAGING_CRANE_ARCHIVE:-}"
+  if [[ -n "$offline" ]]; then
+    if [[ "$offline" != /* || ! -f "$offline" || -L "$offline" ]] \
+      || [[ "$(readlink -f -- "$offline")" != "$offline" ]] \
+      || [[ "$(stat -c '%u:%a' -- "$offline")" != "$(id -u):600" ]]; then
+      echo 'Offline crane archive must be a canonical regular file owned by this user with mode 0600.' >&2
+      return 1
+    fi
+    cp -- "$offline" "$work/tool.tar.gz" || return 1
+    chmod 600 "$work/tool.tar.gz" || return 1
+  else
+    curl --fail --silent --show-error --location --retry 1 \
+      --connect-timeout 10 --max-time 60 \
+      https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz \
+      --output "$work/tool.tar.gz" || return 1
+  fi
+  printf '%s  %s\n' \
+    '0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0' \
+    "$work/tool.tar.gz" | sha256sum --check || return 1
+  tar --extract --gzip --file "$work/tool.tar.gz" --directory "$work" crane || return 1
+}
+
 pull_private_image() (
   set -Eeuo pipefail
   : "${DOCKER_CONFIG:?Temporary registry configuration is required}"
@@ -27,15 +52,7 @@ pull_private_image() (
     export NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1
     echo 'Using existing loopback proxy for client-side GHCR image transfer.'
   fi
-  # Fixed upstream release and SHA256; never execute an unverified download.
-  curl --fail --silent --show-error --location --retry 1 \
-    --connect-timeout 10 --max-time 60 \
-    https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz \
-    --output "$work/tool.tar.gz"
-  printf '%s  %s\n' \
-    '0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0' \
-    "$work/tool.tar.gz" | sha256sum --check
-  tar --extract --gzip --file "$work/tool.tar.gz" --directory "$work" crane
+  prepare_crane "$work"
   for attempt in 1 2; do
     started=$SECONDS
     rm -f -- "$work/image.tar" "$work/manifest.json" "$work/transfer.err"
