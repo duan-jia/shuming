@@ -134,7 +134,18 @@ The job's temporary Docker authentication is reused, with no permanent token or
 daemon reconfiguration. Only the transfer subprocess disables Go HTTP/2 using
 `GODEBUG=http2client=0`, following the stalled proxy transfers observed during
 the release. Each image has two attempts with a 30-second manifest deadline and
-180-second archive deadline. Retries discard incomplete archives.
+180-second archive deadline. The two-attempt limit and deadlines are unchanged.
+Retries discard incomplete archives, but keep verified complete compressed layers
+in a job-private native crane cache. Before every use, the helper removes unknown,
+non-private, partial or SHA/size-mismatching entries against the current manifest.
+This is complete-layer reuse, NOT byte-range resume of an incomplete blob. The
+cache is not shared across jobs or persisted on the host; existing Docker images
+still require the unstarted-container unpack probe. Cache plus tarball can use
+about twice the compressed size, unlike the previous tarball-only transfer. A
+manifest-size capacity gate keeps 20% of current free space outside the estimated
+transfer working set. This is not a promise that Docker unpacking fits; measure
+remaining space and unpacking needs before authorizing another run. No host
+cache pruning or network/configuration changes are performed.
 
 The tarball retains original compressed layers and uses no uncompressed
 filesystem cache. Before import, `verify-image.py` checks the registry config
@@ -145,8 +156,16 @@ The probe removes only its own container/anonymous volumes and never starts an
 application. A corrupt cached image is rejected offline or fetched again online.
 
 Archives and raw diagnostics stay in a mode-0700 per-job temporary workspace and
-are deleted on exit. Printed transfer errors redact URLs, including signed query
-parameters. Image archives never enter Actions artifacts. Always-run cleanup
+are deleted on exit. Transfer telemetry reports only stage, exit code, elapsed seconds, archive/cache
+bytes and fixed error-category labels. Raw errors, headers, URLs, signed query
+parameters and authorization text are never printed. Manifest, pull, verify,
+load, inspect and unpack are separate stages; verification/import/unpack failures
+fail closed without a second download. No verbose HTTP tracing is enabled.
+The manifest summary reports expected compressed layer bytes; cache_bytes includes
+partial bytes and must not be misreported as verified bytes or network throughput.
+Exit 124 identifies a command deadline; 137 means killed (forced deadline kill
+or another SIGKILL cannot be distinguished). Neither proves the cause of a CDN
+stall. Image archives never enter Actions artifacts. Always-run cleanup
 also removes this run/attempt's registry authentication and downloads. MySQL
 continues using the Tencent mirror and bounded Docker pull.
 
