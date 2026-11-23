@@ -49,31 +49,49 @@ pull_private_image() (
   # Preserve the runner's default/inherited transport; a listening proxy may
   # have broken upstream TLS. Never override proxy variables automatically.
   prepare_crane "$work"
+  run_stage() {
+    local stage="$1" budget="$2" stage_started=$SECONDS rc
+    shift 2
+    if timeout --kill-after=10s "$budget" "$@" 2>"$work/transfer.err"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    python3 "$STAGING_TRANSFER_DIR/transfer-state.py" report "$work" \
+      --stage "$stage" --rc "$rc" --seconds "$((SECONDS - stage_started))" >&2 || return 1
+    return "$rc"
+  }
   for attempt in 1 2; do
     started=$SECONDS
     rm -f -- "$work/image.tar" "$work/manifest.json" "$work/transfer.err"
     echo "Downloading $image with client-side transport (attempt $attempt/2)"
-    # Keep the original compressed layers. An interrupted uncompressed cache
-    # can retain a zero-byte layer that later loads but cannot be unpacked.
-    if timeout --kill-after=10s 30s "$work/crane" manifest --platform linux/amd64 \
-        "$image" >"$work/manifest.json" 2>"$work/transfer.err" \
-      && timeout --kill-after=10s 180s "$work/crane" pull \
-      --platform linux/amd64 --format tarball \
-      "$image" "$work/image.tar" 2>>"$work/transfer.err" \
-      && timeout --kill-after=10s 120s python3 "$STAGING_TRANSFER_DIR/verify-image.py" \
-        "$work/image.tar" "$work/manifest.json" 2>>"$work/transfer.err" \
-      && timeout --kill-after=10s 120s docker load --input "$work/image.tar" 2>>"$work/transfer.err" \
-      && docker image inspect "$image" >/dev/null \
-      && probe_image "$image"; then
-      # This archive exists only in a private per-job directory on the server.
-      # It is never uploaded as an Actions artifact and is removed by EXIT trap.
+    if ! run_stage manifest 30s "$work/crane" manifest --platform linux/amd64 \
+        "$image" >"$work/manifest.json"; then
+      # No layer data is consumed after a failed/partial manifest.
+      [[ "$attempt" == 2 ]] || sleep 5
+      continue
+    fi
+    # The native crane cache can contain partial files after termination. Keep
+    # only complete manifest-matching compressed layers; never reuse diff_id or
+    # unknown entries. This private cache survives only these two attempts.
+    python3 "$STAGING_TRANSFER_DIR/transfer-state.py" cache "$work"
+    if run_stage pull 180s "$work/crane" pull --platform linux/amd64 \
+        --format tarball --cache_path "$work/cache" "$image" "$work/image.tar"; then
+      # Integrity/import/unpack errors fail closed rather than redownloading.
+      run_stage verify 120s python3 "$STAGING_TRANSFER_DIR/verify-image.py" \
+        "$work/image.tar" "$work/manifest.json" || return 1
+      run_stage load 120s docker load --input "$work/image.tar" || return 1
+      run_stage inspect 30s docker image inspect "$image" >/dev/null || return 1
+      # probe_image is a shell function; retain its existing cleanup trap.
+      local probe_started=$SECONDS probe_rc
+      if probe_image "$image" 2>"$work/transfer.err"; then probe_rc=0; else probe_rc=$?; fi
+      python3 "$STAGING_TRANSFER_DIR/transfer-state.py" report "$work" \
+        --stage unpack --rc "$probe_rc" --seconds "$((SECONDS - probe_started))" >&2
+      [[ "$probe_rc" == 0 ]] || return 1
       echo "Verified/imported $image in $((SECONDS - started))s"
       return 0
     fi
-    echo "Image transfer/validation failed after $((SECONDS - started))s" >&2
-    # Redirect targets can contain signed query parameters; keep raw diagnostics
-    # only in the private workspace, which the EXIT trap always removes.
-    tail -n 6 "$work/transfer.err" | sed -E 's#https?://[^[:space:]"<>]+#[redacted-url]#g' >&2
+    echo "Image transfer failed after $((SECONDS - started))s; retry reuses verified complete layers only." >&2
     [[ "$attempt" == 2 ]] || sleep 5
   done
   echo "Client-side GHCR transfer failed after two bounded attempts: $image" >&2
