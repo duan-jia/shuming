@@ -167,14 +167,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # The optional mihomo container publishes only this host-loopback port.
-          # Empty subscriptions leave the original direct/offline path available.
-          if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/7890' 2>/dev/null; then
-            export http_proxy=http://127.0.0.1:7890
-            export https_proxy=http://127.0.0.1:7890
-            export no_proxy=localhost,127.0.0.1
-            echo 'Using the local mihomo proxy for staging bundle downloads.'
-          fi
+          # Keep the runner's existing default transport and inherited environment.
+          # A listening loopback proxy is not evidence of healthy TLS upstream.
           python3 - <<'PY'
           import base64, json, os, pathlib, time, urllib.error, urllib.request
           class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -209,18 +203,25 @@ jobs:
           python3 "$BUNDLE_DIR/download-bundle.py"
       - name: Use separately transferred bundle if download failed
         if: steps.download.outcome == 'failure'
-        timeout-minutes: 2
+        timeout-minutes: 5
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import os, pathlib, shutil
+          import os, pathlib, shutil, time
           run = os.environ['GITHUB_RUN_ID']
           attempt = os.environ['GITHUB_RUN_ATTEMPT']
           bundle = pathlib.Path('/srv/fastllm-staging/bundles') / (run + '.zip')
           target = pathlib.Path(os.environ['GITHUB_WORKSPACE']) / f'.staging-{run}-{attempt}'
           target.mkdir(exist_ok=True)
+          # Allow an operator to deliver this newly built run-specific artifact.
+          # No network retries or data import occur during this bounded wait.
+          deadline = time.monotonic() + 180
+          if not bundle.is_file():
+              print('Waiting up to 180 seconds for the same-run offline source bundle.', flush=True)
+          while not bundle.is_file() and time.monotonic() < deadline:
+              time.sleep(2)
           if not bundle.is_file():
               raise SystemExit(f'Artifact download failed. Transfer this run\'s staging-bundle ZIP to {bundle}, then retry the deployment job.')
           shutil.copyfile(bundle, target / 'bundle.zip')
@@ -251,6 +252,7 @@ jobs:
         timeout-minutes: 30
         env:
           GHCR_TOKEN: ${{ github.token }}
+          STAGING_CRANE_ARCHIVE: /srv/fastllm-staging/tools/go-containerregistry-v0.22.1-linux-x86_64.tar.gz
           DOCKER_CONFIG: ${{ runner.temp }}/shuming-ghcr-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
         run: |

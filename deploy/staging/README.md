@@ -31,7 +31,7 @@ Validate this path on the real runner before merging. Public repository/fork
 workflow permissions still need a separate security review: job conditions are
 not a sandbox or a proof that private packages cannot be accessed by forks.
 
-The optional loopback proxy still applies to source-bundle downloads. The fallback
+Source-bundle downloads preserve the runner's existing default transport. The fallback
 transfer path accepts only a source-only bundle for the same run. Legacy bundles
 containing images are rejected by the exact file allowlist.
 
@@ -115,8 +115,8 @@ The ZIP is deleted after the run. This fallback needs no registry credentials
 or production configuration.
 
 An optional loopback-only mihomo download proxy can be prepared with
-[deploy/proxy](../proxy/README.md). The download step uses it when port 7890
-is listening; otherwise direct download and the offline fallback remain.
+[deploy/proxy](../proxy/README.md). Downloads do not select it merely because port 7890 is listening. They preserve
+the existing default/inherited transport; the offline fallback remains.
 Subscription credentials stay on the server outside the repository.
 
 The distributed backend image disables GGML_NATIVE so the embedding backend
@@ -129,7 +129,7 @@ catches instruction incompatibility that build-runner-only tests cannot.
 
 Docker image pulls run in the daemon, so exporting a proxy in a CI shell does
 not change the shared daemon's network path. GHCR downloads therefore use the
-SHA256-pinned crane v0.22.1 client and the existing loopback proxy when available.
+SHA256-pinned crane v0.22.1 client using the runner's existing default/inherited transport.
 The job's temporary Docker authentication is reused, with no permanent token or
 daemon reconfiguration. Only the transfer subprocess disables Go HTTP/2 using
 `GODEBUG=http2client=0`, following the stalled proxy transfers observed during
@@ -180,3 +180,69 @@ as successful even when its **outcome** is failure; inspect the actual log.
 
 Offline regression check (no network, containers, or deployment):
 `python3 -m unittest discover -s tests -p test_staging_bundle_bootstrap.py -v`.
+
+### Pinned offline crane input
+
+CI's image-fetch step selects the fixed archive
+`/srv/fastllm-staging/tools/go-containerregistry-v0.22.1-linux-x86_64.tar.gz`
+through `STAGING_CRANE_ARCHIVE`. Before authorizing a new run, an operator must
+place the original upstream v0.22.1 Linux x86_64 archive there using a task-specific
+temporary filename and atomic publication (do not overwrite a different file).
+The file must be owned by the runner user, mode 0600, a regular file, and its
+canonical absolute path must not traverse symlinks. Do not change directory,
+server, proxy or credential permissions to accommodate this input.
+
+Expected SHA256:
+`0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0`.
+The archive is copied to the existing mode-0700 job-private transfer directory,
+checked against the fixed digest, and only then is `crane` extracted. A missing,
+unsafe or mismatched explicit offline input fails closed without online fallback.
+If no offline variable is selected, non-CI callers retain the existing bounded
+online download. Cached valid images continue to bypass tool preparation.
+The credential cleanup removes job-private copies, not the operator's source
+archive. Do not commit the binary or attach image archives to Actions artifacts.
+
+Offline unit check:
+`python3 -m unittest discover -s tests -p test_staging_crane_offline.py -v`.
+The matching-fixture unit test mocks only the pinned digest verifier; the bad
+archive test uses real SHA256. Validate any actual upstream input against the
+fixed digest separately before transfer. No unit test contacts Docker/registries.
+
+This input only removes the crane-tool download dependency. Bundle retrieval,
+GHCR manifests/blobs and MySQL pulls may still fail; it does not prove registry
+network health. Re-running an old Actions run still uses its old scripts and
+cannot acquire this feature. A reviewed update and separately authorized new
+execution are needed; neither publishing this code nor placing the file is a
+standing deployment authorization.
+
+Rollback: revert the offline-input change and remove only its task-owned source
+archive after confirming no run is consuming it. Do not remove database volumes,
+restore data, or change production as part of tool rollback. A deployment may
+migrate staging data and seed test records; those effects need a separate reviewed
+recovery plan. Existing cleanup stops the CI staging stack even after a failure.
+Logs saying `Stopped` alone do not prove that the attempt caused a fresh outage:
+inspect container state/timestamps before attributing availability changes.
+
+When automatic source-bundle download fails, the same-run offline fallback now
+waits at most 180 seconds for the operator's atomic file publication. The step
+has a five-minute ceiling; no network retry, extraction or deployment occurs
+while waiting. This window allows copying the new hosted artifact without
+racing the self-hosted job. The revision and content checks still follow before
+any use. Missing input after the deadline fails closed. Upload the ZIP associated
+with that exact new run; never relabel an older ZIP or its REVISION.
+
+### Preserve the existing default transport
+
+Source bootstrap and GHCR client transfers no longer overwrite proxy/no_proxy
+variables just because a loopback listener exists. The runner's existing default
+path is tried with unchanged request deadlines and retry bounds. Explicit
+inherited proxy settings are preserved, not erased or replaced. There is no
+automatic probe-based switch and no system/daemon/network configuration change.
+This follows server evidence: default public GitHub API returned200 and GHCR
+returned401, while explicit loopback proxy returned curl35/HTTP000. These are
+connectivity observations, not private-manifest/layer authorization proof.
+Private requests still use only the executing CI job's own temporary token.
+
+Regression: `python3 -m unittest discover -s tests -p test_staging_default_transport.py -v`.
+Tests simulate an unhealthy listening proxy, verify unchanged unset/inherited
+proxy variables, no automatic listener probe/network call, and private cleanup.
