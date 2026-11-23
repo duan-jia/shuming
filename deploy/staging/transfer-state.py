@@ -70,6 +70,9 @@ def classify(rc, error):
         return 'deadline'
     if rc == 137:
         return 'killed'
+    ranged = re.search(r'Range transfer failed category=(deadline|redirect_policy|credentials_policy|image_policy|auth_policy|auth|io|tls|metadata|manifest_http|manifest_digest|address_expired|http_transient|range_status|range_protocol|range_interrupted|disk|blob_digest|platform|capacity|internal)\b', error)
+    if ranged:
+        return ranged.group(1)
     # Only fixed category labels leave the private workspace, never matched text.
     classes = [
         ('auth', r'UNAUTHORIZED|DENIED|unauthorized|authentication required|\b(?:401|403)\b'),
@@ -106,7 +109,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('operation', choices=['cache', 'report'])
     parser.add_argument('work', type=Path)
-    parser.add_argument('--stage', choices=['manifest', 'pull', 'verify', 'load', 'inspect', 'unpack'])
+    parser.add_argument('--stage', choices=['manifest', 'pull', 'ranges', 'verify', 'load', 'inspect', 'unpack'])
     parser.add_argument('--rc', type=int, default=0)
     parser.add_argument('--seconds', type=int, default=0)
     args = parser.parse_args()

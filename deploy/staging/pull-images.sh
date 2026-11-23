@@ -48,7 +48,6 @@ pull_private_image() (
   export GODEBUG="${GODEBUG:+${GODEBUG},}http2client=0"
   # Preserve the runner's default/inherited transport; a listening proxy may
   # have broken upstream TLS. Never override proxy variables automatically.
-  prepare_crane "$work"
   run_stage() {
     local stage="$1" budget="$2" stage_started=$SECONDS rc
     shift 2
@@ -61,6 +60,20 @@ pull_private_image() (
       --stage "$stage" --rc "$rc" --seconds "$((SECONDS - stage_started))" >&2 || return 1
     return "$rc"
   }
+  case "${STAGING_IMAGE_TRANSPORT:-crane}" in
+    range)
+      run_stage ranges 390s python3 "$STAGING_TRANSFER_DIR/ranged-image.py" "$image" "$work" || return 1
+      run_stage verify 120s python3 "$STAGING_TRANSFER_DIR/verify-image.py" "$work/image.tar" "$work/manifest.json" || return 1
+      run_stage load 120s docker load --input "$work/image.tar" || return 1
+      run_stage inspect 30s docker image inspect "$image" >/dev/null || return 1
+      local probe_started=$SECONDS probe_rc
+      if probe_image "$image" 2>"$work/transfer.err"; then probe_rc=0; else probe_rc=$?; fi
+      python3 "$STAGING_TRANSFER_DIR/transfer-state.py" report "$work" --stage unpack --rc "$probe_rc" --seconds "$((SECONDS - probe_started))" >&2
+      return "$probe_rc"
+      ;;
+    crane) prepare_crane "$work" ;;
+    *) echo 'Unsupported staging image transport.' >&2; return 1 ;;
+  esac
   for attempt in 1 2; do
     started=$SECONDS
     rm -f -- "$work/image.tar" "$work/manifest.json" "$work/transfer.err"

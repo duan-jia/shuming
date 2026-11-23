@@ -252,7 +252,7 @@ jobs:
         timeout-minutes: 30
         env:
           GHCR_TOKEN: ${{ github.token }}
-          STAGING_CRANE_ARCHIVE: /srv/fastllm-staging/tools/go-containerregistry-v0.22.1-linux-x86_64.tar.gz
+          STAGING_IMAGE_TRANSPORT: range
           DOCKER_CONFIG: ${{ runner.temp }}/shuming-ghcr-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
         run: |
