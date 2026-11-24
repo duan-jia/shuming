@@ -265,3 +265,48 @@ Private requests still use only the executing CI job's own temporary token.
 Regression: `python3 -m unittest discover -s tests -p test_staging_default_transport.py -v`.
 Tests simulate an unhealthy listening proxy, verify unchanged unset/inherited
 proxy variables, no automatic listener probe/network call, and private cleanup.
+
+### Strict ranged GHCR transport (review implementation; private compatibility unverified)
+
+CI selects `STAGING_IMAGE_TRANSPORT=range`; callers without the selector retain
+the previous pinned-crane implementation. There is no automatic fallback from a
+failed range transfer to another whole-image download.
+
+The helper reads only this job's mode0600 `DOCKER_CONFIG/config.json` under its
+canonical mode0700 directory. Supported images are the backend/MCP packages with
+full40-character revision tags. Basic authentication goes only to the exact
+`https://ghcr.io/token` realm, with read-only repository scope; Bearer goes only
+to the registry origin. No credential helper, offline refresh token, new secret,
+token export, or cross-job token reuse is supported.
+
+A single linux/amd64 manifest is pinned before consuming config/layer digests.
+Blob requests follow at most5 HTTPS hops restricted to ghcr.io and
+pkg-containers.githubusercontent.com, with no userinfo, fragment, alternate port,
+or Authorization on any redirected request. Short-lived storage401/403 responses
+restart from the original registry endpoint, never from a saved signed URL.
+
+Ranges are128KiB, at most8 workers, with2 attempts per chunk. Retained prefixes
+resume at their exact offset; completed chunks remain while others retry.
+Every response must be206 with exact Content-Range/total and identity encoding.
+A server ignoring Range with200 fails closed, without appending its body.
+The360-second image-wide budget is rechecked between socket reads;390-second
+outer timeout is a hard backstop. No whole-image retry extends that budget.
+Limits:128 layers,4MiB metadata/config,2GiB per blob,4GiB total compressed data.
+A2-copy compressed working-set estimate retains20% of current free space; it
+does not promise Docker unpacking will fit or prune anything.
+
+Blobs are published only after exact size/full SHA256 and atomic rename. The
+assembled Docker archive is then subject to the existing config/layer/diff_id
+verifier, Docker load, image inspection and unstarted unpack probe. Helpers remove
+job-private blob/partial data; outer workflow cleanup removes the original
+temporary auth config. Diagnostics are fixed categories and numeric progress,
+never URL/header/token/error-body text. Host networking/permissions are unchanged.
+
+Synthetic protocol and shell tests cover interruption/resume, expired locations,
+cross-origin auth stripping, unsupported redirects, ignored Range, bad totals/
+hashes, platform selection, capacity and deadlines. A synthetic assembled archive
+also passes the actual pinned crane validator offline. **These are not evidence
+that real private GHCR storage accepts these Range requests or meets the budget.**
+Only a separately authorized feature-branch merge and one new staging run can
+verify that; it may migrate the isolated DB/write fixtures/finally stop services.
+No old run should be retried to pick up this implementation.
