@@ -7,8 +7,8 @@ probe_image() (
   # Creating an unstarted container forces layer unpacking. inspect/load alone
   # can succeed for the corrupt empty layer observed on the deployment host.
   local probe="shuming-image-probe-${BASHPID}-${RANDOM}"
-  trap 'docker rm --volumes "$probe" >/dev/null 2>&1 || true' EXIT
-  docker create --name "$probe" --label org.shuming.purpose=image-unpack-check \
+  trap 'timeout --kill-after=5s 5s docker rm --volumes "$probe" >/dev/null 2>&1 || true' EXIT
+  timeout --kill-after=5s 20s docker create --name "$probe" --label org.shuming.purpose=image-unpack-check \
     --network none --pull never --entrypoint /bin/true "$1" >/dev/null
 )
 
@@ -62,10 +62,10 @@ pull_private_image() (
   }
   case "${STAGING_IMAGE_TRANSPORT:-crane}" in
     range)
-      run_stage ranges 390s python3 "$STAGING_TRANSFER_DIR/ranged-image.py" "$image" "$work" || return 1
-      run_stage verify 120s python3 "$STAGING_TRANSFER_DIR/verify-image.py" "$work/image.tar" "$work/manifest.json" || return 1
-      run_stage load 120s docker load --input "$work/image.tar" || return 1
-      run_stage inspect 30s docker image inspect "$image" >/dev/null || return 1
+      run_stage ranges 570s python3 "$STAGING_TRANSFER_DIR/ranged-image.py" "$image" "$work" || return 1
+      run_stage verify 45s python3 "$STAGING_TRANSFER_DIR/verify-image.py" "$work/image.tar" "$work/manifest.json" || return 1
+      run_stage load 45s docker load --input "$work/image.tar" || return 1
+      run_stage inspect 10s docker image inspect "$image" >/dev/null || return 1
       local probe_started=$SECONDS probe_rc
       if probe_image "$image" 2>"$work/transfer.err"; then probe_rc=0; else probe_rc=$?; fi
       python3 "$STAGING_TRANSFER_DIR/transfer-state.py" report "$work" --stage unpack --rc "$probe_rc" --seconds "$((SECONDS - probe_started))" >&2
