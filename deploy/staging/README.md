@@ -289,7 +289,7 @@ Ranges are128KiB, at most8 workers, with2 attempts per chunk. Retained prefixes
 resume at their exact offset; completed chunks remain while others retry.
 Every response must be206 with exact Content-Range/total and identity encoding.
 A server ignoring Range with200 fails closed, without appending its body.
-The360-second image-wide budget is rechecked between socket reads;390-second
+The540-second image-wide budget is rechecked between socket reads;570-second
 outer timeout is a hard backstop. No whole-image retry extends that budget.
 Limits:128 layers,4MiB metadata/config,2GiB per blob,4GiB total compressed data.
 A2-copy compressed working-set estimate retains20% of current free space; it
@@ -310,3 +310,22 @@ that real private GHCR storage accepts these Range requests or meets the budget.
 Only a separately authorized feature-branch merge and one new staging run can
 verify that; it may migrate the isolated DB/write fixtures/finally stop services.
 No old run should be retried to pick up this implementation.
+
+
+#### Measured Range budget calibration (Nov25, converged)
+Run45352557117 retained about90.67/111.86MB in360s. The linear~445s estimate
+is NOT a throughput guarantee. Range now has a540s image-wide budget and570s
+hard backstop;8 workers/128KiB/2 chunk attempts and full integrity checks remain.
+Each GHCR whole pipeline has720s+10s kill grace, including download, verify45s,
+load45s, inspect10s and probe20s plus its bounded cleanup. No whole-image retry.
+
+The fetch step remains30min. Inclusive ceilings (kill grace already included):
+backend730s +MCP730s +MySQL130s +login30s +guard25s +mkdir10s +logout15s
++auth-directory removal25s +bookkeeping allowance30s =1725s.
+Explicit unused margin:75s below1800s. There is no double-counted grace.
+Cleanup logout/removal have their own reserved windows, not a reliance on the
+top-level30min kill. A cleanup timeout is failure, not claimed clean.
+The whole-image720s window includes post-download checks; any slow stage fails
+closed rather than skipping integrity. Frontend is hosted-build-only, not part
+of the CI staging runtime. Deploy/E2E10min and finalstop2min are separate existing
+steps. No actual deployment/E2E success is implied by this budget calculation.

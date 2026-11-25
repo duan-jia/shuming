@@ -40,7 +40,7 @@ class Retry(Failure):
 
 
 class Budget:
-    def __init__(self, seconds=360, clock=time.monotonic):
+    def __init__(self, seconds=540, clock=time.monotonic):
         self.clock = clock
         self.end = clock() + seconds
         self.cancel = threading.Event()
@@ -90,7 +90,7 @@ def read_auth(directory):
 
 def read_some(response, size):
     # read1 avoids waiting for a whole buffer from a slow trickle. Recheck the
-    # image-wide budget between socket reads; outer390s is the hard backstop.
+    # image-wide budget between socket reads; outer570s is the hard backstop.
     return getattr(response, 'read1', response.read)(size)
 
 

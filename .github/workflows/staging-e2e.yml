@@ -257,25 +257,28 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          python3 deploy/staging/guard.py
+          timeout --kill-after=5s 20s python3 deploy/staging/guard.py
           umask 077
-          mkdir -p "$DOCKER_CONFIG"
+          timeout --kill-after=5s 5s mkdir -p "$DOCKER_CONFIG"
           cleanup_registry_auth() {
-            docker logout ghcr.io >/dev/null 2>&1 || true
-            rm -rf -- "$DOCKER_CONFIG"
-            rmdir -- "$DOCKER_CONFIG" 2>/dev/null || true
+            timeout --kill-after=5s 10s docker logout ghcr.io >/dev/null 2>&1 || true
+            timeout --kill-after=5s 20s rm -rf -- "$DOCKER_CONFIG"
           }
           trap cleanup_registry_auth EXIT
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$GHCR_TOKEN" | timeout --kill-after=10s 20s docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           unset GHCR_TOKEN
-          # Docker pulls run inside dockerd: shell proxy variables do not reach it.
-          # The client-side GHCR downloader uses the existing loopback proxy,
-          # without restarting or reconfiguring the shared production daemon.
-          source deploy/staging/pull-images.sh
+          # Whole-image windows include verification/import/probe, not just HTTP.
+          # Inclusive ceilings:2*730 images +130 MySQL +30 login +25 guard
+          # +10 mkdir +15 logout +25 removal +30 bookkeeping =1725s.
+          # Each figure already includes its kill grace;75s remains below1800s.
+          # Frontend is built above but is not a service in this CI staging stack.
           export STAGING_OFFLINE=0
-          pull_image "$BACKEND_IMAGE"
-          pull_image "$MCP_IMAGE"
-          pull_image mirror.ccs.tencentyun.com/library/mysql:8.4
+          fetch_with_budget() {
+            timeout --kill-after=10s "$1" bash -c 'set -Eeuo pipefail; source deploy/staging/pull-images.sh; pull_image "$1"' _ "$2"
+          }
+          fetch_with_budget 720s "$BACKEND_IMAGE"
+          fetch_with_budget 720s "$MCP_IMAGE"
+          fetch_with_budget 120s mirror.ccs.tencentyun.com/library/mysql:8.4
       - name: Deploy stack and run E2E
         timeout-minutes: 10
         run: ./deploy/staging/deploy.sh
