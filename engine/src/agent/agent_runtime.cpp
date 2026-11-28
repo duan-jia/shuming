@@ -1,5 +1,6 @@
 #include "agent/agent_runtime.h"
 #include "agent/source_files.h"
+#include "agent/html_display.h"
 #include "agent/conversation_history.h"
 
 #include <algorithm>
@@ -90,7 +91,10 @@ void AgentRuntime::stream_complete(const std::string& prompt, const InferParams&
         "Do not send private document text or secrets to web search. Cite source filenames or web URLs for claims based on evidence. "
         "EMOS provides source-file download controls separately; do not include signed download URLs or storage paths in your answer, or call representation=source just to add a link. If a tool fails or no evidence exists, state the limitation. Never invent retrieved facts.";
     std::set<std::string> permitted;
-    for (const auto& tool : tools_.list(ToolSet::ALL, allow_web_)) {
+    auto available_tools = tools_.list(ToolSet::ALL, allow_web_);
+    available_tools.push_back(html_display_schema());
+    size_t display_count = 0;
+    for (const auto& tool : available_tools) {
         const auto name = tool["name"].get<std::string>();
         if ((name == "search_knowledge" || name == "fetch_knowledge") && !allow_knowledge_) continue;
         permitted.insert(name);
@@ -221,7 +225,11 @@ void AgentRuntime::stream_complete(const std::string& prompt, const InferParams&
                     throw std::runtime_error("Selected model does not support page images; use text");
                 stage = "execute";
                 execution_started = true;
-                auto output = tools_.execute(call.name, arguments, caller_, stopped);
+                if (call.name == "display_html" && display_count >= 4)
+                    throw std::invalid_argument("At most four HTML displays per request");
+                auto output = call.name == "display_html"
+                    ? ToolResult{html_display(arguments)} : tools_.execute(call.name, arguments, caller_, stopped);
+                if (call.name == "display_html") ++display_count;
                 raw = output.data;
                 stage = "result_processing";
                 content = tool_content(output.data, options_.max_tool_result_bytes);
@@ -250,6 +258,8 @@ void AgentRuntime::stream_complete(const std::string& prompt, const InferParams&
                 + "\n[PDF page images were shown in this request but are not retained in history; fetch pages again to inspect them.]";
             if (!record("message", durable_message)) break;
             params.tool_messages.push_back(std::move(tool_message));
+            if (!error && call.name == "display_html" && on_event_)
+                on_event_({{"type", "html_display"}, {"display", raw}});
             if (on_event_) on_event_({{"type", "tool_end"}, {"name", call.name}, {"tool_call_id", call.id}, {"is_error", error}});
         }
         // Finish every tool response in the batch before adding page images.

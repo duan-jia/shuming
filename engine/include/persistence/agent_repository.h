@@ -17,6 +17,7 @@ public:
     std::vector<ChatMessage> history(const std::string& session);
     nlohmann::json attachments(const std::string& session);
     nlohmann::json requests(const std::string& session, int tenant, int user);
+    nlohmann::json displays(const std::string& session, int tenant, int user);
     nlohmann::json trace(const std::string& session, const std::string& request, int tenant, int user);
 
 private:
