@@ -92,7 +92,10 @@ class ImageTransferTests(unittest.TestCase):
             trace = root / 'trace'
             scripts = {
                 'docker': '#!/bin/bash\n[[ "$1" == image ]] && exit ' + ('0' if cached else '1') + '\n[[ "$1" == create || "$1" == rm ]] && exit 0\nexit 1\n',
-                'timeout': '#!/bin/bash\nprintf "%s\\n" "$*" >> "$TRACE"\nexit ' + ('0' if succeeds else '124') + '\n',
+                # Probe create/rm are bounded local operations, not registry
+                # pulls. Execute their Docker fixture instead of treating every
+                # timeout invocation as a stalled network request.
+                'timeout': '#!/bin/bash\nif [[ "$3" == docker && ( "$4" == create || "$4" == rm ) ]]; then shift 2; exec "$@"; fi\nprintf "%s\\n" "$*" >> "$TRACE"\nexit ' + ('0' if succeeds else '124') + '\n',
                 'sleep': '#!/bin/bash\nexit 0\n',
             }
             for name, script in scripts.items():
