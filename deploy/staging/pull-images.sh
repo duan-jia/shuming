@@ -1,16 +1,41 @@
 #!/usr/bin/env bash
 # Source this file only after the staging isolation guard has passed.
-# GHCR transfers use a client-side proxy, not the shared Docker daemon's network.
+# GHCR transfers use the client's existing transport, not daemon reconfiguration.
 STAGING_TRANSFER_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 probe_image() (
   # Creating an unstarted container forces layer unpacking. inspect/load alone
   # can succeed for the corrupt empty layer observed on the deployment host.
   local probe="shuming-image-probe-${BASHPID}-${RANDOM}"
-  trap 'docker rm --volumes "$probe" >/dev/null 2>&1 || true' EXIT
-  docker create --name "$probe" --label org.shuming.purpose=image-unpack-check \
+  trap 'timeout --kill-after=5s 5s docker rm --volumes "$probe" >/dev/null 2>&1 || true' EXIT
+  timeout --kill-after=5s 20s docker create --name "$probe" --label org.shuming.purpose=image-unpack-check \
     --network none --pull never --entrypoint /bin/true "$1" >/dev/null
 )
+
+# Prepare only a pinned archive in the job-private workspace. An explicit offline
+# input fails closed; never replace a bad/missing file with an online download.
+prepare_crane() {
+  local work="$1" offline="${STAGING_CRANE_ARCHIVE:-}"
+  if [[ -n "$offline" ]]; then
+    if [[ "$offline" != /* || ! -f "$offline" || -L "$offline" ]] \
+      || [[ "$(readlink -f -- "$offline")" != "$offline" ]] \
+      || [[ "$(stat -c '%u:%a' -- "$offline")" != "$(id -u):600" ]]; then
+      echo 'Offline crane archive must be a canonical regular file owned by this user with mode 0600.' >&2
+      return 1
+    fi
+    cp -- "$offline" "$work/tool.tar.gz" || return 1
+    chmod 600 "$work/tool.tar.gz" || return 1
+  else
+    curl --fail --silent --show-error --location --retry 1 \
+      --connect-timeout 10 --max-time 60 \
+      https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz \
+      --output "$work/tool.tar.gz" || return 1
+  fi
+  printf '%s  %s\n' \
+    '0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0' \
+    "$work/tool.tar.gz" | sha256sum --check || return 1
+  tar --extract --gzip --file "$work/tool.tar.gz" --directory "$work" crane || return 1
+}
 
 pull_private_image() (
   set -Eeuo pipefail
@@ -21,46 +46,65 @@ pull_private_image() (
   trap 'rm -rf -- "$work"' EXIT
   # This proxy path stalled with Go HTTP/2; scope the workaround to this client.
   export GODEBUG="${GODEBUG:+${GODEBUG},}http2client=0"
-  if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/7890' 2>/dev/null; then
-    export HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890
-    export https_proxy="$HTTPS_PROXY" http_proxy="$HTTP_PROXY"
-    export NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1
-    echo 'Using existing loopback proxy for client-side GHCR image transfer.'
-  fi
-  # Fixed upstream release and SHA256; never execute an unverified download.
-  curl --fail --silent --show-error --location --retry 1 \
-    --connect-timeout 10 --max-time 60 \
-    https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz \
-    --output "$work/tool.tar.gz"
-  printf '%s  %s\n' \
-    '0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0' \
-    "$work/tool.tar.gz" | sha256sum --check
-  tar --extract --gzip --file "$work/tool.tar.gz" --directory "$work" crane
+  # Preserve the runner's default/inherited transport; a listening proxy may
+  # have broken upstream TLS. Never override proxy variables automatically.
+  run_stage() {
+    local stage="$1" budget="$2" stage_started=$SECONDS rc
+    shift 2
+    if timeout --kill-after=10s "$budget" "$@" 2>"$work/transfer.err"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    python3 "$STAGING_TRANSFER_DIR/transfer-state.py" report "$work" \
+      --stage "$stage" --rc "$rc" --seconds "$((SECONDS - stage_started))" >&2 || return 1
+    return "$rc"
+  }
+  case "${STAGING_IMAGE_TRANSPORT:-crane}" in
+    range)
+      run_stage ranges 570s python3 "$STAGING_TRANSFER_DIR/ranged-image.py" "$image" "$work" || return 1
+      run_stage verify 45s python3 "$STAGING_TRANSFER_DIR/verify-image.py" "$work/image.tar" "$work/manifest.json" || return 1
+      run_stage load 45s docker load --input "$work/image.tar" || return 1
+      run_stage inspect 10s docker image inspect "$image" >/dev/null || return 1
+      local probe_started=$SECONDS probe_rc
+      if probe_image "$image" 2>"$work/transfer.err"; then probe_rc=0; else probe_rc=$?; fi
+      python3 "$STAGING_TRANSFER_DIR/transfer-state.py" report "$work" --stage unpack --rc "$probe_rc" --seconds "$((SECONDS - probe_started))" >&2
+      return "$probe_rc"
+      ;;
+    crane) prepare_crane "$work" ;;
+    *) echo 'Unsupported staging image transport.' >&2; return 1 ;;
+  esac
   for attempt in 1 2; do
     started=$SECONDS
     rm -f -- "$work/image.tar" "$work/manifest.json" "$work/transfer.err"
     echo "Downloading $image with client-side transport (attempt $attempt/2)"
-    # Keep the original compressed layers. An interrupted uncompressed cache
-    # can retain a zero-byte layer that later loads but cannot be unpacked.
-    if timeout --kill-after=10s 30s "$work/crane" manifest --platform linux/amd64 \
-        "$image" >"$work/manifest.json" 2>"$work/transfer.err" \
-      && timeout --kill-after=10s 180s "$work/crane" pull \
-      --platform linux/amd64 --format tarball \
-      "$image" "$work/image.tar" 2>>"$work/transfer.err" \
-      && timeout --kill-after=10s 120s python3 "$STAGING_TRANSFER_DIR/verify-image.py" \
-        "$work/image.tar" "$work/manifest.json" 2>>"$work/transfer.err" \
-      && timeout --kill-after=10s 120s docker load --input "$work/image.tar" 2>>"$work/transfer.err" \
-      && docker image inspect "$image" >/dev/null \
-      && probe_image "$image"; then
-      # This archive exists only in a private per-job directory on the server.
-      # It is never uploaded as an Actions artifact and is removed by EXIT trap.
+    if ! run_stage manifest 30s "$work/crane" manifest --platform linux/amd64 \
+        "$image" >"$work/manifest.json"; then
+      # No layer data is consumed after a failed/partial manifest.
+      [[ "$attempt" == 2 ]] || sleep 5
+      continue
+    fi
+    # The native crane cache can contain partial files after termination. Keep
+    # only complete manifest-matching compressed layers; never reuse diff_id or
+    # unknown entries. This private cache survives only these two attempts.
+    python3 "$STAGING_TRANSFER_DIR/transfer-state.py" cache "$work"
+    if run_stage pull 180s "$work/crane" pull --platform linux/amd64 \
+        --format tarball --cache_path "$work/cache" "$image" "$work/image.tar"; then
+      # Integrity/import/unpack errors fail closed rather than redownloading.
+      run_stage verify 120s python3 "$STAGING_TRANSFER_DIR/verify-image.py" \
+        "$work/image.tar" "$work/manifest.json" || return 1
+      run_stage load 120s docker load --input "$work/image.tar" || return 1
+      run_stage inspect 30s docker image inspect "$image" >/dev/null || return 1
+      # probe_image is a shell function; retain its existing cleanup trap.
+      local probe_started=$SECONDS probe_rc
+      if probe_image "$image" 2>"$work/transfer.err"; then probe_rc=0; else probe_rc=$?; fi
+      python3 "$STAGING_TRANSFER_DIR/transfer-state.py" report "$work" \
+        --stage unpack --rc "$probe_rc" --seconds "$((SECONDS - probe_started))" >&2
+      [[ "$probe_rc" == 0 ]] || return 1
       echo "Verified/imported $image in $((SECONDS - started))s"
       return 0
     fi
-    echo "Image transfer/validation failed after $((SECONDS - started))s" >&2
-    # Redirect targets can contain signed query parameters; keep raw diagnostics
-    # only in the private workspace, which the EXIT trap always removes.
-    tail -n 6 "$work/transfer.err" | sed -E 's#https?://[^[:space:]"<>]+#[redacted-url]#g' >&2
+    echo "Image transfer failed after $((SECONDS - started))s; retry reuses verified complete layers only." >&2
     [[ "$attempt" == 2 ]] || sleep 5
   done
   echo "Client-side GHCR transfer failed after two bounded attempts: $image" >&2
