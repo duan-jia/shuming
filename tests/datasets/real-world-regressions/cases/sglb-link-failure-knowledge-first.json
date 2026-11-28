@@ -1,0 +1,180 @@
+{
+  "id": "sglb-link-failure-knowledge-first",
+  "recorded_at": "2026-11-09",
+  "source": "user_report_and_persisted_local_trace",
+  "status": "observed_failure_trace_verified",
+  "category": "agent_tool_routing",
+  "user_query": "SGLB 与这篇论文处理链路失效的场景有什么差别",
+  "context": {
+    "environment": "local",
+    "comparison_paper": "REPS: Recycled Entropy Packet Spraying for Adaptive Load Balancing and Failure Mitigation",
+    "session_id": "e5868c73-ba3e-4cbc-a38b-4ede58d1088f",
+    "request_id": "d8daaf75-b6b6-4586-b16e-c0df0cec5a61",
+    "observed_tool_calls": [],
+    "preceding_user_questions": [
+      "介绍一下这篇文章",
+      "介绍一下这个不对称网络"
+    ]
+  },
+  "expected_policy": {
+    "knowledge_first": true,
+    "resolve_comparison_paper_from_history_or_attachment": true,
+    "search_for": [
+      "SGLB",
+      "链路失效",
+      "上下文中确定的对比论文"
+    ],
+    "query_wording_is_not_fixed": true,
+    "read_relevant_sources_before_comparison": true,
+    "allow_web_after": "successful knowledge search and confirmed lack of relevant evidence for the comparison",
+    "tool_error_is_not_a_knowledge_miss": true,
+    "external_queries_use_public_paper_terms_only": true
+  },
+  "required_scenarios": [
+    {
+      "id": "sufficient_local_evidence",
+      "setup": "知识库返回足够支持双方链路失效场景比较的证据",
+      "expect": "先 search_knowledge，按需 fetch_knowledge 读取原文；使用本地证据回答，不调用网络工具"
+    },
+    {
+      "id": "confirmed_local_miss",
+      "setup": "知识库搜索成功，但未返回相关证据",
+      "expect": "search_knowledge 完成后才调用 search_web，再 fetch_web 读取相关来源"
+    },
+    {
+      "id": "partial_or_irrelevant_local_evidence",
+      "setup": "知识库有命中，但仅覆盖对比的一方，或正文不支持链路失效问题",
+      "expect": "检查本地候选后，只针对仍缺少的公开论文证据联网补充；不能把非空结果自动判为足够"
+    },
+    {
+      "id": "local_search_error",
+      "setup": "知识库工具超时、权限拒绝或其他错误",
+      "expect": "明确区分工具不可用与无相关资料；不得声称已经确认知识库无结果"
+    },
+    {
+      "id": "unresolved_comparison_paper",
+      "setup": "历史和附件均无法确定这篇论文所指对象",
+      "expect": "澄清论文身份，不编造比较对象"
+    }
+  ],
+  "failure_examples": [
+    "在知识库搜索之前直接联网",
+    "不检查已有上下文，凭记忆直接比较两篇论文",
+    "知识库成功返回空结果后，未尝试允许的网络补充便声称无法查询",
+    "未读取必要证据便把检索卡片当作完整论文依据"
+  ],
+  "missing_evidence": [
+    "可复核的SGLB与REPS链路失效场景答案及证据标注",
+    "RAG候选的相关性判定和当时语料完整性核验"
+  ],
+  "verification": {
+    "actual_failure_reproduced": false,
+    "automated_regression_ready": false,
+    "reference_answer": null,
+    "note": "已从持久化轨迹确认原始轮次未检索。尚未重新执行模型或建立完整可运行夹具；原始上下文含PDF内容，仅保存在本地忽略目录。",
+    "observed_failure_verified": true
+  },
+  "observed": {
+    "model": "deepseek-chat",
+    "request_created_at_database": "2026-11-09 02:33:21",
+    "timestamp_timezone": "database timezone not verified",
+    "available_tools": [
+      "search_knowledge",
+      "fetch_knowledge",
+      "search_web",
+      "fetch_web"
+    ],
+    "event_types": [
+      "message",
+      "model_request",
+      "model_response",
+      "message",
+      "request_end"
+    ],
+    "finish_reason": "stop",
+    "error": "",
+    "answer_excerpt": "我目前掌握的证据只有 REPS 这篇论文的全文",
+    "behavior": "未调用工具便表示需要SGLB原文，要求用户提供PDF或论文名",
+    "classification": "missing_proactive_knowledge_search",
+    "source_boundary": "从本地后端配置指向的数据库只读查询持久化事件；没有重新运行模型，也未独立核验论文比较结论"
+  },
+  "followup_observations": [
+    {
+      "request_id": "df72b498-5b59-4d9b-a1b1-81a5d6a76624",
+      "user_query": "你可以在实验室知识库查询",
+      "knowledge_search_calls": 5,
+      "knowledge_fetch_calls": 5,
+      "web_calls": 0,
+      "stop_reason": "turn_limit",
+      "error": "Agent turn limit reached",
+      "first_search": {
+        "query": "SGLB 负载均衡 链路失效",
+        "top3_documents": [
+          "Concertina",
+          "DLB",
+          "PCM"
+        ]
+      },
+      "second_search": {
+        "query": "SGLB load balancing link failure",
+        "top3_documents": [
+          "Ofan",
+          "Load Balancing for AI Training Workloads",
+          "Varuna"
+        ]
+      },
+      "pagination_violations": [
+        {
+          "doc_id": 42,
+          "previous_range": {
+            "start_page": 1,
+            "page_count": 3
+          },
+          "returned_next_offset": 4000,
+          "next_request": {
+            "start_page": 4,
+            "page_count": 3,
+            "offset": 0
+          }
+        },
+        {
+          "doc_id": 41,
+          "previous_range": {
+            "start_page": 1,
+            "page_count": 3
+          },
+          "returned_next_offset": 8000,
+          "next_request": {
+            "start_page": 2,
+            "page_count": 3,
+            "offset": 8000
+          }
+        }
+      ],
+      "interpretation": "本地检索有非空候选，不能当作无命中；出现原文续读范围错误，最终耗尽轮次。召回质量需另行建立相关性标注。"
+    },
+    {
+      "request_id": "64f6c0df-a42b-4c52-a007-93dbc742e943",
+      "user_query": "你调用网络工具搜索试试",
+      "web_search_calls": 5,
+      "web_fetch_calls": 1,
+      "web_fetch_errors": 1,
+      "finish_reason": "stop",
+      "interpretation": "在用户再次提示后才联网；PDF网页读取失败，回答声明证据不完整。未核验最终比较的事实正确性。"
+    }
+  ],
+  "local_artifacts": [
+    {
+      "path": ".tmp/evaluation/cases/sglb-local-inspection/64f6c0df-a42b-4c52-a007-93dbc742e943.json",
+      "sha256": "abfba4f0647139870155041830c37276ee45249acf10a59cc4edd2d9d2324ea8"
+    },
+    {
+      "path": ".tmp/evaluation/cases/sglb-local-inspection/df72b498-5b59-4d9b-a1b1-81a5d6a76624.json",
+      "sha256": "8b0a7ca477a68e7a8d6e950371dd391f0e4cf0eee25577d53e0202b9bcd2f13d"
+    },
+    {
+      "path": ".tmp/evaluation/cases/sglb-local-inspection/local-record.json",
+      "sha256": "dfab06851532ce283dacf701a322dca38b9cea836d62e0d772b5ed0507f3a48c"
+    }
+  ]
+}

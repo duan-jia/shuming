@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Score normalized Agent traces using the current 30-task dataset.
+"""Score normalized Agent traces using the current paper-task dataset.
 
 Tool names alone in SSE cannot establish argument/evidence correctness. Supply
 normalized calls with arguments/results; no hidden task labels are sent to models.

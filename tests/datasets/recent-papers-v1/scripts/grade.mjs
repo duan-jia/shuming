@@ -43,11 +43,17 @@ export function scoreRag(runs, queries=jsonl('rag/queries.jsonl'), qrels=jsonl('
   return {query_id:q.id, missing:!byRun.has(q.id), qrels_complete:complete, scores};
  });
  const metrics = ['known_positive_recall','known_positive_hit','known_first_relevant_rr','precision_lower_bound','precision_upper_bound','precision','recall','unjudged_documents'];
- const macro = Object.fromEntries(ks.map(k => [k, Object.fromEntries(metrics.map(m => {
-  const values = rows.map(r => r.scores[k][m]);
-  return [m, values.some(v => v === null) ? null : values.reduce((a,b) => a+b,0) / rows.length];
+ const macroFor = selectedRows => Object.fromEntries(ks.map(k => [k, Object.fromEntries(metrics.map(m => {
+  const values = selectedRows.map(r => r.scores[k][m]);
+  return [m, values.some(v => v === null) ? null : values.reduce((a,b) => a+b,0) / selectedRows.length];
  }))]));
- return {label:'silver_relevance_with_explicit_unjudged_bounds', queries:rows.length, submitted:byRun.size,
+ const macro=macroFor(rows);
+ const groups=Object.fromEntries(['original','derived'].map(name=>{
+  const ids=new Set(queries.filter(q=>Boolean(q.derived_from_query_id)===(name==='derived')).map(q=>q.id));
+  const selected=rows.filter(r=>ids.has(r.query_id));
+  return [name,{queries:selected.length,macro:selected.length?macroFor(selected):null}];
+ }));
+ return {groups,label:'silver_relevance_with_explicit_unjudged_bounds', queries:rows.length, submitted:byRun.size,
   missing_count:rows.filter(r => r.missing).length,
   duplicate_policy:'Repeated papers consume retrieval slots but do not add relevance credit',
   macro, rows};
@@ -126,7 +132,7 @@ export function scoreAgent(trace,task,fixture){
   task.fetch_paper_ids.some(p=>fixture.bindings[p]===c.arguments.doc_id) &&
   c.result.images.some(image=>image.page===4))) errors.push('successful page 4 image from the required document missing');
  if(task.checks.includes('search_web_count_equals_3')&&!calls.some(c=>c.name==='search_web'&&c.arguments?.count===3))errors.push('count must equal 3');
- if(['agent-009','agent-010'].includes(task.id))errors.push(...paginationErrors(fetches,fixture));
+ if(['agent-009','agent-010'].includes(task.id)||task.checks.includes('sequential_pagination'))errors.push(...paginationErrors(fetches,fixture));
  if(task.id==='agent-022'){const at=calls.findIndex(c=>c.error?.code==='forbidden');if(at<0||at!==calls.length-1)errors.push('must stop on permission denial');}
  if(task.id==='agent-015'&&!calls.some(c=>successfulWebRead(c)&&c.arguments?.url===fixture.responses[0].match.url))errors.push('wrong direct URL');
  if(task.id==='agent-020'){const local=calls.find(c=>c.name==='search_knowledge');if(!successfulCall(local)||!Array.isArray(local.result?.hits)||local.result.hits.length)errors.push('web fallback requires confirmed knowledge miss');}

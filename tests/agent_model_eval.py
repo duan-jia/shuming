@@ -215,7 +215,7 @@ def main():
         for future in as_completed(futures):
             trace, run = future.result(); outcomes[run['task_id']] = (trace, run)
             print(run['task_id'], run['status'], 'calls='+str(len(trace['calls'])), 'seconds='+str(round(run['elapsed_seconds'],1)), flush=True)
-    # Failed/unsupported executions stay missing (zero) in the 30-task denominator.
+    # Failed/unsupported executions stay missing (zero) in the full task denominator.
     completed = [outcomes[t['id']][0] for t in tasks if outcomes[t['id']][1]['status'] == 'completed']
     (args.output / 'normalized-traces.jsonl').write_text(''.join(json.dumps(t, ensure_ascii=False) + '\n' for t in completed))
     (args.output / 'executions.json').write_text(json.dumps([outcomes[t['id']][1] for t in tasks], indent=2))

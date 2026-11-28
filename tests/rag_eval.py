@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Retrieve and score the current 100-query paper dataset with honest unjudged bounds."""
+"""Retrieve and score the current paper-query paper dataset with honest unjudged bounds."""
 import argparse
 import hashlib
 import json

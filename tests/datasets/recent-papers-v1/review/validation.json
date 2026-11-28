@@ -1,12 +1,11 @@
 {
   "papers": 30,
   "family_groups": 28,
-  "queries": 100,
-  "qrels": 3000,
+  "queries": 120,
+  "qrels": 3600,
   "evidence": 100,
-  "body_single_document_questions": 21,
-  "agent_tasks": 30,
-  "review_records": 130,
-  "cache_verified": true,
-  "pdf_pages": 451
+  "body_single_document_questions": 33,
+  "agent_tasks": 40,
+  "review_records": 160,
+  "cache_verified": false
 }

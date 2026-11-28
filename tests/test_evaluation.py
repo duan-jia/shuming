@@ -33,9 +33,9 @@ class AdapterTests(unittest.TestCase):
 
     def test_rag_uses_current_queries_and_additional_positive(self):
         result, report = self.run_eval('rag_eval.py', [{'query_id': 'rag-084', 'doc_ids': ['ofan']}], '--k', '1')
-        self.assertEqual(result.returncode, 1)  # Missing 99 queries stay in denominator.
-        self.assertEqual(report['queries'], 100)
-        self.assertEqual(report['dataset_version'], '0.1.4')
+        self.assertEqual(result.returncode, 1)  # Missing 119 queries stay in denominator.
+        self.assertEqual(report['queries'], 120)
+        self.assertEqual(report['dataset_version'], '0.1.5')
         row = next(r for r in report['rows'] if r['query_id'] == 'rag-084')
         self.assertEqual(row['scores']['1']['known_positive_recall'], .5)
         self.assertEqual(row['scores']['1']['recall'], .5)
@@ -43,8 +43,8 @@ class AdapterTests(unittest.TestCase):
     def test_missing_agent_traces_are_zero_not_silent_pass(self):
         result, report = self.run_eval('agent_eval.py', [{'task_id': 'agent-027', 'calls': [], 'answer': 'hello'}])
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(report['total_tasks'], 30)
-        self.assertEqual(len(report['missing']), 29)
+        self.assertEqual(report['total_tasks'], 40)
+        self.assertEqual(len(report['missing']), 39)
         self.assertTrue(report['semantic_review_required'])
         self.assertNotIn('overall_pass', report)
 
@@ -59,6 +59,48 @@ class AdapterTests(unittest.TestCase):
             target.write_text(json.dumps(changed))
             with self.assertRaises(ValueError):
                 load_mapping(target, manifest)
+
+    def test_complete_rag_cli_keeps_original_and_variant_denominators(self):
+        queries = jsonl(DATASET / 'rag/queries.jsonl')
+        qrels = jsonl(DATASET / 'rag/qrels.jsonl')
+        predictions = [{'query_id': q['id'], 'doc_ids': [
+            r['doc_id'] for r in qrels if r['query_id'] == q['id'] and r['relevance'] > 0
+        ]} for q in queries]
+        result, report = self.run_eval('rag_eval.py', predictions)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report['missing_count'], 0)
+        self.assertEqual(report['groups']['original']['queries'], 100)
+        self.assertEqual(report['groups']['derived']['queries'], 20)
+        for group in report['groups'].values():
+            self.assertEqual(group['macro']['10']['recall'], 1)
+        self.assertEqual(report['summary']['queries'], 120)
+
+    def test_expanded_agent_cli_scores_combined_pagination(self):
+        fixture = next(f for f in jsonl(DATASET / 'agent/fixtures.jsonl') if f['id'] == 'agent-040')
+        calls = [{'name': r['name'], 'arguments': {
+            **({'query': 'UCCL'} if r['name'] == 'search_knowledge' else {}), **r['match']
+        }, 'result': r['result']} for r in fixture['responses']]
+        result, report = self.run_eval('agent_eval.py', [{'task_id': 'agent-040', 'calls': calls}])
+        self.assertEqual(result.returncode, 1)  # Other 39 tasks remain missing.
+        self.assertTrue(report['results'][0]['mechanical_pass'])
+        self.assertEqual(report['mechanical_pass_rate_with_missing_as_zero'], 1 / 40)
+        calls[2], calls[3] = calls[3], calls[2]
+        _, report = self.run_eval('agent_eval.py', [{'task_id': 'agent-040', 'calls': calls}])
+        self.assertFalse(report['results'][0]['mechanical_pass'])
+
+    def test_mapping_rejects_missing_duplicate_and_nonpositive_ids(self):
+        target = self.directory / 'map.json'
+        manifest = [{'id': 'a', 'pdf_sha256': 'sha-a'}, {'id': 'b', 'pdf_sha256': 'sha-b'}]
+        papers = [{'paper_id': d['id'], 'pdf_sha256': d['pdf_sha256'], 'doc_id': i + 1}
+                  for i, d in enumerate(manifest)]
+        for rows in [papers[:1], [papers[0], papers[0]],
+                     [papers[0], {**papers[1], 'doc_id': 1}],
+                     [papers[0], {**papers[1], 'doc_id': 0}],
+                     [papers[0], {**papers[1], 'doc_id': -1}]]:
+            with self.subTest(rows=rows):
+                target.write_text(json.dumps({'papers': rows}))
+                with self.assertRaises(ValueError):
+                    load_mapping(target, manifest)
 
     def test_live_mapping_is_required_before_network_access(self):
         result = subprocess.run([sys.executable, str(ROOT / 'rag_eval.py'), '--base-url', 'http://127.0.0.1:1'],
@@ -107,11 +149,11 @@ class LiveRagTests(unittest.TestCase):
             env={**os.environ, 'EMOS_EVAL_TOKEN': 'fixture-token'}, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 1, result.stderr)
         report = json.loads(output.read_text())
-        self.assertEqual(report['summary']['queries'], 100)
+        self.assertEqual(report['summary']['queries'], 120)
         self.assertEqual(report['summary']['errors'], 1)
         bad = next(r for r in report['rows'] if r['query_id'] == 'rag-002')
         self.assertEqual(bad['scores']['1']['known_positive_recall'], 0)
-        self.assertEqual(len(self.requests), 100)
+        self.assertEqual(len(self.requests), 120)
         path, body, headers = self.requests[0]
         self.assertEqual(path, '/mcp/knowledge')
         self.assertEqual(body['params']['arguments']['mode'], 'parents')

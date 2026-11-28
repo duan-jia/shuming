@@ -43,6 +43,43 @@ class HarnessTests(unittest.TestCase):
             self.assertNotIn(hidden, first)
         self.assertEqual(run['usage']['prompt_tokens'], 30)
 
+    def test_expanded_scenarios_execute_through_fixture_bridge(self):
+        class ScriptedModel:
+            def __init__(self, fixture):
+                self.responses = iter(fixture['responses'])
+                self.requests = []
+
+            def complete(self, messages, tools, max_tokens):
+                self.requests.append(json.loads(json.dumps(messages)))
+                response = next(self.responses, None)
+                if response is None:
+                    message = {'role': 'assistant', 'content': 'Synthetic execution complete.'}
+                else:
+                    arguments = {**({'query': 'paper'} if response['name'] == 'search_knowledge' else {}),
+                                 **response['match']}
+                    message = {'role': 'assistant', 'content': None, 'tool_calls': [{
+                        'id': f'call-{len(self.requests)}', 'type': 'function', 'function': {
+                            'name': response['name'], 'arguments': json.dumps(arguments)}}]}
+                return {'model': 'local-scripted', 'choices': [{'message': message,
+                        'finish_reason': 'tool_calls' if response else 'stop'}]}
+
+        for number in range(31, 41):
+            task_id = f'agent-{number:03}'
+            with self.subTest(task_id=task_id), tempfile.TemporaryDirectory() as directory:
+                fixture = self.fixtures[task_id]
+                model = ScriptedModel(fixture)
+                trace, run = execute_task(self.tasks[task_id], fixture, self.contracts,
+                                          model, DATASET, Path(directory))
+                self.assertEqual(run['status'], 'completed')
+                self.assertEqual(len(trace['calls']), len(fixture['responses']))
+                for call in trace['calls']:
+                    self.assertNotIn('error', call)
+                    self.assertTrue(call['result'])
+                first = json.dumps(model.requests[0])
+                for hidden in ('reference_answer', 'required_tools', 'evidence_ids',
+                               'derived_from_query_id', 'source_query_id'):
+                    self.assertNotIn(hidden, first)
+
     def test_unsupported_image_case_is_explicitly_skipped(self):
         model = FakeModel()
         with tempfile.TemporaryDirectory() as directory:

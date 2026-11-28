@@ -1,7 +1,7 @@
 {
   "name": "shuming-recent-papers-eval",
-  "version": "0.1.4",
-  "date": "2026-10-25",
+  "version": "0.1.5",
+  "date": "2026-11-06",
   "status": "assistant_reviewed_silver",
   "independent_human_review": false,
   "real_model_evaluation_performed": false,
@@ -14,23 +14,23 @@
   "counts": {
     "papers": 30,
     "family_groups": 28,
-    "rag_queries": 100,
-    "single_document_queries": 90,
-    "multi_document_queries": 10,
-    "rag_qrels": 3000,
+    "rag_queries": 120,
+    "single_document_queries": 106,
+    "multi_document_queries": 14,
+    "rag_qrels": 3600,
     "evidence_locations": 100,
-    "agent_tasks": 30,
-    "positive_qrels": 122,
-    "negative_qrels": 2878
+    "agent_tasks": 40,
+    "positive_qrels": 149,
+    "negative_qrels": 3451
   },
   "split_policy": "draft_unsplit; freeze grouped splits after contamination and relevance audit",
   "corpus_fulltext_bundled": false,
   "ci_or_deployment_changed": true,
   "provenance": {
     "source_commit": "e3611c616a9bf17edc43226d444a5634c2e09da6",
-    "source_dataset_version": "0.1.2",
+    "source_dataset_version": "0.1.4",
     "corpus_unchanged": true,
-    "revision": "0.1.4 closed-corpus answer-support judgments and disambiguated prompts; no real-model quality evaluation"
+    "revision": "20 correlated query variants and 10 synthetic Agent tasks; original corpus and evidence unchanged"
   },
   "relevance_review": {
     "scope": "frozen_30_paper_database_corpus",
@@ -41,5 +41,12 @@
     "independent_human_review": false,
     "truth_guarantee": "assistant silver judgments under the declared answer-support rubric, not independently adjudicated gold",
     "corpus_manifest_sha256": "1a3a98afb80d88f1b41290b891c9c2053f884e2f7b709244c4d5ad19def8b667"
+  },
+  "query_variants": {
+    "count": 20,
+    "parent_queries": 100,
+    "independent_facts_added": 0,
+    "split_rule": "keep derived query with parent and paper family",
+    "review": "semantic equivalence against existing question, answer and evidence; no independent PDF re-review"
   }
 }

@@ -4,7 +4,7 @@ const tasks=jsonl('agent/tasks.jsonl'),fixtures=jsonl('agent/fixtures.jsonl');
 const t=id=>tasks.find(t=>t.id===id),f=id=>fixtures.find(f=>f.id===id);
 function call(id,name,arguments_){const r=resolveFixture(f(id),name,arguments_);return {name,arguments:arguments_,...(r.result?{result:r.result}:{error:r.error})};}
 function basic(id='agent-001'){return {task_id:id,calls:[call(id,'search_knowledge',{query:'UCCL'}),call(id,'fetch_knowledge',{doc_id:1001,representation:'text'})],answer:'控制路径在主机CPU。'};}
-test('dataset reference consistency and frozen cardinalities',()=>assert.equal(validateDataset().review_records,130));
+test('dataset reference consistency and frozen cardinalities',()=>assert.equal(validateDataset().review_records,160));
 test('tool argument limits and unknown fields',()=>{assert(checkArgs('search_web',{query:'q',count:51}).length);assert(checkArgs('fetch_knowledge',{doc_id:1,page_count:4}).length);assert(checkArgs('search_knowledge',{query:'q',tenant_id:2}).length);assert(checkArgs('fetch_web',{url:3}).length);});
 test('Unicode limits count characters, not UTF-16 code units',()=>assert.equal(checkArgs('search_web',{query:'研'.repeat(128)}).length,0));
 test('normalized mock fills text representation default',()=>assert(resolveFixture(f('agent-001'),'fetch_knowledge',{doc_id:1001}).result));
@@ -101,8 +101,8 @@ test('exact recall requires full explicit judgments; positives are not silently 
 test('closed-corpus review explicitly judges every query against every paper',()=>{
  const qs=jsonl('rag/queries.jsonl'),docs=jsonl('corpus/manifest.jsonl'),rels=jsonl('rag/qrels.jsonl');
  assert.equal(rels.length,qs.length*docs.length);
- assert.equal(rels.filter(r=>r.relevance>0).length,122);
- assert.equal(rels.filter(r=>r.relevance===0).length,2878);
+ assert.equal(rels.filter(r=>r.relevance>0).length,149);
+ assert.equal(rels.filter(r=>r.relevance===0).length,3451);
  for(const q of qs){assert(q.qrels_complete);const rows=rels.filter(r=>r.query_id===q.id);assert.deepEqual(new Set(rows.map(r=>r.doc_id)),new Set(docs.map(d=>d.id)));}
 });
 test('complete review produces exact macro P/R and no unjudged bounds gap',()=>{
@@ -123,4 +123,97 @@ test('namesakes and generic topic overlap are explicitly negative',()=>{
  assert.equal(grade('rag-084','psp'),0); // A constant in a threshold heuristic is not O(1) queue scaling.
  assert.equal(grade('rag-011','rdmacell'),1); // Actual partial answer evidence, not just a keyword.
  assert.equal(grade('rag-073','spritz'),1);
+});
+
+// New scenarios must pass through the same mock and grader used by model runs.
+for (const task of tasks.filter(task => Number(task.id.slice(6)) >= 31)) {
+ test(`${task.id}: complete evidence passes; missing, empty and mismatched reads fail`, () => {
+  const fixture = f(task.fixture_id);
+  const trace = {task_id: task.id, calls: fixture.responses.map(response =>
+   call(task.fixture_id, response.name, {
+    ...(response.name === 'search_knowledge' ? {query: task.prompt.slice(0, 100)} : {}),
+    ...response.match
+   }))};
+  assert(scoreAgent(trace, task, fixture).mechanical_pass);
+  for (let at = 1; at < trace.calls.length; at++) {
+   for (const mutate of [
+    calls => calls.splice(at, 1),
+    calls => { calls[at].result.content = '  '; },
+    calls => { calls[at].result.doc_id = 99999; },
+    calls => { calls[at].result.isError = true; },
+   ]) {
+    const broken = structuredClone(trace);
+    mutate(broken.calls);
+    assert.equal(scoreAgent(broken, task, fixture).mechanical_pass, false, `${task.id} read ${at}`);
+   }
+  }
+  // Guessing the old fixture's doc_id must not work for the new paper bindings.
+  if (task.id !== 'agent-040') {
+   const broken = structuredClone(trace);
+   broken.calls[1].arguments.doc_id = 1001;
+   assert.equal(scoreAgent(broken, task, fixture).mechanical_pass, false);
+  }
+ });
+}
+
+test('combined pagination rejects every nonsequential read permutation', () => {
+ const id = 'agent-040';
+ const calls = f(id).responses.map(r => call(id, r.name, {...(r.name === 'search_knowledge' ? {query: 'UCCL'} : {}), ...r.match}));
+ for (const order of permutations([1, 2, 3])) {
+  const result = scoreAgent({task_id: id, calls: [calls[0], ...order.map(i => calls[i])]}, t(id), f(id));
+  assert.equal(result.mechanical_pass, order.join(',') === '1,2,3', order.join(','));
+ }
+ for (let at = 1; at < calls.length; at++) {
+  const retry = structuredClone(calls[at]);
+  delete retry.result;
+  retry.error = {code: 'upstream_timeout'};
+  const trace = {task_id: id, calls: structuredClone(calls)};
+  trace.calls.splice(at, 0, retry);
+  assert(scoreAgent(trace, t(id), f(id)).mechanical_pass);
+ }
+ const wrong = structuredClone(calls);
+ wrong[3].arguments.offset = 120;
+ assert.equal(scoreAgent({task_id: id, calls: wrong}, t(id), f(id)).mechanical_pass, false);
+});
+
+test('RAG reports original and correlated variant scores separately', () => {
+ const queries = [{id: 'base'}, {id: 'variant', derived_from_query_id: 'base'}];
+ const rels = queries.map(q => ({query_id: q.id, doc_id: 'uccl', relevance: 2}));
+ const report = scoreRag([{query_id: 'base', doc_ids: ['uccl']}], queries, rels, [1]);
+ assert.equal(report.macro[1].known_positive_recall, 0.5);
+ assert.equal(report.groups.original.queries, 1);
+ assert.equal(report.groups.original.macro[1].known_positive_recall, 1);
+ assert.equal(report.groups.derived.queries, 1);
+ assert.equal(report.groups.derived.macro[1].known_positive_recall, 0);
+ assert.equal(report.groups.derived.macro[1].recall, null);
+});
+
+test('RAG judgment and ranking validation rejects malformed adversarial inputs', () => {
+ const qs = [{id: 'q'}], rels = [{query_id: 'q', doc_id: 'uccl', relevance: 2}];
+ for (const invalid of [
+  [...rels, rels[0]],
+  [{...rels[0], relevance: 3}],
+  [{...rels[0], doc_id: 'unknown'}],
+  [{...rels[0], query_id: 'unknown'}],
+ ]) assert.throws(() => scoreRag([], qs, invalid, [1]));
+ for (const doc_ids of [null, 'uccl', [null], [1001], ['unknown']])
+  assert.throws(() => scoreRag([{query_id: 'q', doc_ids}], qs, rels, [1]));
+ for (const ks of [[], [0], [-1], [1.5], ['1']])
+  assert.throws(() => scoreRag([], qs, rels, ks));
+});
+
+test('short and empty rankings keep the requested K denominator and reciprocal rank', () => {
+ const qs = [{id: 'q'}], rels = [
+  {query_id: 'q', doc_id: 'uccl', relevance: 2},
+  {query_id: 'q', doc_id: 'pcm', relevance: 0},
+ ];
+ const row = scoreRag([{query_id: 'q', doc_ids: ['pcm', 'uccl', 'uccl']}], qs, rels, [1, 3, 5]).rows[0];
+ assert.equal(row.scores[1].known_first_relevant_rr, 0);
+ assert.equal(row.scores[3].known_first_relevant_rr, 0.5);
+ assert.equal(row.scores[5].precision, 0.2);
+ assert.equal(row.scores[5].known_positive_recall, 1);
+ const empty = scoreRag([{query_id: 'q', doc_ids: []}], qs, rels, [5]);
+ assert.equal(empty.missing_count, 0);
+ assert.equal(empty.macro[5].precision, 0);
+ assert.equal(empty.macro[5].known_positive_recall, 0);
 });
