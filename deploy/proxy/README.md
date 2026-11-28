@@ -3,8 +3,9 @@
 Mihomo runs as an independent Compose project on the deployment server. Only
 127.0.0.1:7890 is published. It does not change production containers, Docker
 routing, DNS, the host default route, or the Docker daemon's proxy settings.
-The staging artifact download step detects this listener and uses HTTP proxy
-environment variables; without it the existing direct/offline paths remain.
+Staging download steps preserve the existing default/inherited transport and do
+not auto-select this listener. A listening socket is not proof of healthy upstream
+TLS. The existing offline source/tool fallbacks remain available.
 
 Install compose.yaml, configure.py and start.sh in
 /home/ubuntu/mihomo-private, owned by ubuntu with directory mode 0700. Create
