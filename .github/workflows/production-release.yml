@@ -8,6 +8,7 @@ on:
         type: string
 permissions:
   contents: read
+  actions: read
   packages: read
 concurrency:
   group: lab-server-release
@@ -26,6 +27,12 @@ jobs:
         env:
           IMAGE_REVISION: ${{ inputs.image_revision }}
         run: python3 deploy/server/release.py --revision "$IMAGE_REVISION"
+      - name: Require successful CI and staging for selected images
+        timeout-minutes: 1
+        env:
+          IMAGE_REVISION: ${{ inputs.image_revision }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 deploy/server/verify-release-checks.py
       - name: Log in to GHCR
         run: echo '${{ github.token }}' | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
       - name: Release using persistent production overrides

@@ -11,15 +11,12 @@ const read = (file) => readFileSync(path.join(root, file), 'utf8');
 const directory = '.github/workflows';
 const files = readdirSync(path.join(root, directory)).filter((f) => /\.ya?ml$/.test(f));
 const gate = [
-  "(github.event_name == 'pull_request' &&",
-  " github.event.pull_request.base.ref == 'master' &&",
-  " github.event.pull_request.head.repo.full_name == github.repository) ||",
   "(github.event_name == 'push' && github.ref == 'refs/heads/master') ||",
   "(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')",
 ].join('\n      ');
 
 function checkStaging(source) {
-  assert.match(source, /^  pull_request:\n    branches: \[master\]/m);
+  assert.doesNotMatch(source, /^  (pull_request|pull_request_target):/m);
   assert.match(source, /^  push:\n    branches: \[master\]/m);
   assert.match(source, /^  workflow_dispatch:/m);
   assert.doesNotMatch(source, /pull_request_target|ENABLE_PRIVATE_DEPLOYMENT/);
@@ -31,13 +28,12 @@ function checkStaging(source) {
   assert.match(deploy, /concurrency:\n      group: lab-server-release\n      cancel-in-progress: false/);
 }
 
-test('same-repository PR and final master staging are automatic and path-filtered', () => {
+test('all master pushes run staging; PRs use hosted CI only', () => {
   const source = read(directory + '/staging-e2e.yml');
   checkStaging(source);
-  assert.equal((source.match(/    paths:/g) || []).length, 2);
+  assert.equal((source.match(/    paths:/g) || []).length, 0);
   assert.doesNotMatch(source, /      - (?:docs\/|\*\*\/\*\.md)/);
-  assert.ok(source.includes('      - web/**'));
-  assert.ok(source.includes('      - engine/**'));
+  assert.match(read(directory + '/ci.yml'), /^  pull_request:/m);
 });
 
 test('gate rejects forks, wrong targets and non-master push/manual events', () => {
@@ -49,8 +45,7 @@ test('gate rejects forks, wrong targets and non-master push/manual events', () =
           const github = { event_name: event, ref, repository: 'owner/project', event: {
             pull_request: { base: { ref: base }, head: { repo: { full_name: head } } },
           } };
-          const expected = (event === 'pull_request' && base === 'master' && head === github.repository) ||
-            (['push', 'workflow_dispatch'].includes(event) && ref === 'refs/heads/master');
+          const expected = ['push', 'workflow_dispatch'].includes(event) && ref === 'refs/heads/master';
           assert.equal(allow(github), expected);
         }
       }
@@ -58,8 +53,7 @@ test('gate rejects forks, wrong targets and non-master push/manual events', () =
   }
   const source = read(directory + '/staging-e2e.yml');
   for (const needle of [
-    "github.event.pull_request.head.repo.full_name == github.repository",
-    "github.event.pull_request.base.ref == 'master'",
+    "github.ref == 'refs/heads/master'",
     "github.event_name == 'push'",
   ]) assert.throws(() => checkStaging(source.replace(needle, 'true')));
   // Push/dispatch contexts do not include pull_request: short-circuiting must be safe.

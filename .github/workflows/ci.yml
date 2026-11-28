@@ -237,7 +237,9 @@ jobs:
       - name: Test staging guard
         run: python3 -m unittest discover -s tests -p 'test_staging*.py'
       - name: Test production release
-        run: python3 -m unittest discover -s tests -p test_production_release.py
+        run: |
+          python3 -m unittest discover -s tests -p test_production_release.py
+          python3 -m unittest discover -s tests -p test_release_checks.py
       - name: Check shell syntax
         run: bash -n deploy/staging/deploy.sh deploy/staging/pull-images.sh
 

@@ -1,14 +1,15 @@
 # Isolated staging
 
-> Current automation trusts same-repository PR branches from maintainers/agents.
+> Server automation runs only on master pushes and manual master runs.
 > Staging and production share a host-level trust boundary despite separate data
 > and Compose resources; this is not a sandbox for untrusted code. Review runner
 > isolation before accepting external contributions or changing visibility.
 > See the [release checklist](../../docs/open-source-readiness.md).
 
 
-Relevant same-repository PRs, relevant master pushes and manual master runs build
-backend, MCP and frontend images on GitHub-hosted runners. Only a source snapshot,
+PR updates run hosted CI only. Every master push and manual master run builds
+backend, MCP and frontend images on GitHub-hosted runners. There is no path filter,
+so each merged revision can acquire its own staging validation and image tags. Only a source snapshot,
 REVISION and SHA256SUMS are uploaded as the staging-bundle Actions artifact.
 **Image archives must never be attached to that artifact.**
 
@@ -27,7 +28,7 @@ not started by staging. Existing production services and their image names do no
 GHCR package visibility/ACLs are separately managed; this workflow does not set
 packages private or prove their visibility. If package access is denied or registry
 pulls time out, staging fails without falling back to an image-bearing artifact.
-Validate this path on the real runner before merging. Public repository/fork
+Validate this path on the real runner before production release. Public repository/fork
 workflow permissions still need a separate security review: job conditions are
 not a sandbox or a proof that private packages cannot be accessed by forks.
 
@@ -87,14 +88,18 @@ This never changes production service-account credentials.
 
 The runner has Docker access on the production host. Container and data
 separation prevent accidental overlap but do not provide a security boundary
-against malicious code. Only trusted repository members should execute PR
-code on this runner. Use a separate VM when accepting untrusted contributors.
+against malicious code. Only trusted master code should execute on this runner. Use a separate VM when accepting untrusted contributors.
 
 Production release remains manual through workflow_dispatch on master; neither
-PRs, master pushes nor publishing a GitHub Release automatically deploy production. Run Staging
-E2E manually on master after merging, then use that successful run's full image
-SHA in Production release. PR image tags can name GitHub's synthetic merge
-commit, so do not infer an image tag from the PR head SHA. The release retains
+PRs, master pushes nor publishing a GitHub Release automatically deploy production. Staging
+E2E runs automatically after merging (or manually on master for diagnosis). Use
+that successful run's full image SHA in Production release. Before registry login
+or server changes, the release workflow checks GitHub for successful master CI
+and Staging E2E runs at that exact SHA. Missing, failed, pending or unreadable
+validation blocks release; PR-only results do not qualify. The newest matching
+run for each workflow must have succeeded. This is a workflow gate, not a
+restriction on an administrator invoking the server release helper directly.
+Historical PR image tags can name GitHub's synthetic merge commit and do not qualify for the new master-only release gate. The release retains
 model settings, database volumes and MCP network overrides. Database schema
 migrations require a separate reviewed procedure.
 
@@ -125,6 +130,39 @@ instructions, including Intel AMX. Backend CI uses the same setting. The live
 staging retrieval check exercises an embedding on the deployment CPU and
 catches instruction incompatibility that build-runner-only tests cannot.
 
+### Persistent verified blob cache
+
+The selected Range transport uses `/srv/fastllm-staging/image-cache`, owned by
+and readable only to the runner (directory 0700, files 0600). It retains only
+SHA256-addressed compressed blobs/config, never tokens, signed URLs, registry
+manifests, diagnostics or assembled image archives. Each run still authenticates
+and fetches the selected manifest with its own temporary token before cache use.
+A cache hit is copied into the job workspace and its full SHA256/size checked
+against that manifest. Damaged content is discarded and downloaded again;
+unsafe ownership, permissions, links or foreign files fail closed.
+
+The cache holds at most 512 MiB of blob data, evicting least-recently-used blobs
+before publication. Larger individual blobs transfer normally without retention.
+A nonblocking exclusive lock serializes reuse/publication/eviction. Only complete
+verified blobs are atomically published; a later lock holder removes orphaned
+private publication temp files after interruption. No Docker image, build cache,
+database or RAG cleanup is performed. Temporary registry credentials and per-job
+files are still removed after each run; verified cache bytes intentionally remain
+private on the host. Do not upload this directory to Actions artifacts/caches.
+
+The capacity estimate includes job blobs, assembled tar and newly retained cache
+bytes, keeping the existing 20% free-space reserve; Docker unpack space remains
+additional. If the cache filesystem lacks space, retention is skipped while
+the job-local transfer still proceeds. Current deadlines, Range validation and final diff_id/import/unpack
+checks are unchanged. Numeric cache-hit byte logs show reuse, not a measured
+speedup. A cold cache or changed dependencies still need downloads. The first
+real master run warms the cache; subsequent versions are needed to measure reuse.
+Local tests use synthetic registries and cannot establish real GHCR throughput.
+
+To disable cache reuse, remove `STAGING_BLOB_CACHE` from the fetch step; the
+existing job-local Range path still works. Do not remove cached files while a
+run owns the lock. Reverting the code does not require deleting any data.
+
 ### GHCR image transfer on this server
 
 Docker image pulls run in the daemon, so exporting a proxy in a CI shell does
@@ -139,7 +177,7 @@ Retries discard incomplete archives, but keep verified complete compressed layer
 in a job-private native crane cache. Before every use, the helper removes unknown,
 non-private, partial or SHA/size-mismatching entries against the current manifest.
 This is complete-layer reuse, NOT byte-range resume of an incomplete blob. The
-cache is not shared across jobs or persisted on the host; existing Docker images
+legacy crane cache is not shared across jobs or persisted on the host; existing Docker images
 still require the unstarted-container unpack probe. Cache plus tarball can use
 about twice the compressed size, unlike the previous tarball-only transfer. A
 manifest-size capacity gate keeps 20% of current free space outside the estimated
@@ -268,7 +306,7 @@ proxy variables, no automatic listener probe/network call, and private cleanup.
 
 ### Strict ranged GHCR transport (review implementation; private compatibility unverified)
 
-CI selects `STAGING_IMAGE_TRANSPORT=range`; callers without the selector retain
+CI selects `STAGING_IMAGE_TRANSPORT=range` and the private blob cache above; callers without the selector retain
 the previous pinned-crane implementation. There is no automatic fallback from a
 failed range transfer to another whole-image download.
 
