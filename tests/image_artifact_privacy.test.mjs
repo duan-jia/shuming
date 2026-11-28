@@ -47,9 +47,10 @@ test('prefetch is gated by the existing isolation guard and deploy remains offli
   assert.match(workflow, /STAGING_OFFLINE: '1'/);
 });
 
-test('PRs from forks still cannot start the private staging jobs', () => {
-  const gate = "github.event.pull_request.head.repo.full_name == github.repository";
-  assert.equal(workflow.split(gate).length - 1, 2);
+test('PR events cannot start the private staging jobs', () => {
+  assert.doesNotMatch(workflow, /^  pull_request:/m);
+  assert.equal((workflow.match(/^    if: >-/gm) || []).length, 2);
+  assert.equal((workflow.match(/github.event_name == 'push'/g) || []).length, 2);
   assert.doesNotMatch(workflow, /pull_request_target/);
 });
 

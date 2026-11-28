@@ -2,6 +2,8 @@
 import argparse
 import base64
 import concurrent.futures
+import contextlib
+import fcntl
 import hashlib
 import http.client
 import io
@@ -14,6 +16,7 @@ import ssl
 import stat
 import tarfile
 import threading
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -29,6 +32,7 @@ LAYERS = {'application/vnd.oci.image.layer.v1.tar+gzip', 'application/vnd.oci.im
 METADATA_LIMIT = 4 * 1024 * 1024
 CHUNK = 128 * 1024
 WORKERS = 8
+CACHE_LIMIT = 512 * 1024 * 1024
 
 
 class Failure(Exception):
@@ -226,6 +230,127 @@ def descriptor(value, max_size=2 * 1024 ** 3):
     return value
 
 
+class BlobCache:
+    """Private, bounded compressed blobs only; never auth, manifests or URLs.
+
+    The caller must obtain the current manifest using the current job token.
+    A hit is copied and rehashed against that manifest before it can be used.
+    One nonblocking lock covers lookup, publication and eviction.
+    """
+    def __init__(self, directory, budget, limit=CACHE_LIMIT):
+        self.directory, self.budget, self.limit = Path(directory), budget, limit
+        self.lock = None
+
+    def regular(self, path):
+        info = private(path, 0o600)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise Failure('cache_policy')
+        return info
+
+    def __enter__(self):
+        directory = self.directory
+        if not directory.is_absolute() or directory.resolve() != directory:
+            raise Failure('cache_policy')
+        directory.mkdir(mode=0o700, exist_ok=True)
+        if not stat.S_ISDIR(private(directory, 0o700).st_mode):
+            raise Failure('cache_policy')
+        self.lock = os.open(directory / '.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            if self.regular(directory / '.lock').st_size != 0:
+                raise Failure('cache_policy')
+            try:
+                fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise Failure('cache_busy') from None
+            # A killed writer may leave an unpublished temp file. Under the
+            # exclusive lock only our own narrowly named regular files qualify.
+            for path in directory.iterdir():
+                self.budget.check()
+                if re.fullmatch(r'\.partial-[a-z0-9_]+', path.name):
+                    self.regular(path)
+                    path.unlink()
+            self.prune(0)
+            return self
+        except BaseException:
+            os.close(self.lock)
+            self.lock = None
+            raise
+
+    def __exit__(self, *args):
+        if self.lock is not None:
+            os.close(self.lock)
+            self.lock = None
+
+    def prune(self, reserve):
+        entries = []
+        for path in self.directory.iterdir():
+            self.budget.check()
+            if path.name == '.lock':
+                continue
+            if not re.fullmatch(r'[0-9a-f]{64}', path.name):
+                raise Failure('cache_policy')
+            info = self.regular(path)
+            entries.append((info.st_mtime_ns, path.name, path, info.st_size))
+        total = sum(item[3] for item in entries)
+        for _, _, path, size in sorted(entries):
+            if total + reserve <= self.limit:
+                break
+            self.budget.check()
+            path.unlink()
+            total -= size
+
+    def copy(self, source, target):
+        checksum = hashlib.sha256()
+        with source.open('rb') as incoming, target.open('xb') as outgoing:
+            os.chmod(target, 0o600)
+            for block in iter(lambda: incoming.read(1024 * 1024), b''):
+                self.budget.check()
+                outgoing.write(block)
+                checksum.update(block)
+        return 'sha256:' + checksum.hexdigest()
+
+    def take(self, item, directory):
+        path = self.directory / item['digest'][7:]
+        try:
+            info = self.regular(path)
+        except FileNotFoundError:
+            return None
+        target = directory / path.name
+        if info.st_size == item['size']:
+            digest = self.copy(path, target)
+            if digest == item['digest']:
+                os.utime(path, None)
+                print(f'Range cache hit: verified_bytes={info.st_size}', flush=True)
+                return target
+            target.unlink()
+        # Damaged content is a miss; unsafe ownership/types fail above.
+        path.unlink()
+        print('Range cache discarded: reason=size_or_digest', flush=True)
+        return None
+
+    def put(self, item, source):
+        if item['size'] > self.limit:
+            return  # Large blobs still transfer, without defeating the cap.
+        self.prune(item['size'])
+        if item['size'] > shutil.disk_usage(self.directory).free * 4 // 5:
+            # The persistent directory may live on a different filesystem than
+            # the job workspace. A full cache disk need not break the transfer.
+            print('Range cache skipped: reason=capacity', flush=True)
+            return
+        fd, name = tempfile.mkstemp(prefix='.partial-', dir=self.directory)
+        path = Path(name)
+        os.close(fd)
+        path.unlink()  # copy uses exclusive creation.
+        try:
+            if self.copy(source, path) != item['digest'] or path.stat().st_size != item['size']:
+                raise Failure('blob_digest')
+            with path.open('rb') as stream:
+                os.fsync(stream.fileno())
+            os.replace(path, self.directory / item['digest'][7:])
+        finally:
+            path.unlink(missing_ok=True)
+
+
 def download_blob(client, item, directory):
     descriptor(item)
     size, digest = item['size'], item['digest']
@@ -305,7 +430,7 @@ def download_blob(client, item, directory):
         print(f'Range progress: retained_bytes={counter} completed_chunks={complete} total_bytes={size}', flush=True)
 
 
-def transfer(image, work, basic, budget=None, opener=None):
+def transfer(image, work, basic, budget=None, opener=None, cache_directory=None):
     match = IMAGE.fullmatch(image)
     if not match:
         raise Failure('image_policy')
@@ -334,7 +459,10 @@ def transfer(image, work, basic, budget=None, opener=None):
     items = {x['digest']: x for x in [config, *layers]}
     if sum(x['size'] for x in items.values()) > 4 * 1024 ** 3:
         raise Failure('capacity')
-    required = 2 * sum(x['size'] for x in items.values()) + 1024 * 1024
+    compressed = sum(x['size'] for x in items.values())
+    # Budget for job blobs, archive and newly retained cache bytes. Existing
+    # cache occupancy is already excluded from disk_usage().free.
+    required = 2 * compressed + (min(compressed, CACHE_LIMIT) if cache_directory else 0) + 1024 * 1024
     available = shutil.disk_usage(work).free
     if required > available * 4 // 5:
         raise Failure('capacity')
@@ -342,7 +470,16 @@ def transfer(image, work, basic, budget=None, opener=None):
     directory = work / 'blobs'
     directory.mkdir(mode=0o700)
     try:
-        paths = {digest: download_blob(client, item, directory) for digest, item in items.items()}
+        with contextlib.ExitStack() as stack:
+            cache = stack.enter_context(BlobCache(cache_directory, budget)) if cache_directory else None
+            paths = {}
+            for digest, item in items.items():
+                path = cache.take(item, directory) if cache else None
+                if path is None:
+                    path = download_blob(client, item, directory)
+                    if cache:
+                        cache.put(item, path)
+                paths[digest] = path
         data = json.loads(paths[config['digest']].read_bytes())
         if data.get('os') != 'linux' or data.get('architecture') != 'amd64':
             raise Failure('platform')
@@ -380,13 +517,14 @@ def main():
         private(args.work, 0o700)
         if not args.work.is_absolute() or args.work.resolve() != args.work:
             raise Failure('credentials_policy')
-        transfer(args.image, args.work, read_auth(os.environ['DOCKER_CONFIG']))
+        transfer(args.image, args.work, read_auth(os.environ['DOCKER_CONFIG']),
+                 cache_directory=os.environ.get('STAGING_BLOB_CACHE') or None)
     except Failure as error:
         # Failure messages are static labels only; never print arbitrary text.
         allowed = {'deadline', 'redirect_policy', 'credentials_policy', 'image_policy', 'auth_policy',
                    'auth', 'io', 'tls', 'metadata', 'manifest_http', 'manifest_digest', 'address_expired',
                    'http_transient', 'range_status', 'range_protocol', 'range_interrupted', 'disk',
-                   'blob_digest', 'platform', 'capacity'}
+                   'blob_digest', 'platform', 'capacity', 'cache_policy', 'cache_busy'}
         label = str(error) if str(error) in allowed else 'internal'
         print('Range transfer failed category=' + label, file=__import__('sys').stderr)
         return 1

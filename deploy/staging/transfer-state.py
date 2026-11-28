@@ -70,7 +70,7 @@ def classify(rc, error):
         return 'deadline'
     if rc == 137:
         return 'killed'
-    ranged = re.search(r'Range transfer failed category=(deadline|redirect_policy|credentials_policy|image_policy|auth_policy|auth|io|tls|metadata|manifest_http|manifest_digest|address_expired|http_transient|range_status|range_protocol|range_interrupted|disk|blob_digest|platform|capacity|internal)\b', error)
+    ranged = re.search(r'Range transfer failed category=(deadline|redirect_policy|credentials_policy|image_policy|auth_policy|auth|io|tls|metadata|manifest_http|manifest_digest|address_expired|http_transient|range_status|range_protocol|range_interrupted|disk|blob_digest|platform|capacity|cache_policy|cache_busy|internal)\b', error)
     if ranged:
         return ranged.group(1)
     # Only fixed category labels leave the private workspace, never matched text.
