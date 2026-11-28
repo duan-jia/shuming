@@ -14,12 +14,12 @@
 当前按你与 agent 都有可信写权限的协作模式运行，不把外部贡献者自动纳入服务器验收。
 
 1. 任意 PR 创建或更新：自动运行 GitHub-hosted 构建与测试。
-2. 同仓库 PR 涉及 staging 路径过滤器中的代码/部署文件：自动构建镜像并在
-   CI staging 验证后端与 MCP；fork 来源不运行这些 staging jobs。
-3. 检查与必要验收通过后合并；master 的普通 CI 自动运行，涉及相同路径的
-   master push 还会进行 staging 验收，绑定最终提交。纯文档修改不部署。
-4. 需要正式版本时由维护者创建 Release；确认后手动部署已验收的准确镜像版本。
-   **本分支不实现 Release 触发器、验收来源强制校验或自动生产发布。**
+2. PR 不自动执行服务器 staging；合并到 master 后，每次 push 自动构建镜像并在
+   独立 CI staging 验证后端与 MCP。保留 master 上的手动入口供排查；不做路径过滤。
+3. CI 与 staging 各自运行；合并后的 staging 失败不会撤销合并，需修复或回退。
+4. 正式发布仍手动执行。发布工作流先核对所选完整 SHA 在 master 的 CI 与 staging
+   最新匹配运行均成功；缺失、未结束、失败或查询失败均阻止发布。不自动发布生产。
+   此门禁不约束管理员直接调用服务器上的发布程序，也不是完整制品来源证明。
 
 工作流顶层只读；GHCR 写权限仅给 staging build job；部署 job 只读源码、
 Actions 制品及包，使用临时认证从 GHCR 拉取镜像。生产发布和 runner smoke 保持手动/master，不要求新增全局部署变量。
@@ -88,5 +88,6 @@ Actions 制品及包，使用临时认证从 GHCR 拉取镜像。生产发布和
 ## 兼容性与回滚
 
 本分支不改 C++ target、命名空间、接口、SQL、数据卷或运行时默认配置。
-保留同仓库相关 PR 的自动 staging，增加相关 master push 验收，普通 hosted CI 保留。
+PR 仅运行 hosted CI；staging 改为 master push 自动运行及 master 手动运行。
+镜像层缓存只占专用私有目录，保留上限 512 MiB；认证仍每任务独立清理。
 工作流变更须通过 PR 检查后合并；生产仍手动发布。变量与 if 条件不是隔离边界。
